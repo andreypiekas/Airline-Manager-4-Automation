@@ -46,15 +46,17 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
    entry.plan=planPurchase(entry.before,kind,effectiveConfig);
    if(entry.plan.reason==='INVALID_DATA')throw Error('SUPPLY_DATA_INVALID');
    if(!entry.plan.quantity){entry.status='skipped';entry.reason=entry.plan.reason;await save();continue;}
-   entry.quotedCost=await port.quote(kind,entry.plan.quantity);
+   const quote=await port.quote(kind,entry.plan.quantity);
+   entry.quotedCost=quote.total;entry.discountPercent=quote.discountPercent;
    const fresh=await port.snapshot(kind);
+   const expectedCost=entry.before.pricePer1000*entry.plan.quantity/1000*(1-quote.discountPercent/100);
    if(JSON.stringify(fresh)!==JSON.stringify(entry.before)||entry.quotedCost<=0||entry.quotedCost>entry.plan.budget||
-     entry.quotedCost>entry.plan.estimatedCost||Math.abs(entry.quotedCost-entry.before.pricePer1000*entry.plan.quantity/1000)>=1)throw Error('SUPPLY_QUOTE_CHANGED_OR_OVER_BUDGET');
+     entry.quotedCost>entry.plan.estimatedCost||Math.abs(entry.quotedCost-expectedCost)>=1)throw Error('SUPPLY_QUOTE_CHANGED_OR_OVER_BUDGET');
    entry.reason='PRICE_AND_BUDGET_ACCEPTED';
    if(dryRun){entry.status='would_buy';await save();continue;}
    entry.status='attempting';await save();
    try{
-    entry.after=await port.purchase(kind,entry.plan.quantity,entry.before,entry.quotedCost);
+    entry.after=await port.purchase(kind,entry.plan.quantity,entry.before,quote);
    }catch(error){
     if(error instanceof SupplyPreMutationError&&error.code==='SUPPLY_PRICE_ROLLOVER'){
      entry.status='skipped';entry.reason='PRICE_ROLLOVER_BEFORE_PURCHASE';

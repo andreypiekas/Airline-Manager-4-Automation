@@ -17,6 +17,23 @@ export function parseSignedInteger(text:string):number {
  if(!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(s))throw Error('SUPPLY_NUMBER_INVALID');
  const n=Number(s.replace(/,/g,''));if(!Number.isSafeInteger(n))throw Error('SUPPLY_NUMBER_INVALID');return n;
 }
+
+export interface SupplyQuote { total:number; discountPercent:number }
+/** Accept a live discount only when its visible percentage and total reconcile. */
+export function parseSupplyQuote(text:string,pricePer1000:number,quantity:number):SupplyQuote {
+ const sections=[...text.matchAll(/TOTAL PRICE[\s\S]{0,160}?AMOUNT TO PURCHASE/gi)];
+ if(sections.length!==1)throw Error('SUPPLY_QUOTE_MISSING');
+ const match=/^TOTAL PRICE\s+\$\s*([\d,.]+)(?:\s*-(\d{1,2})%)?\s+AMOUNT TO PURCHASE$/i.exec(sections[0][0].trim());
+ if(!match)throw Error('SUPPLY_QUOTE_UNVERIFIED');
+ const discountPercent=match[2]===undefined?0:Number(match[2]);
+ if(!Number.isSafeInteger(quantity)||quantity<=0||!Number.isSafeInteger(pricePer1000)||pricePer1000<=0||
+    !Number.isSafeInteger(discountPercent)||discountPercent<0||discountPercent>=100)throw Error('SUPPLY_QUOTE_UNVERIFIED');
+ const total=parseAmount(match[1]);
+ const expected=pricePer1000*quantity/1000*(1-discountPercent/100);
+ if(!Number.isFinite(expected)||expected<=0||Math.abs(total-expected)>=1)throw Error('SUPPLY_QUOTE_INCONSISTENT');
+ return {total,discountPercent};
+}
+
 export function parseSupplyText(text:string,kind:Commodity,balance:number):SupplySnapshot {
  const one=(re:RegExp)=>{
   const matches=[...text.matchAll(re)];
@@ -109,15 +126,14 @@ export class SupplyPort {
   await assertNoInteractiveChallenge(this.page,'supplies:quote');
   const {input}=await this.verifyControl(kind);
   await input.fill(String(quantity),{timeout:this.timeout});await input.press('ArrowRight',{timeout:this.timeout});
-  const expected=(await this.snapshot(kind)).pricePer1000*quantity/1000;
-  const read=async()=>{
-   const text=await this.page.locator('#fuelMain').innerText();const match=text.match(/TOTAL PRICE\s+\$\s*([\d,.]+)\s+AMOUNT TO PURCHASE/i);
-   if(!match)throw Error('SUPPLY_QUOTE_MISSING');return parseAmount(match[1]);
-  };
-  await expect.poll(async()=>Math.abs(await read()-expected)<1,{timeout:this.timeout}).toBe(true);
+  const pricePer1000=(await this.snapshot(kind)).pricePer1000;
+  const read=async()=>parseSupplyQuote(await this.page.locator('#fuelMain').innerText(),pricePer1000,quantity);
+  // The game can render the total asynchronously after the amount changes.
+  // Never click Purchase unless the visible total and discount reconcile.
+  await expect.poll(async()=>{try{await read();return true;}catch{return false;}},{timeout:this.timeout}).toBe(true);
   return read();
  }
- async purchase(kind:Commodity,quantity:number,before:SupplySnapshot,quote:number){
+ async purchase(kind:Commodity,quantity:number,before:SupplySnapshot,quote:SupplyQuote){
   let mutationAttempted=false;
   try{
    await assertNoInteractiveChallenge(this.page,'supplies:before-purchase');
@@ -125,6 +141,8 @@ export class SupplyPort {
    if(await input.inputValue()!==String(quantity))throw Error('SUPPLY_AMOUNT_CHANGED');
    const fresh=await this.snapshot(kind);
    if(JSON.stringify(fresh)!==JSON.stringify(before))throw Error('SUPPLY_SNAPSHOT_CHANGED');
+   const freshQuote=parseSupplyQuote(await this.page.locator('#fuelMain').innerText(),fresh.pricePer1000,quantity);
+   if(freshQuote.total!==quote.total||freshQuote.discountPercent!==quote.discountPercent)throw Error('SUPPLY_QUOTE_CHANGED');
    // Avoid a market rollover while the native request is being dispatched.
    const clock=(await this.page.locator('#fuelMain').innerText()).match(/PRICE CHANGE\s+(\d{2}):(\d{2}):(\d{2})/i);
    if(!clock||Number(clock[1])*3600+Number(clock[2])*60+Number(clock[3])<10)throw Error('SUPPLY_PRICE_ROLLOVER');
@@ -139,7 +157,7 @@ export class SupplyPort {
    await this.open(kind);
    const after=await this.snapshot(kind);
    if(after.holding!==before.holding+quantity||after.remainingCapacity!==before.remainingCapacity-quantity||
-     Math.abs((before.balance-after.balance)-quote)>1)throw Error('SUPPLY_OUTCOME_UNKNOWN');
+     Math.abs((before.balance-after.balance)-quote.total)>1)throw Error('SUPPLY_OUTCOME_UNKNOWN');
    return after;
   }catch(error){
    if(!mutationAttempted){
