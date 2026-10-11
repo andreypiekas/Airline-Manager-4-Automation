@@ -23,7 +23,7 @@ export interface SupplyQuote { total:number; discountPercent:number }
 export function parseSupplyQuote(text:string,pricePer1000:number,quantity:number):SupplyQuote {
  const sections=[...text.matchAll(/TOTAL PRICE[\s\S]{0,160}?AMOUNT TO PURCHASE/gi)];
  if(sections.length!==1)throw Error('SUPPLY_QUOTE_MISSING');
- const match=/^TOTAL PRICE\s+\$\s*([\d,.]+)(?:\s+-(\d{1,2})%)?\s+AMOUNT TO PURCHASE$/i.exec(sections[0][0].trim());
+ const match=/^TOTAL PRICE\s+\$\s*([\d,.]+)(?:\s*-(\d{1,2})%)?\s+AMOUNT TO PURCHASE$/i.exec(sections[0][0].trim());
  if(!match)throw Error('SUPPLY_QUOTE_UNVERIFIED');
  const discountPercent=match[2]===undefined?0:Number(match[2]);
  if(!Number.isSafeInteger(quantity)||quantity<=0||!Number.isSafeInteger(pricePer1000)||pricePer1000<=0||
