@@ -55,14 +55,7 @@ test('real discounted fuel quote reconciles native 25% price and confirms purcha
  await fixture(page,'discount-fuel');
  const {dir,run}=await execute(page,false);
  try{
-  let report;
-  try{report=await run();}
-  catch(error){
-   const persisted=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
-   const panel=(await page.locator('#fuelMain').innerText().catch(()=>'')); 
-   console.log('[SupplyDiscountFixture]',JSON.stringify({entries:persisted.entries.map((e:any)=>({kind:e.kind,status:e.status,reason:e.reason,quotedCost:e.quotedCost,discountPercent:e.discountPercent,quantity:e.plan?.quantity})),totalSection:panel.match(/TOTAL PRICE[\\s\\S]{0,100}?AMOUNT TO PURCHASE/i)?.[0]||null}));
-   throw error;
-  }
+  const report=await run();
   expect(report.halted).toBe(false);
   expect(report.entries.map(e=>e.status)).toEqual(['purchased','purchased']);
   expect(report.entries[0]).toMatchObject({kind:'fuel',discountPercent:25,quotedCost:3375,reason:'STOCK_AND_PAYMENT_CONFIRMED'});
@@ -81,6 +74,8 @@ test('invalid promotional total is rejected before any purchase',async({page})=>
  }finally{await rm(dir,{recursive:true,force:true})}
 });
 test('live discounted quote parser matches incident and rejects unsupported math',()=>{
+ expect(parseSupplyQuote('TOTAL PRICE\n$3375-25%\nAMOUNT TO PURCHASE',500,9000))
+  .toEqual({total:3375,discountPercent:25});
  expect(parseSupplyQuote('TOTAL PRICE\n$4,487,653\n-25%\nAMOUNT TO PURCHASE',480,12465703))
   .toEqual({total:4487653,discountPercent:25});
  expect(parseSupplyQuote('TOTAL PRICE\n$5,983,537\nAMOUNT TO PURCHASE',480,12465703))
