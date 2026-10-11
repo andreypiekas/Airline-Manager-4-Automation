@@ -55,7 +55,14 @@ test('real discounted fuel quote reconciles native 25% price and confirms purcha
  await fixture(page,'discount-fuel');
  const {dir,run}=await execute(page,false);
  try{
-  const report=await run();
+  let report;
+  try{report=await run();}
+  catch(error){
+   const persisted=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
+   const panel=(await page.locator('#fuelMain').innerText().catch(()=>'')); 
+   console.log('[SupplyDiscountFixture]',JSON.stringify({entries:persisted.entries.map((e:any)=>({kind:e.kind,status:e.status,reason:e.reason,quotedCost:e.quotedCost,discountPercent:e.discountPercent,quantity:e.plan?.quantity})),totalSection:panel.match(/TOTAL PRICE[\\s\\S]{0,100}?AMOUNT TO PURCHASE/i)?.[0]||null}));
+   throw error;
+  }
   expect(report.halted).toBe(false);
   expect(report.entries.map(e=>e.status)).toEqual(['purchased','purchased']);
   expect(report.entries[0]).toMatchObject({kind:'fuel',discountPercent:25,quotedCost:3375,reason:'STOCK_AND_PAYMENT_CONFIRMED'});
