@@ -55,7 +55,15 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
     await writeFile('test-results/demand/flight-history-live-stitch.md',['# Stitched Flight History ancorado no snapshot live — diagnostico','',...(liveStitches.length?liveStitches.map(x=>`- ${x.aircraftId}: ${x.status}; live ${x.liveAnchorVerified?'verificado':'indisponivel'}; anchors persistidos ${x.persistedAnchorsAvailable}; usados ${x.anchorsUsed}; links ${x.linksVerified}; linhas ${x.rowsStitched}; idade inferior mais antiga ${x.oldestAgeLowerMinutes??'n/d'} min; motivo ${x.reason}${x.stoppedReason?'; limite '+x.stoppedReason:''}.`):['Nenhuma aeronave disponivel neste run.']),'','_Snapshot live obrigatorio. Cadeias verificadas podem complementar somente a cobertura historica do ledger de demanda; o stitch continua com comparisonReady=false e mutationAuthorized=false e nunca autoriza reroute isoladamente._',''].join('\n'));
   }
   if(!candidateData.uiRestored)throw new Error('[Demand] Painel nao restaurado apos consulta; nenhuma operacao autorizada.');
-  if (!report.collectionComplete) throw new Error('[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.');
+  if (!report.collectionComplete) {
+    // Structured, sanitized evidence in Actions logs, without DOM/URLs or session data.
+    console.warn('[DemandCollection] '+JSON.stringify({
+      observed:collection.aircraft.length,
+      expected:collection.expectedRoutes,
+      warnings:collection.warnings.filter(value=>/^[A-Z0-9_:/.]{1,100}$/.test(value)).slice(0,15)
+    }));
+    throw new Error('[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.');
+  }
   return {report,collection,researchReport,candidateData,optimization,ownedBases};
 }
 

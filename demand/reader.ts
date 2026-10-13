@@ -17,6 +17,16 @@ interface RouteCard {
   from: string; to: string; ready: boolean; inflight: boolean; pax: boolean; onboardText: string;
 }
 
+function collectionFailureCode(error:unknown):string {
+  const message=error instanceof Error?error.message:'';
+  if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')return message;
+  if(message==='PAGINATION_DUPLICATE')return 'PAGINATION_DUPLICATE';
+  if(message==='ROUTE_PAGE_LIMIT_INVALID')return 'ROUTE_PAGE_LIMIT_INVALID';
+  if(/Timeout|waiting for|expect\(/i.test(message))return 'UI_WAIT_TIMEOUT';
+  if(/strict mode violation/i.test(message))return 'AMBIGUOUS_UI_CONTROL';
+  return 'UNCLASSIFIED';
+}
+
 function detailFailureCode(error:unknown):string {
   const message=error instanceof Error?error.message:'';
   if(message==='UI_CONTROL_OBSCURED')return 'UI_CONTROL_OBSCURED';
@@ -45,12 +55,15 @@ export class DemandReader {
   async collect(): Promise<CollectionResult> {
     const result: CollectionResult = { aircraft: [], complete: false, expectedRoutes: null, warnings: [] };
     const seenRoutes = new Set<string>();
+    let stage='FLEET_OPEN';
     try {
       await this.page.locator('#routesContainer').waitFor({ state: 'visible', timeout: this.timeout });
+      stage='ROUTE_COUNT';
       const heading = await this.page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ }).innerText();
       result.expectedRoutes = integerText(heading.match(/\((\d+)\)/)![1]);
       let maxPages=1;
       for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+        stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
         if (result.expectedRoutes > 0) await rows.first().waitFor({ state: 'visible', timeout: this.timeout });
         const cards: RouteCard[] = await rows.evaluateAll((elements, pattern) => elements.filter(el => !!el.getClientRects().length).map(el => {
@@ -70,6 +83,7 @@ export class DemandReader {
             inflight: visible && /Onboard\s*:/.test((el as HTMLElement).innerText) };
         }), AIRCRAFT_DETAILS_CONTROL);
         if(pageIndex===0)maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));
+        stage='AIRCRAFT_DETAILS';
         for (const card of cards) {
           if (seenRoutes.has(card.routeId)) throw new Error('PAGINATION_DUPLICATE');
           seenRoutes.add(card.routeId);
@@ -98,19 +112,47 @@ export class DemandReader {
           result.complete=true;
           return result;
         }
+        stage='PAGINATION_NEXT';
         const next = this.page.locator('#routesContainer .pagination').getByRole('link', { name: 'Next', exact: true });
-        if (pageIndex===maxPages-1 || !(await next.count())) {
-          result.complete = false;
-          result.warnings.push('ROUTE_COUNT_MISMATCH');
+        if (pageIndex===maxPages-1 || await next.count()!==1) {
+          result.warnings.push('ROUTE_COUNT_MISMATCH','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
           return result;
         }
         const firstId = cards[0]?.routeId;
-        await next.click({ timeout: this.timeout });
-        await expect.poll(async () => this.page.locator('#routesContainer [id^="routeMainList"]:visible').first().getAttribute('id'), { timeout: this.timeout }).not.toBe(`routeMainList${firstId}`);
+        if (!firstId) {
+          result.warnings.push('PAGINATION_ID_UNVERIFIED');
+          return result;
+        }
+        // Retry a stalled read-only pagination control only once. A partial
+        // collection never authorizes any departure, reroute, or pricing.
+        let advanced=false;
+        for(let attempt=1;attempt<=2;attempt++){
+          const currentId=await rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null);
+          if(currentId!=='routeMainList'+firstId){advanced=true;break;}
+          if(await next.count()!==1||!await next.isVisible())break;
+          try{
+            await next.click({timeout:this.timeout});
+            await expect.poll(async()=>rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null),
+              {timeout:this.timeout}).not.toBe('routeMainList'+firstId);
+            advanced=true;
+            break;
+          }catch(error){
+            if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+            const afterClick=await rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null).catch(()=>null);
+            if(afterClick&&afterClick!=='routeMainList'+firstId){advanced=true;break;}
+          }
+        }
+        if(!advanced){
+          result.warnings.push('PAGINATION_STALLED','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
+          return result;
+        }
       }
       result.warnings.push('PAGINATION_LIMIT');
-    } catch {
-      result.warnings.push('COLLECTION_FAILED');
+    } catch(error) {
+      if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+      result.warnings.push('COLLECTION_FAILED','COLLECTION_STAGE:'+stage,
+        'COLLECTION_REASON:'+collectionFailureCode(error),
+        'ROUTE_COUNT:'+seenRoutes.size+'/'+(result.expectedRoutes??'unknown'));
     }
     return result;
   }
