@@ -96,6 +96,31 @@ test('pagination reads every page once', async ({ page }) => {
   await fixture(page, { pages: 2 }); const r = await new DemandReader(page, 400).collect(); expect(r.complete).toBe(true); expect(r.aircraft).toHaveLength(3);
 });
 
+
+test('a transient first Next click can be retried once without losing fleet identity',async ({page})=>{
+  await fixture(page,{pages:2});
+  await page.evaluate(()=>{
+    const next=document.querySelector('#routesContainer .pagination a')!;
+    const original=next.getAttribute('onclick')||'';
+    next.setAttribute('onclick',"window.navClicks=(window.navClicks||0)+1;if(window.navClicks===1)return false;"+original);
+  });
+  const report=await new DemandReader(page,120).collect();
+  expect(report.complete).toBe(true);
+  expect(report.expectedRoutes).toBe(3);
+  expect(report.aircraft.map(x=>x.routeId)).toEqual(['101','102','103']);
+  expect(await page.evaluate(()=>(window as any).navClicks)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('permanently stalled pagination stays incomplete with explicit safe evidence',async ({page})=>{
+  await fixture(page,{pages:2,loop:true});
+  const report=await new DemandReader(page,120).collect();
+  expect(report.complete).toBe(false);
+  expect(report.warnings).toContain('PAGINATION_STALLED');
+  expect(report.warnings).toContain('ROUTE_COUNT:2/3');
+  expect(report.aircraft).toHaveLength(2);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('hidden rows from other AM4 pages are not treated as current-page fleet rows', async ({ page }) => {
   await fixture(page, { pages: 2 });
   await page.evaluate(() => {
