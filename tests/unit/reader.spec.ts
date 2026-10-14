@@ -112,6 +112,29 @@ test('a transient first Next click can be retried once without losing fleet iden
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
+
+test('asynchronous Next page waits for every unique visible row, not only first ID',async({page})=>{
+  await fixture(page,{pages:2});
+  await page.evaluate(()=>{
+    const original=(window as any).render;
+    (window as any).render=(index:number)=>{
+      original(index);
+      if(index!==1)return;
+      const container=document.querySelector('#routesContainer')!;
+      const stale=document.createElement('div');
+      stale.id='routeMainList101';stale.className='row classPAX';
+      stale.innerHTML='<span class="s-text">AAA - BBB</span>';
+      container.prepend(stale);
+      setTimeout(()=>stale.remove(),120);
+    };
+  });
+  const report=await new DemandReader(page,500).collect();
+  expect(report.complete).toBe(true);
+  expect(report.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(report.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('native Fleet pagination is restored after opening aircraft details resets page cursor',async ({page})=>{
   await page.route('**/*',route=>route.abort());
   await page.setContent(String.raw`<button>Routes (5)</button>
