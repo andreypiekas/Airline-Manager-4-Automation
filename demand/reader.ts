@@ -69,11 +69,26 @@ export class DemandReader {
       stage='ROUTE_COUNT';
       const heading = await this.page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ }).innerText();
       result.expectedRoutes = integerText(heading.match(/\((\d+)\)/)![1]);
-      let maxPages=1;
+      let maxPages=1,firstPageSize=0;
       for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
         if (result.expectedRoutes > 0) await rows.first().waitFor({ state: 'visible', timeout: this.timeout });
+        if(pageIndex>0){
+          stage='PAGINATION_PAGE_VERIFY';
+          const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
+          try{
+            await expect.poll(async()=>{
+              const ids=await rows.evaluateAll(es=>es.filter(e=>!!e.getClientRects().length)
+                .map(e=>e.id.replace(/^routeMainList/,'')));
+              return ids.length===required&&new Set(ids).size===ids.length&&
+                ids.every(id=>/^\d+$/.test(id)&&!seenRoutes.has(id));
+            },{timeout:this.timeout}).toBe(true);
+          }catch{
+            result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
+            throw Error('PAGINATION_DUPLICATE');
+          }
+        }
         const cards: RouteCard[] = await rows.evaluateAll((elements, pattern) => elements.filter(el => !!el.getClientRects().length).map(el => {
           const routeId = el.id.replace(/^routeMainList/, '');
           const links = Array.from(el.querySelectorAll('a')).map(link => ({link,
@@ -90,7 +105,7 @@ export class DemandReader {
             onboardText: ((el as HTMLElement).innerText.match(/Onboard:[^\n]*/) || [''])[0].trim(),
             inflight: visible && /Onboard\s*:/.test((el as HTMLElement).innerText) };
         }), AIRCRAFT_DETAILS_CONTROL);
-        if(pageIndex===0)maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));
+        if(pageIndex===0){firstPageSize=cards.length;maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));}
         stage='AIRCRAFT_DETAILS';
         for (const card of cards) {
           if (seenRoutes.has(card.routeId)) throw new Error('PAGINATION_DUPLICATE');
