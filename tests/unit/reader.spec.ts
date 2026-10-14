@@ -135,6 +135,61 @@ test('asynchronous Next page waits for every unique visible row, not only first 
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
+
+async function overlappingPageFixture(page:Page,permanent:boolean){
+  await fixture(page,{pages:2});
+  await page.evaluate((alwaysBad)=>{
+    const w=window as any,render=w.render,ajax=w.Ajax;
+    w.badPageAttempts=0;w.fleetReopens=0;
+    w.render=(index:number)=>{
+      render(index);
+      if(index!==1)return;
+      w.badPageAttempts++;
+      if(alwaysBad||w.badPageAttempts===1){
+        const extra=document.createElement('div');extra.id='routeMainList101';
+        extra.className='row classPAX';extra.innerHTML='<span class="s-text">AAA - BBB</span>';
+        document.querySelector('#routesContainer')!.append(extra);
+      }
+    };
+    w.Ajax=(url:string,...args:any[])=>{
+      if(url==='routes.php'){
+        w.fleetReopens++;
+        const old=document.querySelector('#routesContainer')!;
+        const fresh=document.createElement('div');fresh.id='routesContainer';
+        old.replaceWith(fresh);w.render(0);return;
+      }
+      return ajax(url,...args);
+    };
+    w.$=(selector:string)=>({
+      removeClass(){return this;},addClass(){return this;},
+      hide(){const el=document.querySelector(selector) as HTMLElement|null;
+        if(el)el.style.display='none';return this;}
+    });
+    const button=document.createElement('button');button.id='popBtn1';button.textContent='Fleet';
+    button.setAttribute('onclick',"$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);");
+    document.body.append(button);
+  },permanent);
+}
+test('late page overlap is recovered by replaying verified native Fleet pages',async({page})=>{
+  await overlappingPageFixture(page,false);
+  const result=await new DemandReader(page,500).collect();
+  expect(result.complete).toBe(true);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(result.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('permanent late page overlap stays incomplete after bounded verified replay',async({page})=>{
+  await overlappingPageFixture(page,true);
+  const result=await new DemandReader(page,300).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102']);
+  expect(result.warnings).toContain('PAGINATION_OVERLAP_OR_INCOMPLETE');
+  expect(result.warnings).toContain('PAGINATION_PAGE:1');
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('native Fleet pagination is restored after opening aircraft details resets page cursor',async ({page})=>{
   await page.route('**/*',route=>route.abort());
   await page.setContent('<button>Routes (5)</button><button id="popBtn1">Fleet</button><div id="routeAction"><div id="routesContainer"></div></div><div id="detailsAction" style="display:none"></div>');
