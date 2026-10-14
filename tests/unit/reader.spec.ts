@@ -181,6 +181,7 @@ test('native Fleet pagination is restored after opening aircraft details resets 
       render(0);
     </script>`);
   const report=await new DemandReader(page,500).collect();
+  console.log('[FleetCursorFixture]',JSON.stringify({complete:report.complete,warnings:report.warnings,ids:report.aircraft.map(a=>a.routeId),states:report.aircraft.map(a=>a.state),cursor:await page.evaluate(()=>(window as any).cursor),restores:await page.evaluate(()=>(window as any).listRestores)}));
   expect(report.complete).toBe(true);
   expect(report.aircraft.map(a=>a.routeId)).toEqual(['101','102','103','104','105']);
   expect(report.aircraft[3].state).toBe('ready');
