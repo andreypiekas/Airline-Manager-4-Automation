@@ -143,6 +143,10 @@ async function overlappingPageFixture(page:Page,permanent:boolean){
     w.badPageAttempts=0;w.fleetReopens=0;
     w.render=(index:number)=>{
       render(index);
+      if(index===0){
+        document.querySelector('#routesContainer .pagination a')!
+          .setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
+      }
       if(index!==1)return;
       w.badPageAttempts++;
       if(alwaysBad||w.badPageAttempts===1){
@@ -158,8 +162,11 @@ async function overlappingPageFixture(page:Page,permanent:boolean){
         const fresh=document.createElement('div');fresh.id='routesContainer';
         old.replaceWith(fresh);w.render(0);return;
       }
+      if(url==="routes.php?start=20&sort="){w.render(1);return;}
       return ajax(url,...args);
     };
+    document.querySelector('#routesContainer .pagination a')!
+      .setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
     w.$=(selector:string)=>({
       removeClass(){return this;},addClass(){return this;},
       hide(){const el=document.querySelector(selector) as HTMLElement|null;
