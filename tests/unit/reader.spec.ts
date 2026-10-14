@@ -111,6 +111,61 @@ test('a transient first Next click can be retried once without losing fleet iden
   expect(await page.evaluate(()=>(window as any).navClicks)).toBe(2);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+
+test('native Fleet pagination is restored after opening aircraft details resets page cursor',async ({page})=>{
+  await page.route('**/*',route=>route.abort());
+  await page.setContent(String.raw`<button>Routes (5)</button>
+    <button id="popBtn1" onclick="$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);">Fleet</button>
+    <div id="routeAction"><div id="routesContainer"></div></div>
+    <div id="detailsAction" style="display:none"></div>
+    <script>
+      window.mutations=0;window.listRestores=0;window.cursor=0;
+      const intro=0;
+      function playSound(){}
+      function $(selector){return {removeClass(){return this},addClass(){return this},hide(){document.querySelector(selector).style.display='none';return this}}}
+      function render(index){
+        window.cursor=index;
+        const pages=[[101,102],[103,104],[105]];
+        const container=document.createElement('div');container.id='routesContainer';
+        const current=document.querySelector('#routesContainer');
+        current.replaceWith(container);
+        document.querySelector('#routeAction').style.display='block';
+        container.innerHTML=pages[index].map(id=>
+          '<div class="row classPAX '+(id===104?'listDepartable':'')+'" id="routeMainList'+id+'">'+
+          '<span class="s-text">AAA - BBB</span>'+
+          '<a href="javascript:void(0)" onclick="playSound(\\'neutral_click\\');Ajax(\\'fleet_details.php?id='+(id+1000)+'\\',\\'detailsAction\\');if(intro==0){$(\\'#routeAction\\').hide();}">'+
+          '<span id="acRegList'+(id+1000)+'">TEST-'+id+'</span> - Aircraft</a>'+
+          (id===104?'<button id="listDepart104">Depart</button>':'')+'</div>').join('')+
+          '<ul class="pagination">'+(index<2?
+            '<a href="javascript:void(0)" onclick="Ajax(\\'routes.php?start='+((index+1)*20)+'&sort=\\',\\'routeAction\\',this);">Next</a>':'')+'</ul>';
+      }
+      function show(id){
+        const d=document.querySelector('#detailsAction');
+        d.style.display='block';
+        d.innerHTML='<div id="route-name"><span class="glyphicons-chevron-left" onclick="document.querySelector(\\'#detailsAction\\').style.display=\\'none\\';window.listRestores++;render(0);">Back</span></div>'+
+        '<span id="ff-name">TEST-'+id+'</span>'+
+        '<button id="routeViewDepart" onclick="window.mutations++; /* route_depart.php?id='+id+'&ref=list */">Depart</button>'+
+        '<button id="routeViewGround_unground">Ground</button>'+
+        '<div class="col-5"><span class="l-text">BBB</span></div><div class="col-5"><span class="l-text">AAA</span></div>'+
+        '<div id="seat-layout">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png"><br>'+(i?0:100)+'</div>').join('')+'</div>'+
+        '<div id="list-demand">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png"><br>'+(i?'0/200':'90/1000')+'</div>').join('')+'</div>';
+      }
+      function Ajax(url){
+        if(url==='routes.php'){render(0);return;}
+        if(url.startsWith('routes.php?start=')){render(Number(url.match(/start=(\d+)/)[1])/20);return;}
+        if(url.startsWith('fleet_details.php?id=')){show(Number(url.match(/id=(\d+)/)[1])-1000);return;}
+      }
+      render(0);
+    </script>`);
+  const report=await new DemandReader(page,500).collect();
+  expect(report.complete).toBe(true);
+  expect(report.aircraft.map(a=>a.routeId)).toEqual(['101','102','103','104','105']);
+  expect(report.aircraft[3].state).toBe('ready');
+  expect(report.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).listRestores)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('permanently stalled pagination stays incomplete with explicit safe evidence',async ({page})=>{
   await fixture(page,{pages:2,loop:true});
   const report=await new DemandReader(page,120).collect();
