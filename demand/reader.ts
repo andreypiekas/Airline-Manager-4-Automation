@@ -63,6 +63,48 @@ export class DemandReader {
   async collect(): Promise<CollectionResult> {
     const result: CollectionResult = { aircraft: [], complete: false, expectedRoutes: null, warnings: [] };
     const seenRoutes = new Set<string>();
+    const verifiedPages: string[][] = [];
+    const visibleRouteIds=async()=>this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>
+      es.filter(e=>!!e.getClientRects().length).map(e=>e.id.replace(/^routeMainList/,'')));
+    const freshPage=async(required:number)=>{
+      const ids=await visibleRouteIds();
+      return ids.length===required&&new Set(ids).size===ids.length&&
+        ids.every(id=>/^\d+$/.test(id)&&!seenRoutes.has(id));
+    };
+    const restorePage=async(index:number,required:number,total:number)=>{
+      // Never reuse a partial page. Start from the inspected Fleet control and
+      // verify the exact previously observed identities of all preceding pages.
+      for(let attempt=1;attempt<=2;attempt++){
+        try{
+          await openFleetList(this.page,this.timeout);
+          const heading=await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout});
+          if(integerText(heading.match(/\((\d+)\)/)![1])!==total)return false;
+          for(let cursor=0;cursor<=index;cursor++){
+            if(cursor<index){
+              const expected=verifiedPages[cursor];
+              await expect.poll(async()=>JSON.stringify(await visibleRouteIds()),{timeout:this.timeout})
+                .toBe(JSON.stringify(expected));
+              const next=this.page.locator('#routesContainer .pagination')
+                .getByRole('link',{name:'Next',exact:true});
+              if(await next.count()!==1||!await next.isVisible()||
+                nativeNextStart(await next.getAttribute('onclick')||'')!==(cursor+1)*20)
+                throw Error('FLEET_PAGE_REPLAY_CONTROL_UNVERIFIED');
+              const firstId=expected[0];
+              await next.click({timeout:this.timeout});
+              await expect.poll(async()=> (await visibleRouteIds())[0]||null,{timeout:this.timeout})
+                .not.toBe(firstId);
+            }else{
+              await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
+            }
+          }
+          console.log('[FleetPagination] '+JSON.stringify({page:index,recoveryAttempt:attempt,verifiedPages:index,remaining:required}));
+          return true;
+        }catch(error){
+          if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+        }
+      }
+      return false;
+    };
     let stage='FLEET_OPEN';
     try {
       await this.page.locator('#routesContainer').waitFor({ state: 'visible', timeout: this.timeout });
@@ -78,15 +120,13 @@ export class DemandReader {
           stage='PAGINATION_PAGE_VERIFY';
           const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
           try{
-            await expect.poll(async()=>{
-              const ids=await rows.evaluateAll(es=>es.filter(e=>!!e.getClientRects().length)
-                .map(e=>e.id.replace(/^routeMainList/,'')));
-              return ids.length===required&&new Set(ids).size===ids.length&&
-                ids.every(id=>/^\d+$/.test(id)&&!seenRoutes.has(id));
-            },{timeout:this.timeout}).toBe(true);
+            await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
           }catch{
-            result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
-            throw Error('PAGINATION_DUPLICATE');
+            stage='PAGINATION_PAGE_RECOVERY';
+            if(!await restorePage(pageIndex,required,result.expectedRoutes)){
+              result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
+              throw Error('PAGINATION_DUPLICATE');
+            }
           }
         }
         const cards: RouteCard[] = await rows.evaluateAll((elements, pattern) => elements.filter(el => !!el.getClientRects().length).map(el => {
@@ -106,6 +146,7 @@ export class DemandReader {
             inflight: visible && /Onboard\s*:/.test((el as HTMLElement).innerText) };
         }), AIRCRAFT_DETAILS_CONTROL);
         if(pageIndex===0){firstPageSize=cards.length;maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));}
+        verifiedPages.push(cards.map(card=>card.routeId));
         stage='AIRCRAFT_DETAILS';
         for (const card of cards) {
           if (seenRoutes.has(card.routeId)) throw new Error('PAGINATION_DUPLICATE');
