@@ -111,6 +111,96 @@ test('a transient first Next click can be retried once without losing fleet iden
   expect(await page.evaluate(()=>(window as any).navClicks)).toBe(2);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+
+
+test('asynchronous Next page waits for every unique visible row, not only first ID',async({page})=>{
+  await fixture(page,{pages:2});
+  await page.evaluate(()=>{
+    const original=(window as any).render;
+    (window as any).render=(index:number)=>{
+      original(index);
+      if(index!==1)return;
+      const container=document.querySelector('#routesContainer')!;
+      const stale=document.createElement('div');
+      stale.id='routeMainList101';stale.className='row classPAX';
+      stale.innerHTML='<span class="s-text">AAA - BBB</span>';
+      container.prepend(stale);
+      setTimeout(()=>stale.remove(),120);
+    };
+  });
+  const report=await new DemandReader(page,500).collect();
+  expect(report.complete).toBe(true);
+  expect(report.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(report.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('native Fleet pagination is restored after opening aircraft details resets page cursor',async ({page})=>{
+  await page.route('**/*',route=>route.abort());
+  await page.setContent('<button>Routes (5)</button><button id="popBtn1">Fleet</button><div id="routeAction"><div id="routesContainer"></div></div><div id="detailsAction" style="display:none"></div>');
+  await page.evaluate(()=>{
+    const w=window as any;w.intro=0;w.mutations=0;w.listRestores=0;w.cursor=0;
+    w.playSound=()=>{};
+    w.$=(selector:string)=>({
+      removeClass(){return this;},addClass(){return this;},
+      hide(){const el=document.querySelector(selector) as HTMLElement|null;if(el)el.style.display='none';return this;}
+    });
+    w.render=(index:number)=>{
+      w.cursor=index;
+      const old=document.querySelector('#routesContainer')!;
+      const container=document.createElement('div');container.id='routesContainer';old.replaceWith(container);
+      (document.querySelector('#routeAction') as HTMLElement).style.display='block';
+      const pages=[[101,102],[103,104],[105]];
+      for(const id of pages[index]){
+        const row=document.createElement('div');
+        row.id='routeMainList'+id;row.className='row classPAX'+(id===104?' listDepartable':'');
+        row.innerHTML='<span class="s-text">AAA - BBB</span>';
+        const link=document.createElement('a');link.href='javascript:void(0)';
+        link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id="+(id+1000)+"','detailsAction');if(intro==0){$('#routeAction').hide();}");
+        link.innerHTML='<span id="acRegList'+(id+1000)+'">TEST-'+id+'</span> - Aircraft';
+        row.append(link);
+        if(id===104){const depart=document.createElement('button');depart.id='listDepart104';depart.textContent='Depart';row.append(depart);}
+        container.append(row);
+      }
+      if(index<2){
+        const ul=document.createElement('ul');ul.className='pagination';
+        const link=document.createElement('a');link.href='javascript:void(0)';link.textContent='Next';
+        link.setAttribute('onclick',"Ajax('routes.php?start="+((index+1)*20)+"&sort=','routeAction',this);");
+        ul.append(link);container.append(ul);
+      }
+    };
+    w.show=(id:number)=>{
+      const details=document.querySelector('#detailsAction') as HTMLElement;
+      details.style.display='block';
+      details.innerHTML='<div id="route-name"><span class="glyphicons-chevron-left">Back</span></div>'+
+        '<span id="ff-name">TEST-'+id+'</span>'+
+        '<button id="routeViewDepart" onclick="window.mutations++; /* route_depart.php?id='+id+'&ref=list */">Depart</button>'+
+        '<button id="routeViewGround_unground">Ground</button>'+
+        '<div class="col-5"><span class="l-text">BBB</span></div><div class="col-5"><span class="l-text">AAA</span></div>'+
+        '<div id="seat-layout">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png"><br>'+(i?0:100)+'</div>').join('')+'</div>'+
+        '<div id="list-demand">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png"><br>'+(i?'0/200':'90/1000')+'</div>').join('')+'</div>';
+      details.querySelector('.glyphicons-chevron-left')!.addEventListener('click',()=>{
+        details.style.display='none';w.listRestores++;w.render(0);
+      });
+    };
+    w.Ajax=(url:string)=>{
+      if(url==='routes.php'){w.render(0);return;}
+      if(url.startsWith('routes.php?start=')){w.render(Number(url.match(/start=(\d+)/)![1])/20);return;}
+      if(url.startsWith('fleet_details.php?id=')){w.show(Number(url.match(/id=(\d+)/)![1])-1000);return;}
+    };
+    document.querySelector('#popBtn1')!.setAttribute('onclick',
+      "$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);");
+    w.render(0);
+  });
+  const report=await new DemandReader(page,500).collect();
+  expect(report.complete).toBe(true);
+  expect(report.aircraft.map(a=>a.routeId)).toEqual(['101','102','103','104','105']);
+  expect(report.aircraft[3].state).toBe('ready');
+  expect(report.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).listRestores)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('permanently stalled pagination stays incomplete with explicit safe evidence',async ({page})=>{
   await fixture(page,{pages:2,loop:true});
   const report=await new DemandReader(page,120).collect();

@@ -9,7 +9,7 @@ import { flightCountdownObservation } from '../optimization/flight-timing';
 import { departureControlShape } from './departure-control-evidence';
 import { readCurrentRouteFieldDiagnostics } from '../optimization/current-route-diagnostics';
 import { readFlightHistoryEvidence } from '../optimization/flight-history';
-import { routePageLimit } from './navigation';
+import { routePageLimit, openFleetList } from './navigation';
 import { GeneralUtils } from '../utils/general.utils';
 
 interface RouteCard {
@@ -25,6 +25,14 @@ function collectionFailureCode(error:unknown):string {
   if(/Timeout|waiting for|expect\(/i.test(message))return 'UI_WAIT_TIMEOUT';
   if(/strict mode violation/i.test(message))return 'AMBIGUOUS_UI_CONTROL';
   return 'UNCLASSIFIED';
+}
+
+/** Native AM4 pagination cursor. Never guess the target of an unknown callback. */
+function nativeNextStart(callback:string):number|null {
+  const match=callback.replace(/\s/g,'').match(/^Ajax\('routes\.php\?start=(\d+)&sort=','routeAction',this\);$/);
+  if(!match)return null;
+  const value=Number(match[1]);
+  return Number.isSafeInteger(value)?value:null;
 }
 
 function detailFailureCode(error:unknown):string {
@@ -61,11 +69,26 @@ export class DemandReader {
       stage='ROUTE_COUNT';
       const heading = await this.page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ }).innerText();
       result.expectedRoutes = integerText(heading.match(/\((\d+)\)/)![1]);
-      let maxPages=1;
+      let maxPages=1,firstPageSize=0;
       for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
         if (result.expectedRoutes > 0) await rows.first().waitFor({ state: 'visible', timeout: this.timeout });
+        if(pageIndex>0){
+          stage='PAGINATION_PAGE_VERIFY';
+          const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
+          try{
+            await expect.poll(async()=>{
+              const ids=await rows.evaluateAll(es=>es.filter(e=>!!e.getClientRects().length)
+                .map(e=>e.id.replace(/^routeMainList/,'')));
+              return ids.length===required&&new Set(ids).size===ids.length&&
+                ids.every(id=>/^\d+$/.test(id)&&!seenRoutes.has(id));
+            },{timeout:this.timeout}).toBe(true);
+          }catch{
+            result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
+            throw Error('PAGINATION_DUPLICATE');
+          }
+        }
         const cards: RouteCard[] = await rows.evaluateAll((elements, pattern) => elements.filter(el => !!el.getClientRects().length).map(el => {
           const routeId = el.id.replace(/^routeMainList/, '');
           const links = Array.from(el.querySelectorAll('a')).map(link => ({link,
@@ -82,7 +105,7 @@ export class DemandReader {
             onboardText: ((el as HTMLElement).innerText.match(/Onboard:[^\n]*/) || [''])[0].trim(),
             inflight: visible && /Onboard\s*:/.test((el as HTMLElement).innerText) };
         }), AIRCRAFT_DETAILS_CONTROL);
-        if(pageIndex===0)maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));
+        if(pageIndex===0){firstPageSize=cards.length;maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));}
         stage='AIRCRAFT_DETAILS';
         for (const card of cards) {
           if (seenRoutes.has(card.routeId)) throw new Error('PAGINATION_DUPLICATE');
@@ -123,6 +146,42 @@ export class DemandReader {
           result.warnings.push('PAGINATION_ID_UNVERIFIED');
           return result;
         }
+        // Opening/closing aircraft details can reset the Fleet pagination
+        // cursor. Verify the *entire* current page and the native Next target,
+        // not merely that the first route changed after a click.
+        const samePage=async()=>{
+          const visibleIds=await rows.evaluateAll(es=>es.filter(e=>!!e.getClientRects().length).map(e=>e.id.replace(/^routeMainList/,'')));
+          return visibleIds.length===cards.length&&visibleIds.every((id,i)=>id===cards[i].routeId);
+        };
+        const targetStart=(pageIndex+1)*20;
+        const readNextStart=async()=>nativeNextStart(await next.getAttribute('onclick')||'');
+        const nativeCursor=await readNextStart();
+        if(!await samePage()||(nativeCursor!==null&&nativeCursor!==targetStart)){
+          stage='PAGINATION_CONTEXT_RESTORE';
+          try{
+            // Read-only reset through the inspected Fleet tab. Walk forward
+            // using exact native offsets, then cross-check page identities.
+            await openFleetList(this.page,this.timeout);
+            for(let cursor=0;cursor<pageIndex;cursor++){
+              const link=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
+              if(await link.count()!==1||nativeNextStart(await link.getAttribute('onclick')||'')!==(cursor+1)*20)
+                throw Error('FLEET_CURSOR_UNVERIFIED');
+              const oldId=await rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null);
+              await link.click({timeout:this.timeout});
+              await expect.poll(()=>rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null),
+                {timeout:this.timeout}).not.toBe(oldId);
+            }
+          }catch(error){
+            if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+            result.warnings.push('PAGINATION_CONTEXT_RESTORE_FAILED');
+            return result;
+          }
+          if(!await samePage()||await readNextStart()!==targetStart){
+            result.warnings.push('PAGINATION_CONTEXT_NOT_RESTORED');
+            return result;
+          }
+        }
+        stage='PAGINATION_NEXT';
         // Retry a stalled read-only pagination control only once. A partial
         // collection never authorizes any departure, reroute, or pricing.
         let advanced=false;
