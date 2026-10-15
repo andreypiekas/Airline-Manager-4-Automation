@@ -134,7 +134,7 @@ function markdown(d,states){
   '## Resumo executivo','',
   '| Área | Resultado | Evidência resumida |','| --- | --- | --- |',
   `| Bases | **${d.bases?.effective?.length??0}** ativas | ${d.bases?.effective?.length?d.bases.effective.map(safe).join(', '):'n/d'} · fonte ${safe(d.bases?.status||'n/d')} |`,
-  `| Frota | **${fmt(d.fleet.seen)}** vistas | ${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis |`,
+  `| Frota (coleta antes das decolagens) | **${fmt(d.fleet.seen)}** vistas | ${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis |`,
   `| Demanda | **${fmt(d.demand.sufficient)}/${fmt(d.demand.evaluated)}** suficientes | insuficientes ${fmt(d.demand.insufficient)} · indisponíveis ${fmt(d.demand.unavailable)} · coleta ${d.demand.collectionComplete===true?'completa':d.demand.collectionComplete===false?'incompleta':'n/d'} |`,
   `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}) · incertas ${fmt(d.departures.unknown)} |`,
   `| Pricing | **${fmt(d.pricing.adjusted)}** ajustadas | ${fmt(d.pricing.unchanged)} no alvo · incertas ${fmt(d.pricing.unknown)}${d.pricing.phaseHoldReason?` · fase: ${safe(d.pricing.phaseHoldReason)}`:''} |`,
@@ -211,7 +211,7 @@ function selfTest(){
  const campaignHeld=build(dir,path.join(dir,'missing.log'),path.join(dir,'journal.json')).dashboard;
  assert.equal(campaignHeld.campaign.status,'unverified');assert.equal(campaignHeld.campaign.departureAuthorized,false);
  assert.ok(markdown(campaignHeld,[]).includes('campanhas exigidas não confirmadas'));
- assert.equal(dashboard.uiHealth.status,'not_observed');assert.equal(dashboard.timeBudget.blocked,0);const md=markdown(dashboard,states);assert.ok(md.includes('Resumo executivo'));assert.ok(md.includes('Aeronaves que exigem atenção'));assert.ok(md.includes('Relatórios detalhados'));
+ assert.equal(dashboard.uiHealth.status,'not_observed');assert.equal(dashboard.timeBudget.blocked,0);const md=markdown(dashboard,states);assert.ok(md.includes('Resumo executivo'));assert.ok(md.includes('Frota (coleta antes das decolagens)'));assert.ok(md.includes('Aeronaves que exigem atenção'));assert.ok(md.includes('Relatórios detalhados'));
  assert.deepEqual(states.find(x=>x.aircraftId==='2'),{aircraftId:'2',registration:'B',state:'QUARENTENA_DECOLAGEM',reason:'PERSISTED_UNCERTAIN_DEPARTURE_BLOCK',observedFleetState:'inflight'});
  assert.deepEqual(states.find(x=>x.aircraftId==='3'),{aircraftId:'3',registration:'C',state:'PRECISA_REVISAR_ROTA',reason:'PERSISTED_UNCERTAIN_ROUTE_BLOCK',observedFleetState:'ready'});
  assert.deepEqual(states.find(x=>x.aircraftId==='4'),{aircraftId:'4',registration:'D',state:'QUARENTENA_DECOLAGEM',reason:'PERSISTED_UNCERTAIN_DEPARTURE_BLOCK',observedFleetState:'ready'});
