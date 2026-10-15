@@ -254,8 +254,8 @@ export class DemandReader {
             }
           }
           if(firstWindowShort){
-            const validRouteIds=result.aircraft.every(a=>/^[1-9]\\d*$/.test(a.routeId));
-            const validAircraftIds=result.aircraft.every(a=>/^[1-9]\\d*$/.test(a.aircraftId)) &&
+            const validRouteIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.routeId));
+            const validAircraftIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)) &&
               new Set(result.aircraft.map(a=>a.aircraftId)).size===result.expectedRoutes;
             if(!validRouteIds||!validAircraftIds){
               result.warnings.push('FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED');
