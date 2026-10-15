@@ -8,19 +8,19 @@ import { discoverOwnedAirlineBases } from '../optimization/owned-airline-bases';
 import { Page } from '@playwright/test';
 import { readDemandConfig } from './config';
 import { DemandManager } from './manager';
-import { DemandReader } from './reader';
+import { collectFleetWithFreshRetry } from './reader';
 import { writeDemandReport } from './report';
 import { DemandConfig, DemandReport } from './types';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
 import { appendFlightHistoryAnchors, appendObservedArrivals, appendResolvedUncertainDepartures, readFlightHistoryContinuityDiagnostics, readFlightHistoryStitchDiagnostics, readLiveAnchoredFlightHistoryStitchDiagnostics } from '../optimization/return-journal';
 import { writeFile } from 'node:fs/promises';
 
-export async function runDemandSimulationDetailed(page: Page, config: DemandConfig = readDemandConfig(), reviews: Record<string, RouteReview> = {}) {
+export async function runDemandSimulationDetailed(page: Page, config: DemandConfig = readDemandConfig(), reviews: Record<string, RouteReview> = {}, options: { collectionRetryDeadlineEpochMs?: number } = {}) {
   const configuredOptimization = optimizationConfig();
   const ownedBases = await discoverOwnedAirlineBases(page, configuredOptimization.airlineBases);
   const optimization = {...configuredOptimization, airlineBases: ownedBases.effectiveBases};
   const research = researchConfig();
-  const collection = await new DemandReader(page, 10000, true).collect();
+  const collection = await collectFleetWithFreshRetry(page, 10000, true, options.collectionRetryDeadlineEpochMs);
   if(optimization.returnJournal){
     const resolvedDepartures=await appendResolvedUncertainDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,collection);
     if(resolvedDepartures)console.log('[History] Quarentenas de departure reconciliadas por estado live: '+resolvedDepartures+'.');
