@@ -70,12 +70,17 @@ export class DemandReader {
     let firstWindowShort=false;
     const pageDiagnostics=async(index:number,expected:number)=>{
       const ids=await visibleRouteIds().catch(()=>[] as string[]);
+      const rendered=await this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>({
+        totalNodes:es.length,hiddenNodes:es.filter(e=>!e.getClientRects().length).length,
+        cargoNodes:es.filter(e=>!e.classList.contains('classPAX')).length,
+        duplicateIds:es.length-new Set(es.map(e=>e.id)).size
+      })).catch(()=>({totalNodes:0,hiddenNodes:0,cargoNodes:0,duplicateIds:0}));
       const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
       const cursor=await next.count()===1?nativeNextStart(await next.getAttribute('onclick')||''):null;
       return {
         page:index,expected,visible:ids.length,unique:new Set(ids).size,
         overlap:ids.filter(id=>seenRoutes.has(id)).length,nextStart:cursor,
-        total:result.expectedRoutes
+        total:result.expectedRoutes,...rendered
       };
     };
     const visibleRouteIds=async()=>this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>
@@ -172,6 +177,7 @@ export class DemandReader {
             if(!await restorePage(pageIndex,required,result.expectedRoutes)){
               console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
               result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
+              if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
               throw Error('PAGINATION_DUPLICATE');
             }
           }
