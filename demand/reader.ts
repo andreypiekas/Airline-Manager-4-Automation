@@ -11,6 +11,7 @@ import { readCurrentRouteFieldDiagnostics } from '../optimization/current-route-
 import { readFlightHistoryEvidence } from '../optimization/flight-history';
 import { routePageLimit, openFleetList } from './navigation';
 import { GeneralUtils } from '../utils/general.utils';
+import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
 interface RouteCard {
   routeId: string; aircraftId: string; registration: string; routeLabel: string;
@@ -425,7 +426,7 @@ export async function collectFleetWithFreshRetry(
     w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
   )) return first;
 
-  const minimumRemainingMs=180000;
+  const minimumRemainingMs=240000;
   if(retryDeadlineEpochMs!==undefined && (
     !Number.isSafeInteger(retryDeadlineEpochMs) ||
     Date.now()+minimumRemainingMs>=retryDeadlineEpochMs
@@ -437,6 +438,16 @@ export async function collectFleetWithFreshRetry(
     status:'START',observed:first.aircraft.length,expected:first.expectedRoutes
   }));
   try{
+    // The first pass already tried native Fleet navigation. Reopening that
+    // same JS/AJAX state again may reproduce the same broken pagination.
+    // One normal browser reload resets transient client-side handlers while
+    // retaining only the existing authenticated session; never re-login.
+    await assertNoInteractiveChallenge(page,'fleet-reload:before');
+    await page.reload({waitUntil:'domcontentloaded',timeout:Math.max(15000,timeout)});
+    await assertNoInteractiveChallenge(page,'fleet-reload:after');
+    await page.locator('#mapRoutes').waitFor({state:'visible',timeout:Math.max(15000,timeout)});
+    await assertNoInteractiveChallenge(page,'fleet-reload:authenticated');
+    console.warn('[FleetFreshRetry] '+JSON.stringify({status:'PAGE_RELOADED_AUTHENTICATED'}));
     await openFleetList(page,timeout);
     const second=await new DemandReader(page,timeout,includeInflightDetails).collect();
     const validSecond=second.complete &&
