@@ -105,7 +105,7 @@ test('permanently truncated native first page remains blocked after read-only pa
   const r=await new DemandReader(page,250).collect();
   expect(r.complete).toBe(false);
   expect(r.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
-  expect(r.aircraft).toHaveLength(0);
+  expect(r.aircraft).toHaveLength(18); // partial read-only evidence is retained, never authorized
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
@@ -163,7 +163,7 @@ test('19-row first page never authorizes inventory completion when one route is 
   await nativeShortWindowFixture(page,6);
   const result=await new DemandReader(page,70).collect();
   expect(result.complete).toBe(false);
-  expect(result.aircraft).toHaveLength(65);
+  expect(result.aircraft).toHaveLength(59); // final 6/7 page rejected, never marked complete
   expect(result.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
