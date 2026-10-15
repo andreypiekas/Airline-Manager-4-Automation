@@ -175,7 +175,22 @@ async function overlappingPageFixture(page:Page,permanent:boolean|number){
     const button=document.createElement('button');button.id='popBtn1';button.textContent='Fleet';
     button.setAttribute('onclick',"$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);");
     document.body.append(button);
+    const menu=document.createElement('button');menu.id='mapRoutes';
+    menu.textContent='Fleet main menu';
+    menu.setAttribute('onclick',"hideAllWhenClick();menuFleet('Routes');");
+    document.body.append(menu);
+    w.reloadCount=0;
   },permanent);
+  // Controlled stand-in for the authenticated document reload. All network
+  // requests remain aborted; never access the game in offline unit tests.
+  (page as any).reload=async()=>{
+    await page.evaluate(()=>{
+      const w=window as any;
+      w.reloadCount++;
+      w.render(0);
+    });
+    return null;
+  };
 }
 test('late page overlap is recovered by replaying verified native Fleet pages',async({page})=>{
   await overlappingPageFixture(page,false);
@@ -194,6 +209,7 @@ test('permanent late page overlap stays incomplete after bounded verified replay
   expect(result.warnings).toContain('PAGINATION_OVERLAP_OR_INCOMPLETE');
   expect(result.warnings).toContain('PAGINATION_PAGE:1');
   expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(0);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
@@ -206,6 +222,7 @@ test('clean fresh Fleet scan recovers if bounded page replay still failed',async
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
   expect(result.warnings).toEqual([]);
   expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
@@ -215,6 +232,7 @@ test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
   expect(result.warnings).toContain('FLEET_FRESH_RETRY_INCOMPLETE');
   expect(result.aircraft).toHaveLength(2);
   expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(5);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 test('fresh Fleet retry is skipped without a conservative time budget',async({page})=>{
