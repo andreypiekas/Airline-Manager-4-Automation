@@ -68,16 +68,20 @@ async function nativeIncompleteFirstPage(page:Page,completes:boolean){
       const append=(n:number)=>{
         const id=100+n,row=document.createElement('div');
         row.id='routeMainList'+id;row.className='row';
-        row.innerHTML='<span class="s-text">AAA - BBB</span>'+
-          '<a onclick="playSound(\\'neutral_click\\');Ajax(\\'fleet_details.php?id='+(1000+id)+'\\',\\'detailsAction\\');if(intro==0){$(\\'#routeAction\\').hide();}">'+
-          '<span id="acRegList'+(1000+id)+'">TEST-'+id+'</span> - Test aircraft</a>';
+        row.innerHTML='<span class="s-text">AAA - BBB</span>';
+        const link=document.createElement('a');
+        link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id="+(1000+id)+"','detailsAction');if(intro==0){$('#routeAction').hide();}");
+        const registration=document.createElement('span');
+        registration.id='acRegList'+(1000+id);registration.textContent='TEST-'+id;
+        link.append(registration,' - Test aircraft');row.append(link);
         root.append(row);
       };
       if(pageNumber===0){
         for(let i=1;i<=18;i++)append(i);
         if(finish)setTimeout(()=>{append(19);append(20);},100);
         const p=document.createElement('ul');p.className='pagination';
-        p.innerHTML='<a href="#" onclick="Ajax(\\'routes.php?start=20&sort=\\',\\'routeAction\\',this);">Next</a>';
+        p.innerHTML='<a href="#">Next</a>';
+        p.querySelector('a')!.setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
         root.append(p);
       }else append(21);
     };
