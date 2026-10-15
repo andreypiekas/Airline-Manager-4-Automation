@@ -139,7 +139,7 @@ async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageI
       if(pageIndex<3){
         const pager=document.createElement('ul');pager.className='pagination';
         const next=document.createElement('a');next.textContent='Next';next.href='#';
-        next.setAttribute('onclick',"Ajax('routes.php?start="+(cursorValid?offset+20:offset+21)+"&sort=','routeAction',this);");
+        next.setAttribute('onclick',"Ajax('routes.php?start="+(cursorValid||pageIndex!==shortAt?offset+20:offset+21)+"&sort=','routeAction',this);");
         pager.append(next);root.append(pager);
       }
     };
