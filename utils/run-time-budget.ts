@@ -1,3 +1,7 @@
+// A full-fleet live run needs time for repeated, independently confirmed
+// departures after collection and pricing. The workflow job has a 29m cap.
+export const LIVE_RUN_TIMEOUT_MS=1_200_000; // 20 minutes
+export const LIVE_RUN_FINALIZATION_RESERVE_MS=120_000;
 export const MUTATION_COMPLETION_RESERVE_MS=240_000;
 export const MUTATION_PHASE_START_MINIMUM_MS=300_000;
 
