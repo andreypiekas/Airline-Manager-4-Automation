@@ -173,7 +173,9 @@ export class DemandReader {
             status:'COMPLETE_BEFORE_DETAILS',observed:seenRoutes.size,expected:result.expectedRoutes,
             detailCandidates:pendingDetails.length
           }));
-          for(const {card,item} of pendingDetails){
+          // Start from the current last page; this avoids immediately
+          // resetting a valid cursor before reading its own aircraft.
+          for(const {card,item} of [...pendingDetails].reverse()){
             try{
               const target=this.page.locator('#routeMainList'+card.routeId);
               if(await target.count()!==1 || !(await target.isVisible())){
