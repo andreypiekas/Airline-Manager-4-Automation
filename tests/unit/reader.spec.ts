@@ -56,6 +56,60 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
   expect(errors).toEqual([]);
   await expect(page.locator('#routeMainList101')).toBeVisible();
 }
+
+async function nativeIncompleteFirstPage(page:Page,completes:boolean){
+  await page.route('**/*',route=>route.abort());
+  await page.setContent('<button>Routes (21)</button><div id="routeAction"><div id="routesContainer"></div></div>');
+  await page.evaluate((finish)=>{
+    const w=window as any;w.mutations=0;w.pageAdvances=0;
+    w.renderPage=(pageNumber:number)=>{
+      const root=document.querySelector('#routesContainer')!;
+      root.replaceChildren();
+      const append=(n:number)=>{
+        const id=100+n,row=document.createElement('div');
+        row.id='routeMainList'+id;row.className='row';
+        row.innerHTML='<span class="s-text">AAA - BBB</span>';
+        const link=document.createElement('a');
+        link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id="+(1000+id)+"','detailsAction');if(intro==0){$('#routeAction').hide();}");
+        const registration=document.createElement('span');
+        registration.id='acRegList'+(1000+id);registration.textContent='TEST-'+id;
+        link.append(registration,' - Test aircraft');row.append(link);
+        root.append(row);
+      };
+      if(pageNumber===0){
+        for(let i=1;i<=18;i++)append(i);
+        if(finish)setTimeout(()=>{append(19);append(20);},100);
+        const p=document.createElement('ul');p.className='pagination';
+        p.innerHTML='<a href="#">Next</a>';
+        p.querySelector('a')!.setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
+        root.append(p);
+      }else append(21);
+    };
+    w.Ajax=(url:string)=>{
+      if(url==="routes.php?start=20&sort="){w.pageAdvances++;w.renderPage(1);}
+    };
+    w.renderPage(0);
+  },completes);
+}
+test('native first page waits for all twenty visible routes before advancing',async({page})=>{
+  await nativeIncompleteFirstPage(page,true);
+  const r=await new DemandReader(page,750).collect();
+  expect(r.complete).toBe(true);
+  expect(r.aircraft).toHaveLength(21);
+  expect(r.aircraft.map(a=>a.routeId)).toEqual(Array.from({length:21},(_,i)=>String(101+i)));
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('permanently truncated native first page fails closed without any Next clicks',async({page})=>{
+  await nativeIncompleteFirstPage(page,false);
+  const r=await new DemandReader(page,250).collect();
+  expect(r.complete).toBe(false);
+  expect(r.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+  expect(r.aircraft).toHaveLength(0);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('reader matches inspected DOM, ignores ticket prices, reads remaining/total and next leg', async ({ page }) => {
   await fixture(page); const result = await new DemandReader(page, 400).collect();
   expect(result.complete).toBe(true); expect(result.aircraft).toHaveLength(2);

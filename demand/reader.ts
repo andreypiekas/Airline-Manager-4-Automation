@@ -66,6 +66,17 @@ export class DemandReader {
     const seenRoutes = new Set<string>();
     const verifiedPages: string[][] = [];
     const pendingDetails: Array<{card: RouteCard; item: AircraftSnapshot}> = [];
+    const nativePageSize=20;
+    const pageDiagnostics=async(index:number,expected:number)=>{
+      const ids=await visibleRouteIds().catch(()=>[] as string[]);
+      const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
+      const cursor=await next.count()===1?nativeNextStart(await next.getAttribute('onclick')||''):null;
+      return {
+        page:index,expected,visible:ids.length,unique:new Set(ids).size,
+        overlap:ids.filter(id=>seenRoutes.has(id)).length,nextStart:cursor,
+        total:result.expectedRoutes
+      };
+    };
     const visibleRouteIds=async()=>this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>
       es.filter(e=>!!e.getClientRects().length).map(e=>e.id.replace(/^routeMainList/,'')));
     const freshPage=async(required:number)=>{
@@ -118,14 +129,37 @@ export class DemandReader {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
         if (result.expectedRoutes > 0) await rows.first().waitFor({ state: 'visible', timeout: this.timeout });
+        if(pageIndex===0 && result.expectedRoutes>nativePageSize){
+          const initialNext=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
+          const isNativeFirst=await initialNext.count()===1 &&
+            nativeNextStart(await initialNext.getAttribute('onclick')||'')===nativePageSize;
+          if(isNativeFirst){
+            // The real AM4 Next control starts at offset 20. Never let a
+            // partially loaded 18/20 first page define the page size or
+            // authorize inventory traversal; wait for a full unique window.
+            try{
+              await expect.poll(async()=>{
+                const ids=await visibleRouteIds();
+                return ids.length===nativePageSize && new Set(ids).size===nativePageSize &&
+                  ids.every(id=>/^\d+$/.test(id));
+              },{timeout:this.timeout}).toBe(true);
+            }catch{
+              result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+              console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(0,nativePageSize)));
+              return result;
+            }
+          }
+        }
         if(pageIndex>0){
           stage='PAGINATION_PAGE_VERIFY';
           const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
           try{
             await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
           }catch{
+            console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
             stage='PAGINATION_PAGE_RECOVERY';
             if(!await restorePage(pageIndex,required,result.expectedRoutes)){
+              console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
               result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
               throw Error('PAGINATION_DUPLICATE');
             }
