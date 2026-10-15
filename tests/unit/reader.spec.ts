@@ -100,13 +100,72 @@ test('native first page waits for all twenty visible routes before advancing',as
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
-test('permanently truncated native first page fails closed without any Next clicks',async({page})=>{
+test('permanently truncated native first page remains blocked after read-only pagination',async({page})=>{
   await nativeIncompleteFirstPage(page,false);
   const r=await new DemandReader(page,250).collect();
   expect(r.complete).toBe(false);
   expect(r.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
   expect(r.aircraft).toHaveLength(0);
-  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+
+async function nativeShortWindowFixture(page:Page,lastPageSize:number){
+  await page.route('**/*',route=>route.abort());
+  await page.setContent('<button>Routes (66)</button><div id="routeAction"><div id="routesContainer"></div></div>');
+  await page.evaluate((lastSize)=>{
+    const w=window as any;
+    w.pageAdvances=0;w.mutations=0;
+    w.renderNative=(offset:number)=>{
+      const root=document.querySelector('#routesContainer')!;
+      root.replaceChildren();
+      const pageIndex=offset/20;
+      const count=pageIndex===0?19:pageIndex===3?lastSize:20;
+      const first=pageIndex===0?1:pageIndex===1?20:pageIndex===2?40:60;
+      for(let j=0;j<count;j++){
+        const id=first+j+100,aircraftId=id+1000;
+        const row=document.createElement('div');
+        row.id='routeMainList'+id;
+        row.className='row classPAX';
+        row.innerHTML='<span class="s-text">AAA - BBB</span>';
+        const link=document.createElement('a');
+        link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id="+aircraftId+"','detailsAction');if(intro==0){$('#routeAction').hide();}");
+        const reg=document.createElement('span');
+        reg.id='acRegList'+aircraftId;reg.textContent='TEST-'+id;
+        link.append(reg,' - Test aircraft');row.append(link);
+        root.append(row);
+      }
+      if(pageIndex<3){
+        const pager=document.createElement('ul');pager.className='pagination';
+        const next=document.createElement('a');next.textContent='Next';next.href='#';
+        next.setAttribute('onclick',"Ajax('routes.php?start="+(offset+20)+"&sort=','routeAction',this);");
+        pager.append(next);root.append(pager);
+      }
+    };
+    w.Ajax=(target:string)=>{
+      const match=target.match(/^routes\.php\?start=(\d+)&sort=$/);
+      if(match){w.pageAdvances++;w.renderNative(Number(match[1]));}
+    };
+    w.renderNative(0);
+  },lastPageSize);
+}
+test('19-row native first page can reconcile when all 66 unique aircraft are later visible',async({page})=>{
+  await nativeShortWindowFixture(page,7);
+  const result=await new DemandReader(page,70).collect();
+  expect(result.complete).toBe(true);
+  expect(result.aircraft).toHaveLength(66);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(66);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('19-row first page never authorizes inventory completion when one route is missing',async({page})=>{
+  await nativeShortWindowFixture(page,6);
+  const result=await new DemandReader(page,70).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft).toHaveLength(65);
+  expect(result.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
