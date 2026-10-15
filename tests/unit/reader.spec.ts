@@ -111,20 +111,22 @@ test('permanently truncated native first page remains blocked after read-only pa
 });
 
 
-async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageIndex=0,validCursor=true){
+async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageIndex=0,validCursor=true,boundaryRepeat=false,conflictingAircraft=false){
   await page.route('**/*',route=>route.abort());
   await page.setContent('<button>Routes (66)</button><div id="routeAction"><div id="routesContainer"></div></div>');
-  await page.evaluate(({lastSize,shortAt,cursorValid})=>{
+  await page.evaluate(({lastSize,shortAt,cursorValid,boundary,conflict})=>{
     const w=window as any;
     w.pageAdvances=0;w.mutations=0;
     w.renderNative=(offset:number)=>{
       const root=document.querySelector('#routesContainer')!;
       root.replaceChildren();
       const pageIndex=offset/20;
-      const count=pageIndex===shortAt?19:pageIndex===3?lastSize:20;
-      const first=shortAt===0?[1,20,40,60][pageIndex]:[1,21,41,60][pageIndex];
+      const count=boundary?(pageIndex===0||pageIndex===2?19:pageIndex===3?lastSize:20):
+        pageIndex===shortAt?19:pageIndex===3?lastSize:20;
+      const first=boundary?[1,19,39,58][pageIndex]:
+        shortAt===0?[1,20,40,60][pageIndex]:[1,21,41,60][pageIndex];
       for(let j=0;j<count;j++){
-        const id=first+j+100,aircraftId=id+1000;
+        const id=first+j+100,aircraftId=id+1000+(boundary&&conflict&&pageIndex===1&&j===0?5000:0);
         const row=document.createElement('div');
         row.id='routeMainList'+id;
         row.className='row classPAX';
@@ -148,7 +150,7 @@ async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageI
       if(match){w.pageAdvances++;w.renderNative(Number(match[1]));}
     };
     w.renderNative(0);
-  },{lastSize:lastPageSize,shortAt:shortPageIndex,cursorValid:validCursor});
+  },{lastSize:lastPageSize,shortAt:shortPageIndex,cursorValid:validCursor,boundary:boundaryRepeat,conflict:conflictingAircraft});
 }
 test('19-row native first page can reconcile when all 66 unique aircraft are later visible',async({page})=>{
   await nativeShortWindowFixture(page,7);
@@ -195,6 +197,34 @@ test('short intermediate page with unverified native Next never authorizes a col
   const result=await new DemandReader(page,90).collect();
   expect(result.complete).toBe(false);
   expect(result.aircraft.length).toBeLessThan(66);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('single duplicated boundary card after short page reconciles if all 66 identities verified',async({page})=>{
+  await nativeShortWindowFixture(page,9,0,true,true);
+  const r=await new DemandReader(page,90).collect();
+  expect(r.complete).toBe(true);
+  expect(r.aircraft).toHaveLength(66);
+  expect(new Set(r.aircraft.map(a=>a.routeId)).size).toBe(66);
+  expect(new Set(r.aircraft.map(a=>a.aircraftId)).size).toBe(66);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('boundary repeat with 65 distinct identities remains blocked despite native cursor',async({page})=>{
+  await nativeShortWindowFixture(page,8,0,true,true);
+  const r=await new DemandReader(page,90).collect();
+  expect(r.complete).toBe(false);
+  expect(r.aircraft.length).toBeLessThan(66);
+  expect(r.warnings).toContain('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('boundary repeat referring to a different aircraft is never reconciled',async({page})=>{
+  await nativeShortWindowFixture(page,9,0,true,true,true);
+  const r=await new DemandReader(page,90).collect();
+  expect(r.complete).toBe(false);
+  expect(r.aircraft.length).toBeLessThan(66);
+  expect(r.warnings).toContain('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
