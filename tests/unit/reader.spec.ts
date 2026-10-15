@@ -12,6 +12,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setContent(String.raw`<button>Routes (${options.badCount ? 9 : options.pages === 2 ? 3 : 2})</button>
+    <button id="popBtn1" onclick="$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);">Fleet</button>
     <div id="routeAction"><div id="routesContainer"></div></div><div id="detailsAction" style="display:none"></div>
     <script>
     window.mutations=0;
@@ -27,7 +28,7 @@ async function fixture(page: Page, options: FixtureOptions = {}) {
         (id===102?'Onboard: 40 / 0 / 0':'Demand: 90 / 0 / 0 <button id="listDepart'+id+'" onclick="window.mutations++">Depart</button>')+'</div>').join('')+
         '<ul class="pagination">'+(options.pages===2&&(index===0||options.staleNext)?'<a href="#" onclick="render('+(options.loop?0:index+1)+');return false">Next</a>':'')+'</ul>';
     }
-    const intro=0; function playSound(){} function $(selector){return {hide(){document.querySelector(selector).style.display='none'}}} function Ajax(url){show(Number(url.split('id=')[1])-1000)}
+    const intro=0; function playSound(){} function $(selector){return {removeClass(){return this},addClass(){return this},hide(){const el=document.querySelector(selector);if(el)el.style.display='none';return this}}} function Ajax(url){if(url==='routes.php'){const old=document.getElementById('routesContainer');const fresh=document.createElement('div');fresh.id='routesContainer';old.replaceWith(fresh);render(0);return;}show(Number(url.split('id=')[1])-1000)}
     function show(id) {
       if(options.missingDetails) return;
       document.getElementById('routeAction').style.display='none';
@@ -96,6 +97,23 @@ test('pagination reads every page once', async ({ page }) => {
   await fixture(page, { pages: 2 }); const r = await new DemandReader(page, 400).collect(); expect(r.complete).toBe(true); expect(r.aircraft).toHaveLength(3);
 });
 
+
+test('inventory pagination finishes before opening any aircraft details',async({page})=>{
+  await fixture(page,{pages:2});
+  await page.evaluate(()=>{
+    const w=window as any,show=w.show,render=w.render;
+    w.inventoryOrder=[];
+    w.show=(id:number)=>{w.inventoryOrder.push('details:'+id);show(id);};
+    w.render=(index:number)=>{if(index===1)w.inventoryOrder.push('page:second');render(index);};
+  });
+  const result=await new DemandReader(page,500).collect();
+  expect(result.complete).toBe(true);
+  const order=await page.evaluate(()=>(window as any).inventoryOrder as string[]);
+  expect(order[0]).toBe('page:second');
+  expect(order.some(item=>item.startsWith('details:'))).toBe(true);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
 
 test('a transient first Next click can be retried once without losing fleet identity',async ({page})=>{
   await fixture(page,{pages:2});
@@ -172,9 +190,8 @@ async function overlappingPageFixture(page:Page,permanent:boolean|number){
       hide(){const el=document.querySelector(selector) as HTMLElement|null;
         if(el)el.style.display='none';return this;}
     });
-    const button=document.createElement('button');button.id='popBtn1';button.textContent='Fleet';
+    const button=document.querySelector('#popBtn1')!;
     button.setAttribute('onclick',"$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);");
-    document.body.append(button);
     const menu=document.createElement('button');menu.id='mapRoutes';
     menu.textContent='Fleet main menu';
     menu.setAttribute('onclick',"hideAllWhenClick();menuFleet('Routes');");
@@ -198,7 +215,7 @@ test('late page overlap is recovered by replaying verified native Fleet pages',a
   expect(result.complete).toBe(true);
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
   expect(result.warnings).toEqual([]);
-  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 test('permanent late page overlap stays incomplete after bounded verified replay',async({page})=>{
@@ -221,7 +238,7 @@ test('clean fresh Fleet scan recovers if bounded page replay still failed',async
   expect(result.complete).toBe(true);
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
   expect(result.warnings).toEqual([]);
-  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(4);
   expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });

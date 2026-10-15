@@ -9,7 +9,7 @@ import { flightCountdownObservation } from '../optimization/flight-timing';
 import { departureControlShape } from './departure-control-evidence';
 import { readCurrentRouteFieldDiagnostics } from '../optimization/current-route-diagnostics';
 import { readFlightHistoryEvidence } from '../optimization/flight-history';
-import { routePageLimit, openFleetList } from './navigation';
+import { routePageLimit, openFleetList, findFleetRoute } from './navigation';
 import { GeneralUtils } from '../utils/general.utils';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
@@ -65,6 +65,7 @@ export class DemandReader {
     const result: CollectionResult = { aircraft: [], complete: false, expectedRoutes: null, warnings: [] };
     const seenRoutes = new Set<string>();
     const verifiedPages: string[][] = [];
+    const pendingDetails: Array<{card: RouteCard; item: AircraftSnapshot}> = [];
     const visibleRouteIds=async()=>this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>
       es.filter(e=>!!e.getClientRects().length).map(e=>e.id.replace(/^routeMainList/,'')));
     const freshPage=async(required:number)=>{
@@ -148,7 +149,9 @@ export class DemandReader {
         }), AIRCRAFT_DETAILS_CONTROL);
         if(pageIndex===0){firstPageSize=cards.length;maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));}
         verifiedPages.push(cards.map(card=>card.routeId));
-        stage='AIRCRAFT_DETAILS';
+        // Phase 1: capture the entire Fleet inventory before opening any
+        // aircraft detail. Detail/back AJAX callbacks can reorder or reset
+        // Fleet pagination and invalidate offsets while scanning pages.
         for (const card of cards) {
           if (seenRoutes.has(card.routeId)) throw new Error('PAGINATION_DUPLICATE');
           seenRoutes.add(card.routeId);
@@ -156,24 +159,43 @@ export class DemandReader {
             routeLabel: card.routeLabel, from: card.from, to: card.to, state: card.inflight ? 'inflight' : 'unavailable',
             capacity: null, onboard: card.inflight ? parseOnboard(card.onboardText) : null, remaining: null, dailyTotal: null, observedAt: new Date().toISOString() };
           result.aircraft.push(item);
-          if (!card.pax) { item.state = 'unavailable'; item.issue = 'Carga/charter nao suportado nesta versao.'; continue; }
-          if (!card.ready && !(this.includeInflightDetails && card.inflight)) continue;
-          try {
-            await this.readDetails(card, item);
-          } catch (error) {
-            const reason=detailFailureCode(error);
-            if(reason==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
-            // Never serialize raw exception messages, HTML, URLs, session data or credentials.
-            item.state = card.inflight ? 'inflight' : 'unavailable'; item.issue = 'Falha de carregamento, identidade ou leitura dos detalhes.';
-            const route=/^\d+$/.test(card.routeId) ? card.routeId : 'invalid-id';
-            result.warnings.push(`DETAILS_UNAVAILABLE:${route}`,`DETAILS_REASON:${route}:${reason}`);
-          } finally {
-            const back = this.page.locator('#route-name .glyphicons-chevron-left');
-            if (await back.isVisible()) await back.click({ timeout: this.timeout });
-            await this.page.locator('#routeAction').waitFor({ state: 'visible', timeout: this.timeout });
+          if (!card.pax) {
+            item.issue = 'Carga/charter nao suportado nesta versao.';
+          } else if(card.ready || (this.includeInflightDetails && card.inflight)){
+            pendingDetails.push({card,item});
           }
         }
         if(seenRoutes.size===result.expectedRoutes){
+          // Phase 2: inspect details only after the whole route inventory is
+          // verified. Re-open native Fleet only if the target row is absent.
+          stage='AIRCRAFT_DETAILS';
+          console.log('[FleetInventory] '+JSON.stringify({
+            status:'COMPLETE_BEFORE_DETAILS',observed:seenRoutes.size,expected:result.expectedRoutes,
+            detailCandidates:pendingDetails.length
+          }));
+          // Start from the current last page; this avoids immediately
+          // resetting a valid cursor before reading its own aircraft.
+          for(const {card,item} of [...pendingDetails].reverse()){
+            try{
+              const target=this.page.locator('#routeMainList'+card.routeId);
+              if(await target.count()!==1 || !(await target.isVisible())){
+                await openFleetList(this.page,this.timeout);
+                await findFleetRoute(this.page,item,this.timeout);
+              }
+              await this.readDetails(card,item);
+            }catch(error){
+              const reason=detailFailureCode(error);
+              if(reason==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+              item.state=card.inflight?'inflight':'unavailable';
+              item.issue='Falha de carregamento, identidade ou leitura dos detalhes.';
+              const route=/^\d+$/.test(card.routeId)?card.routeId:'invalid-id';
+              result.warnings.push('DETAILS_UNAVAILABLE:'+route,'DETAILS_REASON:'+route+':'+reason);
+            }finally{
+              const back=this.page.locator('#route-name .glyphicons-chevron-left');
+              if(await back.isVisible())await back.click({timeout:this.timeout});
+              await this.page.locator('#routeAction').waitFor({state:'visible',timeout:this.timeout});
+            }
+          }
           result.complete=true;
           return result;
         }
