@@ -64,7 +64,8 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     fleet:{seen:demand?.summary?.fleetSeen??aircraft.length,ready:aircraft.filter(a=>a.state==='ready').length,
       inflight:aircraft.filter(a=>a.state==='inflight').length,unavailable:aircraft.filter(a=>a.state==='unavailable').length},
     departures:{evaluated:execution?.summary?.evaluated??null,departed:execution?.summary?.departed??null,held:execution?.summary?.held??null,unknown:execution?.summary?.unknown??null,
-      fuelHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length},
+      fuelHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length,
+      timeBudgetHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&/^RUN_TIME_BUDGET_EXHAUSTED_BEFORE_/.test(x?.reason||'')).length},
     routes:{evaluated:routeExecution?.summary?.evaluated??null,rerouted:routeExecution?.summary?.rerouted??null,
       held:routeExecution?.summary?.held??null,unknown:routeExecution?.summary?.unknown??null,
       reviewDecisions:{
@@ -124,6 +125,7 @@ function markdown(d,states){
  if((d.departures.unknown||0)+(d.routes.unknown||0)+(d.pricing.unknown||0)>0)alerts.push('há resultado operacional incerto — nenhuma repetição automática');
  if(d.uiHealth.status!=='healthy'&&d.uiHealth.status!=='not_observed')alerts.push(`UI health: ${d.uiHealth.status}`);
  if(d.challenge?.detected)alerts.push('CAPTCHA/challenge detectado — execução interrompida sem tentativa de contorno');
+ if((d.departures.timeBudgetHeld||0)>0)alerts.push(`${d.departures.timeBudgetHeld} aeronave(s) adiadas pelo orçamento de tempo; reavaliar na próxima execução`);
  if(d.maintenance?.preventiveACheckRepairs==='held_safe')alerts.push(`manutenção em HOLD seguro: ${d.maintenance.holdReason||'motivo não informado'}`);
  if(d.campaign?.status==='unverified'||d.campaign?.allRequiredVerified===false)alerts.push('campanhas exigidas não confirmadas — decolagens bloqueadas');
  const lines=['# Airline Manager 4 — relatório operacional','',
@@ -134,7 +136,7 @@ function markdown(d,states){
   `| Bases | **${d.bases?.effective?.length??0}** ativas | ${d.bases?.effective?.length?d.bases.effective.map(safe).join(', '):'n/d'} · fonte ${safe(d.bases?.status||'n/d')} |`,
   `| Frota | **${fmt(d.fleet.seen)}** vistas | ${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis |`,
   `| Demanda | **${fmt(d.demand.sufficient)}/${fmt(d.demand.evaluated)}** suficientes | insuficientes ${fmt(d.demand.insufficient)} · indisponíveis ${fmt(d.demand.unavailable)} · coleta ${d.demand.collectionComplete===true?'completa':d.demand.collectionComplete===false?'incompleta':'n/d'} |`,
-  `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} · incertas ${fmt(d.departures.unknown)} |`,
+  `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}) · incertas ${fmt(d.departures.unknown)} |`,
   `| Pricing | **${fmt(d.pricing.adjusted)}** ajustadas | ${fmt(d.pricing.unchanged)} no alvo · incertas ${fmt(d.pricing.unknown)}${d.pricing.phaseHoldReason?` · fase: ${safe(d.pricing.phaseHoldReason)}`:''} |`,
   `| Rotas | **${fmt(d.routes.rerouted)}** reroutes confirmados | revisão: KEEP ${fmt(review.keep)} · HOLD ${fmt(review.hold)} · WOULD_REROUTE ${fmt(review.wouldReroute)} |`,
   `| UI | **${safe(d.uiHealth.status)}** | checks não saudáveis: ${fmt(d.uiHealth.unhealthyChecks)} |`,
@@ -198,6 +200,8 @@ function selfTest(){
  assert.deepEqual(dashboard.routes.reviewDecisions,{keep:1,hold:1,wouldReroute:0,unavailable:0});
  assert.equal(dashboard.routes.originUnavailable,1);assert.equal(dashboard.pricing.phaseHoldReason,'PRICING_INITIAL_COLLECTION_INCOMPLETE');
  assert.deepEqual(dashboard.quarantines,{departure:1,route:1,pricingRoute:1,supplyKinds:0});
+ assert.equal(dashboard.departures.timeBudgetHeld,1);
+ assert.ok(markdown(dashboard,[]).includes('1 aeronave(s) adiadas pelo orçamento de tempo'));
  assert.equal(dashboard.maintenance.preventiveACheckRepairs,'completed_observed');assert.deepEqual(dashboard.maintenance.evidence,{evaluated:22,selected:1,bulkCheckExecuted:true,repairEligible:false});assert.equal(dashboard.campaign.status,'verified_active');assert.equal(dashboard.campaign.allRequiredVerified,true);assert.equal(dashboard.campaign.departureAuthorized,true);
  fs.writeFileSync(path.join(dir,'operational-modules.json'),JSON.stringify({schemaVersion:1,maintenance:{status:'held_safe',observedAt:'2026-01-01T00:00:00.000Z',evidence:{reason:'UI_CONTROL_OBSCURED',mutationAuthorized:false}}}));
  const held=build(dir,path.join(dir,'missing.log'),path.join(dir,'journal.json')).dashboard;
