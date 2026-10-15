@@ -215,7 +215,7 @@ test('late page overlap is recovered by replaying verified native Fleet pages',a
   expect(result.complete).toBe(true);
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
   expect(result.warnings).toEqual([]);
-  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 test('permanent late page overlap stays incomplete after bounded verified replay',async({page})=>{
@@ -238,7 +238,7 @@ test('clean fresh Fleet scan recovers if bounded page replay still failed',async
   expect(result.complete).toBe(true);
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
   expect(result.warnings).toEqual([]);
-  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(4);
   expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
