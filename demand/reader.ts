@@ -379,6 +379,8 @@ export class DemandReader {
       result.warnings.push('COLLECTION_FAILED','COLLECTION_STAGE:'+stage,
         'COLLECTION_REASON:'+collectionFailureCode(error),
         'ROUTE_COUNT:'+seenRoutes.size+'/'+(result.expectedRoutes??'unknown'));
+      if(shortIntermediatePages.length && seenRoutes.size!==result.expectedRoutes)
+        result.warnings.push('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
     }
     return result;
   }
