@@ -405,3 +405,67 @@ export class DemandReader {
     }
   }
 }
+
+
+/**
+ * A second, clean, read-only scan is safer than merging partial pages from
+ * multiple AJAX states. It never repeats a purchase, departure or mutation.
+ * Only a complete, identity-checked scan with an unchanged total is usable.
+ */
+export async function collectFleetWithFreshRetry(
+  page: Page,
+  timeout = 10000,
+  includeInflightDetails = false,
+  retryDeadlineEpochMs?: number
+): Promise<CollectionResult> {
+  const first=await new DemandReader(page,timeout,includeInflightDetails).collect();
+  if(first.complete || !first.warnings.some(w=>
+    w.startsWith('PAGINATION_') ||
+    w==='ROUTE_COUNT_MISMATCH' ||
+    w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
+  )) return first;
+
+  const minimumRemainingMs=180000;
+  if(retryDeadlineEpochMs!==undefined && (
+    !Number.isSafeInteger(retryDeadlineEpochMs) ||
+    Date.now()+minimumRemainingMs>=retryDeadlineEpochMs
+  )){
+    first.warnings.push('FLEET_FRESH_RETRY_BUDGET_INSUFFICIENT');
+    return first;
+  }
+  console.warn('[FleetFreshRetry] '+JSON.stringify({
+    status:'START',observed:first.aircraft.length,expected:first.expectedRoutes
+  }));
+  try{
+    await openFleetList(page,timeout);
+    const second=await new DemandReader(page,timeout,includeInflightDetails).collect();
+    const validSecond=second.complete &&
+      second.expectedRoutes===first.expectedRoutes &&
+      typeof second.expectedRoutes==='number' &&
+      second.aircraft.length===second.expectedRoutes &&
+      new Set(second.aircraft.map(a=>a.routeId)).size===second.expectedRoutes &&
+      new Set(second.aircraft.map(a=>a.aircraftId)).size===second.expectedRoutes &&
+      second.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId));
+    console.warn('[FleetFreshRetry] '+JSON.stringify({
+      status:validSecond?'RECOVERED':'INCOMPLETE',
+      firstObserved:first.aircraft.length,secondObserved:second.aircraft.length,
+      firstExpected:first.expectedRoutes,secondExpected:second.expectedRoutes
+    }));
+    if(validSecond)return second;
+    second.complete=false;
+    second.warnings.push(
+      second.expectedRoutes!==first.expectedRoutes
+        ? 'FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED'
+        : 'FLEET_FRESH_RETRY_INCOMPLETE'
+    );
+    if(first.aircraft.length>second.aircraft.length){
+      first.warnings.push('FLEET_FRESH_RETRY_INCOMPLETE');
+      return first;
+    }
+    return second;
+  }catch(error){
+    if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+    first.warnings.push('FLEET_FRESH_RETRY_FAILED:'+collectionFailureCode(error));
+    return first;
+  }
+}

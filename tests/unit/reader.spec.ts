@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { DemandReader } from '../../demand/reader';
+import { DemandReader, collectFleetWithFreshRetry } from '../../demand/reader';
 import { FleetUtils } from '../../utils/fleet.utils';
 import { runDemandSimulation } from '../../demand/run';
 import { readDemandConfig } from '../../demand/config';
@@ -136,7 +136,7 @@ test('asynchronous Next page waits for every unique visible row, not only first 
 });
 
 
-async function overlappingPageFixture(page:Page,permanent:boolean){
+async function overlappingPageFixture(page:Page,permanent:boolean|number){
   await fixture(page,{pages:2});
   await page.evaluate((alwaysBad)=>{
     const w=window as any,render=w.render,ajax=w.Ajax;
@@ -149,7 +149,7 @@ async function overlappingPageFixture(page:Page,permanent:boolean){
       }
       if(index!==1)return;
       w.badPageAttempts++;
-      if(alwaysBad||w.badPageAttempts===1){
+      if(typeof alwaysBad==='number'?w.badPageAttempts<=alwaysBad:(alwaysBad||w.badPageAttempts===1)){
         const extra=document.createElement('div');extra.id='routeMainList101';
         extra.className='row classPAX';extra.innerHTML='<span class="s-text">AAA - BBB</span>';
         document.querySelector('#routesContainer')!.append(extra);
@@ -193,6 +193,35 @@ test('permanent late page overlap stays incomplete after bounded verified replay
   expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102']);
   expect(result.warnings).toContain('PAGINATION_OVERLAP_OR_INCOMPLETE');
   expect(result.warnings).toContain('PAGINATION_PAGE:1');
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('clean fresh Fleet scan recovers if bounded page replay still failed',async({page})=>{
+  // First complete attempt: initial Next and two bounded replays show overlapping
+  // route IDs. The *new* scan must discard all prior snapshots and succeed.
+  await overlappingPageFixture(page,3);
+  const result=await collectFleetWithFreshRetry(page,120,true);
+  expect(result.complete).toBe(true);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(result.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
+  await overlappingPageFixture(page,true);
+  const result=await collectFleetWithFreshRetry(page,120,true);
+  expect(result.complete).toBe(false);
+  expect(result.warnings).toContain('FLEET_FRESH_RETRY_INCOMPLETE');
+  expect(result.aircraft).toHaveLength(2);
+  expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(5);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('fresh Fleet retry is skipped without a conservative time budget',async({page})=>{
+  await overlappingPageFixture(page,true);
+  const result=await collectFleetWithFreshRetry(page,120,true,Date.now()+90000);
+  expect(result.complete).toBe(false);
+  expect(result.warnings).toContain('FLEET_FRESH_RETRY_BUDGET_INSUFFICIENT');
   expect(await page.evaluate(()=>(window as any).fleetReopens)).toBe(2);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });

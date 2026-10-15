@@ -316,7 +316,7 @@ test('All Operations', async ({ page }) => {
     if (!fleetOpened) {
       throw new Error('[Demand] Fleet/Routes nao abriu apos recuperacao da interface.');
     }
-    const simulation = await runDemandSimulationDetailed(page, demandConfig);
+    const simulation = await runDemandSimulationDetailed(page, demandConfig, {}, {collectionRetryDeadlineEpochMs:phaseDeadlineEpochMs});
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;
     if (process.env.AUTOMATION_MODE === 'semi-automatic') {
