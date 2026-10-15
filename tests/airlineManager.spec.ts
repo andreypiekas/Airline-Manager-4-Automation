@@ -11,7 +11,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, MUTATION_PHASE_START_MINIMUM_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -34,11 +34,11 @@ test('All Operations', async ({ page }) => {
     researchConfig();
     pricingExecutionSettings(); // Valida o contexto do ajuste real de tarifas antes do login.
     routeExecutionSettings(); // Valida o contexto de reroute real antes do login.
-    const runTimeoutMs=demandConfig.dryRun ? 600000 : 900000;
+    const runTimeoutMs=demandConfig.dryRun ? 600000 : LIVE_RUN_TIMEOUT_MS;
     const runStartedEpochMs=Date.now();
     test.setTimeout(runTimeoutMs);
     // Keep a hard finalization reserve for fresh confirmations, state save and artifacts.
-    const finalizationReserveMs=120000;
+    const finalizationReserveMs=LIVE_RUN_FINALIZATION_RESERVE_MS;
     const phaseDeadlineEpochMs=runStartedEpochMs+runTimeoutMs-finalizationReserveMs;
     const departureMutationDeadlineEpochMs=phaseDeadlineEpochMs;
     const phaseBudgetsMs={
