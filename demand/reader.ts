@@ -67,6 +67,7 @@ export class DemandReader {
     const verifiedPages: string[][] = [];
     const pendingDetails: Array<{card: RouteCard; item: AircraftSnapshot}> = [];
     const nativePageSize=20;
+    let firstWindowShort=false;
     const pageDiagnostics=async(index:number,expected:number)=>{
       const ids=await visibleRouteIds().catch(()=>[] as string[]);
       const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
@@ -134,9 +135,11 @@ export class DemandReader {
           const isNativeFirst=await initialNext.count()===1 &&
             nativeNextStart(await initialNext.getAttribute('onclick')||'')===nativePageSize;
           if(isNativeFirst){
-            // The real AM4 Next control starts at offset 20. Never let a
-            // partially loaded 18/20 first page define the page size or
-            // authorize inventory traversal; wait for a full unique window.
+            // A native start=20 callback verifies the page *offset*, not that
+            // exactly 20 route cards were rendered. A persistently short
+            // window must never define the page size. A read-only inventory
+            // may traverse all native offsets, but NO mutation is authorized
+            // until the final 1:1 aircraft/route inventory is reconciled.
             try{
               await expect.poll(async()=>{
                 const ids=await visibleRouteIds();
@@ -144,9 +147,17 @@ export class DemandReader {
                   ids.every(id=>/^\d+$/.test(id));
               },{timeout:this.timeout}).toBe(true);
             }catch{
-              result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
-              console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(0,nativePageSize)));
-              return result;
+              const ids=await visibleRouteIds();
+              firstWindowShort=ids.length<nativePageSize;
+              console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+                ...await pageDiagnostics(0,nativePageSize),
+                status:'INITIAL_NATIVE_WINDOW_SHORT_READ_ONLY_CONTINUE'
+              }));
+              if(!firstWindowShort || !ids.length || new Set(ids).size!==ids.length ||
+                 !ids.every(id=>/^[1-9]\d*$/.test(id))){
+                result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+                return result;
+              }
             }
           }
         }
@@ -181,7 +192,13 @@ export class DemandReader {
             onboardText: ((el as HTMLElement).innerText.match(/Onboard:[^\n]*/) || [''])[0].trim(),
             inflight: visible && /Onboard\s*:/.test((el as HTMLElement).innerText) };
         }), AIRCRAFT_DETAILS_CONTROL);
-        if(pageIndex===0){firstPageSize=cards.length;maxPages=routePageLimit(result.expectedRoutes,Math.max(1,cards.length));}
+        if(pageIndex===0){
+          const nativeNext=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
+          const usesNative20=result.expectedRoutes>nativePageSize &&
+            await nativeNext.count()===1 && nativeNextStart(await nativeNext.getAttribute('onclick')||'')===nativePageSize;
+          firstPageSize=usesNative20?nativePageSize:cards.length;
+          maxPages=routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize));
+        }
         verifiedPages.push(cards.map(card=>card.routeId));
         // Phase 1: capture the entire Fleet inventory before opening any
         // aircraft detail. Detail/back AJAX callbacks can reorder or reset
@@ -230,6 +247,9 @@ export class DemandReader {
               await this.page.locator('#routeAction').waitFor({state:'visible',timeout:this.timeout});
             }
           }
+          if(firstWindowShort) console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+            status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes
+          }));
           result.complete=true;
           return result;
         }
@@ -304,7 +324,8 @@ export class DemandReader {
           return result;
         }
       }
-      result.warnings.push('PAGINATION_LIMIT');
+      result.warnings.push('PAGINATION_LIMIT','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
+      if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
     } catch(error) {
       if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
       result.warnings.push('COLLECTION_FAILED','COLLECTION_STAGE:'+stage,
