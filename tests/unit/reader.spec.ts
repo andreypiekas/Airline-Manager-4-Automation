@@ -111,18 +111,18 @@ test('permanently truncated native first page remains blocked after read-only pa
 });
 
 
-async function nativeShortWindowFixture(page:Page,lastPageSize:number){
+async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageIndex=0,validCursor=true){
   await page.route('**/*',route=>route.abort());
   await page.setContent('<button>Routes (66)</button><div id="routeAction"><div id="routesContainer"></div></div>');
-  await page.evaluate((lastSize)=>{
+  await page.evaluate(({lastSize,shortAt,cursorValid})=>{
     const w=window as any;
     w.pageAdvances=0;w.mutations=0;
     w.renderNative=(offset:number)=>{
       const root=document.querySelector('#routesContainer')!;
       root.replaceChildren();
       const pageIndex=offset/20;
-      const count=pageIndex===0?19:pageIndex===3?lastSize:20;
-      const first=pageIndex===0?1:pageIndex===1?20:pageIndex===2?40:60;
+      const count=pageIndex===shortAt?19:pageIndex===3?lastSize:20;
+      const first=shortAt===0?[1,20,40,60][pageIndex]:[1,21,41,60][pageIndex];
       for(let j=0;j<count;j++){
         const id=first+j+100,aircraftId=id+1000;
         const row=document.createElement('div');
@@ -139,7 +139,7 @@ async function nativeShortWindowFixture(page:Page,lastPageSize:number){
       if(pageIndex<3){
         const pager=document.createElement('ul');pager.className='pagination';
         const next=document.createElement('a');next.textContent='Next';next.href='#';
-        next.setAttribute('onclick',"Ajax('routes.php?start="+(offset+20)+"&sort=','routeAction',this);");
+        next.setAttribute('onclick',"Ajax('routes.php?start="+(cursorValid?offset+20:offset+21)+"&sort=','routeAction',this);");
         pager.append(next);root.append(pager);
       }
     };
@@ -148,7 +148,7 @@ async function nativeShortWindowFixture(page:Page,lastPageSize:number){
       if(match){w.pageAdvances++;w.renderNative(Number(match[1]));}
     };
     w.renderNative(0);
-  },lastPageSize);
+  },{lastSize:lastPageSize,shortAt:shortPageIndex,cursorValid:validCursor});
 }
 test('19-row native first page can reconcile when all 66 unique aircraft are later visible',async({page})=>{
   await nativeShortWindowFixture(page,7);
@@ -166,6 +166,35 @@ test('19-row first page never authorizes inventory completion when one route is 
   expect(result.aircraft).toHaveLength(59); // final 6/7 page rejected, never marked complete
   expect(result.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('19-route third native page reconciles only after all 66 unique aircraft are read',async({page})=>{
+  await nativeShortWindowFixture(page,7,2);
+  const result=await new DemandReader(page,90).collect();
+  expect(result.complete).toBe(true);
+  expect(result.expectedRoutes).toBe(66);
+  expect(result.aircraft).toHaveLength(66);
+  expect(new Set(result.aircraft.map(a=>a.routeId)).size).toBe(66);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(66);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('19-route third page with 65 unique aircraft remains blocked',async({page})=>{
+  await nativeShortWindowFixture(page,6,2);
+  const result=await new DemandReader(page,90).collect();
+  expect(result.complete).toBe(false);
+  expect(result.expectedRoutes).toBe(66);
+  expect(result.aircraft.length).toBeLessThan(66);
+  expect(result.warnings).toContain('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('short intermediate page with unverified native Next never authorizes a collection',async({page})=>{
+  await nativeShortWindowFixture(page,7,2,false);
+  const result=await new DemandReader(page,90).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft.length).toBeLessThan(66);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
