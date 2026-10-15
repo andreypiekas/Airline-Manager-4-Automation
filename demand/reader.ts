@@ -253,9 +253,18 @@ export class DemandReader {
               await this.page.locator('#routeAction').waitFor({state:'visible',timeout:this.timeout});
             }
           }
-          if(firstWindowShort) console.warn('[FleetPageDiagnostic] '+JSON.stringify({
-            status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes
-          }));
+          if(firstWindowShort){
+            const validRouteIds=result.aircraft.every(a=>/^[1-9]\\d*$/.test(a.routeId));
+            const validAircraftIds=result.aircraft.every(a=>/^[1-9]\\d*$/.test(a.aircraftId)) &&
+              new Set(result.aircraft.map(a=>a.aircraftId)).size===result.expectedRoutes;
+            if(!validRouteIds||!validAircraftIds){
+              result.warnings.push('FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED');
+              return result;
+            }
+            console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+              status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes
+            }));
+          }
           result.complete=true;
           return result;
         }
