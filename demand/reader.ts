@@ -68,6 +68,7 @@ export class DemandReader {
     const pendingDetails: Array<{card: RouteCard; item: AircraftSnapshot}> = [];
     const nativePageSize=20;
     let firstWindowShort=false;
+    const shortIntermediatePages:number[]=[];
     const pageDiagnostics=async(index:number,expected:number)=>{
       const ids=await visibleRouteIds().catch(()=>[] as string[]);
       const rendered=await this.page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es=>({
@@ -173,12 +174,36 @@ export class DemandReader {
             await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
           }catch{
             console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
-            stage='PAGINATION_PAGE_RECOVERY';
-            if(!await restorePage(pageIndex,required,result.expectedRoutes)){
-              console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
-              result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
-              if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
-              throw Error('PAGINATION_DUPLICATE');
+            // Some native AM4 Fleet windows persistently render fewer than 20
+            // routes even though their Next callback advances by exactly 20.
+            // A short intermediate window is safe for READ-ONLY inventory
+            // traversal only. It does not itself authorize any mutation:
+            // the final inventory still has to match Routes(N) and contain
+            // N distinct valid aircraft identities from this single scan.
+            const ids=await visibleRouteIds();
+            const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
+            const nativeNext=await next.count()===1 && await next.isVisible() &&
+              nativeNextStart(await next.getAttribute('onclick')||'')===(pageIndex+1)*nativePageSize;
+            const safeShort=pageIndex<maxPages-1 &&
+              required===nativePageSize &&
+              ids.length>0 && ids.length<required &&
+              new Set(ids).size===ids.length &&
+              ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
+              nativeNext;
+            if(safeShort){
+              shortIntermediatePages.push(pageIndex);
+              console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+                status:'INTERMEDIATE_NATIVE_WINDOW_SHORT_READ_ONLY_CONTINUE',
+                ...await pageDiagnostics(pageIndex,required)
+              }));
+            }else{
+              stage='PAGINATION_PAGE_RECOVERY';
+              if(!await restorePage(pageIndex,required,result.expectedRoutes)){
+                console.warn('[FleetPageDiagnostic] '+JSON.stringify(await pageDiagnostics(pageIndex,required)));
+                result.warnings.push('PAGINATION_OVERLAP_OR_INCOMPLETE','PAGINATION_PAGE:'+pageIndex);
+                if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+                throw Error('PAGINATION_DUPLICATE');
+              }
             }
           }
         }
@@ -253,16 +278,23 @@ export class DemandReader {
               await this.page.locator('#routeAction').waitFor({state:'visible',timeout:this.timeout});
             }
           }
-          if(firstWindowShort){
-            const validRouteIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.routeId));
+          if(firstWindowShort||shortIntermediatePages.length>0){
+            // Short native windows are never sufficient evidence on their
+            // own. The *entire* inventory must contain both N unique routes
+            // and N unique aircraft IDs with strictly valid identities.
+            const validRouteIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.routeId)) &&
+              new Set(result.aircraft.map(a=>a.routeId)).size===result.expectedRoutes;
             const validAircraftIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)) &&
               new Set(result.aircraft.map(a=>a.aircraftId)).size===result.expectedRoutes;
-            if(!validRouteIds||!validAircraftIds){
+            const headingNow=await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout});
+            const totalStillStable=integerText(headingNow.match(/\((\d+)\)/)![1])===result.expectedRoutes;
+            if(!validRouteIds||!validAircraftIds||!totalStillStable){
               result.warnings.push('FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED');
               return result;
             }
             console.warn('[FleetPageDiagnostic] '+JSON.stringify({
-              status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes
+              status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes,
+              shortFirst:firstWindowShort,shortIntermediatePages
             }));
           }
           result.complete=true;
@@ -341,6 +373,7 @@ export class DemandReader {
       }
       result.warnings.push('PAGINATION_LIMIT','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
       if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+      if(shortIntermediatePages.length)result.warnings.push('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
     } catch(error) {
       if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
       result.warnings.push('COLLECTION_FAILED','COLLECTION_STAGE:'+stage,
