@@ -49,6 +49,16 @@ Déficit negativo de CO₂ não é usado automaticamente como justificativa para
 
 Nenhuma chamada direta é usada como substituto do controle nativo observado.
 
+## Proxima oportunidade de preco favoravel (Fuel)
+
+A cada consulta do mercado, o relatorio informa a **proxima cotacao listada nas proximas 24 horas** que fique **menor ou igual ao teto efetivo de compra** de Fuel. Esse teto pode ser menor que `MAX_FUEL_PRICE` por politica adaptativa. Igualdade permite compra, desde que os demais requisitos sejam atendidos.
+
+A comparacao inclui preco atual observado ao vivo, teto configurado, teto efetivo, diferenca por 1.000 lbs, percentual potencial e horario local UTC-3. O relatorio tambem identifica a cotacao mais barata listada na mesma janela, quando houver.
+
+**Atencao:** o calendario integrado foi extraido de PDF e encontra-se marcado como `ocr-unverified`. Os precos e horarios futuros sao apenas **referencias nao verificadas**; podem estar errados, incompletos ou nao corresponder ao mercado atual. Nao e possivel garantir que o preco futuro ocorrera. O bot **nao espera nem agenda uma compra com base no calendario**: toda compra continua exigindo cotacao live, saldo, estoque e gates operacionais.
+
+A informacao aparece em `supply-report.json/.md`, no dashboard e no resumo Telegram, sem enviar uma mensagem separada a cada reexecucao. Se nenhum horario elegivel for listado, nao inventa previsao nem extrapola para o proximo mes.
+
 ## Resultado incerto
 
 Se uma compra foi tentada, mas o resultado não pôde ser confirmado:
