@@ -359,6 +359,9 @@ export class DemandReader {
           result.warnings.push('ROUTE_COUNT_MISMATCH','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
           if(firstWindowShort||shortIntermediatePages.length)
             result.warnings.push('PAGINATION_NATIVE_OFFSET_GAP');
+          if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+          if(shortIntermediatePages.length)result.warnings.push('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
+          if(overlapPages.length)result.warnings.push('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
           console.warn('[FleetPageDiagnostic] '+JSON.stringify({
             status:'NATIVE_OFFSETS_EXHAUSTED_INVENTORY_INCOMPLETE',
             observed:seenRoutes.size,expected:result.expectedRoutes,
