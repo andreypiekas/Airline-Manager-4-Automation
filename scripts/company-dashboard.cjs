@@ -99,6 +99,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
       allRequiredVerified:modules?.campaign?.evidence?.allRequiredVerified??null,
       departureAuthorized:modules?.campaign?.evidence?.departureAuthorized??null},
     supplies:supply,
+    fuelPriceWindow:supplies?.fuelPriceWindow??null,
     uiHealth:{status:uiHealth?.status??'not_observed',mutationAuthorized:uiHealth?.mutationAuthorized??null,
       unhealthyChecks:(uiHealth?.checks||[]).filter(x=>x?.status!=='healthy').length},
     challenge:{detected:challenge?.detected===true,reason:challenge?.reason??null,stage:challenge?.stage??null},
@@ -143,6 +144,9 @@ function markdown(d,states){
   `| Orçamento de tempo | **${d.timeBudget.blocked===0?'OK':'BLOQUEIOS'}** | ${fmt(d.timeBudget.blocked)} fase(s) bloqueada(s) de ${fmt(d.timeBudget.decisions)} |`,'',
   '## Suprimentos e módulos','',
   `- ${supplyText('Fuel',fuel)}.`,`- ${supplyText('CO₂',co2)}.`,
+  d.fuelPriceWindow?.nextEligible
+    ? `- **Proxima janela estimada de Fuel (nao verificada):** ${d.fuelPriceWindow.nextEligible.localDate} ${d.fuelPriceWindow.nextEligible.localTime} UTC-3, referencia ${fmt(d.fuelPriceWindow.nextEligible.pricePer1000)}/1k; agora ${fmt(d.fuelPriceWindow.currentPricePer1000)}/1k; teto configurado ${fmt(d.fuelPriceWindow.configuredMax)}/1k, teto efetivo ${fmt(d.fuelPriceWindow.effectiveMax)}/1k; diferenca potencial ${fmt(d.fuelPriceWindow.nextEligible.savingVsCurrentPer1000)}/1k (${d.fuelPriceWindow.nextEligible.savingVsCurrentPercent??'n/d'}%). **Exige preco live para comprar.**`
+    : '- **Janela estimada de Fuel:** sem horario listado elegivel nas proximas 24h, ou referencia indisponivel. A compra depende do preco live.',
   `- Manutenção/A-check/reparos: **${safe(d.maintenance.preventiveACheckRepairs)}**${d.maintenance.holdReason?` — ${safe(d.maintenance.holdReason)}`:d.maintenance.evidence?` — avaliadas ${fmt(d.maintenance.evidence.evaluated)}, selecionadas ${fmt(d.maintenance.evidence.selected)}, bulk check ${d.maintenance.evidence.bulkCheckExecuted===true?'executado':d.maintenance.evidence.bulkCheckExecuted===false?'não necessário':'n/d'}, reparo elegível ${d.maintenance.evidence.repairEligible===true?'sim':d.maintenance.evidence.repairEligible===false?'não':'n/d'}`:''}.`,
   `- Campanhas: **${safe(d.campaign.status)}**${d.campaign.evidence?.ecoFriendly?` — Eco ${d.campaign.evidence.ecoFriendly.verifiedActive===true?'✅':'❌'} · Reputation ${d.campaign.evidence.airlineReputation?.required===false?'n/a':d.campaign.evidence.airlineReputation?.verifiedActive===true?'✅':'❌'} · departure ${d.campaign.departureAuthorized===true?'autorizado':'bloqueado'}`:''}.`,'',
   '## Segurança e atenção','',
