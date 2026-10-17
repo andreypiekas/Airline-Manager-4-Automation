@@ -273,8 +273,8 @@ export class DemandReader {
         // Routes(N) must not drift while paging, even transiently. Opening
         // details may later reset the Fleet list and visually restore an
         // earlier heading, so checking N only after the scan is insufficient.
-        const currentHeading=(await this.page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/}).innerText({timeout:this.timeout})).trim();
-        const currentCount=/^Routes\\s*\\((\\d+)\\)$/.exec(currentHeading);
+        const currentHeading=(await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout})).trim();
+        const currentCount=/^Routes\s*\((\d+)\)$/.exec(currentHeading);
         if(!currentCount||integerText(currentCount[1])!==result.expectedRoutes){
           console.warn('[FleetPageDiagnostic] '+JSON.stringify({
             status:'ROUTE_COUNT_CHANGED_DURING_SCAN',page:pageIndex,
