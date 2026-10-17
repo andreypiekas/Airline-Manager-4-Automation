@@ -270,6 +270,20 @@ export class DemandReader {
           firstPageSize=usesNative20?nativePageSize:cards.length;
           maxPages=routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize));
         }
+        // Routes(N) must not drift while paging, even transiently. Opening
+        // details may later reset the Fleet list and visually restore an
+        // earlier heading, so checking N only after the scan is insufficient.
+        const currentHeading=(await this.page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/}).innerText({timeout:this.timeout})).trim();
+        const currentCount=/^Routes\\s*\\((\\d+)\\)$/.exec(currentHeading);
+        if(!currentCount||integerText(currentCount[1])!==result.expectedRoutes){
+          console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+            status:'ROUTE_COUNT_CHANGED_DURING_SCAN',page:pageIndex,
+            expected:result.expectedRoutes,
+            observedHeading:currentCount?integerText(currentCount[1]):null
+          }));
+          result.warnings.push('FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN');
+          return result;
+        }
         verifiedPages.push(cards.map(card=>card.routeId));
         // Phase 1: capture the entire Fleet inventory before opening any
         // aircraft detail. Detail/back AJAX callbacks can reorder or reset
