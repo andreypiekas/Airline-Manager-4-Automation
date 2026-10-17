@@ -78,6 +78,20 @@ function importantMessage(dir='test-results/demand',botResult=process.env.BOT_RE
   return 'AM4 alerta: '+[...new Set(events)].join('; ')+'.';
 }
 
+function fuelWindowMessage(window) {
+  if(!window || !window.nextEligible)return null;
+  const p=window.nextEligible;
+  const fmt=v=>Number.isSafeInteger(v)?String(v):'n/d';
+  const percent=Number.isFinite(p.savingVsCurrentPercent)?String(p.savingVsCurrentPercent)+'%':'n/d';
+  const confidence=window.status==='ocr-unverified'?'referencia OCR NAO verificada':'referencia sem garantia';
+  const now=window.currentWithinEffectiveLimit===true?'atual ja atende teto':'aguardar cotacao live';
+  return '⛽ Proximo Fuel estimado: '+p.localDate+' '+p.localTime+' (UTC-3) $'+fmt(p.pricePer1000)+'/1k'
+    +' | atual $'+fmt(window.currentPricePer1000)+'/1k | limite $'+fmt(window.configuredMax)
+    +(window.effectiveMax!==window.configuredMax?' (efetivo $'+fmt(window.effectiveMax)+')':'')
+    +' | economia potencial $'+fmt(p.savingVsCurrentPer1000)+'/1k ('+percent+')'
+    +' | '+confidence+'; '+now+'. Compra so com preco live e demais validacoes.';
+}
+
 function semiAutomaticMessage(dir){
   const semi=read(dir,'semi-automatic-summary.json');
   if(process.env.AUTOMATION_MODE!=='semi-automatic'||semi?.mode!=='semi-automatic')return null;
@@ -93,6 +107,8 @@ function semiAutomaticMessage(dir){
     'Nenhuma operação foi executada.',
     'Para executar: GitHub Actions → Run workflow → marque confirm_semiautomatic_execution.'
   ];
+  const forecastLine=fuelWindowMessage(read(dir,'company-dashboard.json')?.fuelPriceWindow);
+  if(forecastLine)lines.splice(4,0,forecastLine);
   if(process.env.WORKFLOW_URL)lines.push('Abrir Actions: '+process.env.WORKFLOW_URL);
   return lines.join('\n').slice(0,3500);
 }
@@ -123,6 +139,8 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
     return label+': '+bits.join(' • ');
   };
   if(d?.supplies)lines.push('Suprimentos: '+supply('Fuel',d.supplies.fuel)+' | '+supply('CO₂',d.supplies.co2));
+  const fuelForecastLine=fuelWindowMessage(d?.fuelPriceWindow);
+  if(fuelForecastLine)lines.push(fuelForecastLine);
   if(d?.campaign){
     const eco=d.campaign.evidence?.ecoFriendly?.verifiedActive===true?'✅':d.campaign.evidence?.ecoFriendly?'❌':'n/d';
     const rep=d.campaign.evidence?.airlineReputation?.required===false?'n/a':d.campaign.evidence?.airlineReputation?.verifiedActive===true?'✅':d.campaign.evidence?.airlineReputation?'❌':'n/d';
@@ -174,4 +192,4 @@ if (require.main === module) main().catch(error => {
   process.exitCode = 1;
 });
 
-module.exports = { message, importantMessage, runSummaryMessage };
+module.exports = { message, importantMessage, runSummaryMessage, fuelWindowMessage };
