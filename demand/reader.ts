@@ -270,6 +270,20 @@ export class DemandReader {
           firstPageSize=usesNative20?nativePageSize:cards.length;
           maxPages=routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize));
         }
+        // Routes(N) must not drift while paging, even transiently. Opening
+        // details may later reset the Fleet list and visually restore an
+        // earlier heading, so checking N only after the scan is insufficient.
+        const currentHeading=(await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout})).trim();
+        const currentCount=/^Routes\s*\((\d+)\)$/.exec(currentHeading);
+        if(!currentCount||integerText(currentCount[1])!==result.expectedRoutes){
+          console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+            status:'ROUTE_COUNT_CHANGED_DURING_SCAN',page:pageIndex,
+            expected:result.expectedRoutes,
+            observedHeading:currentCount?integerText(currentCount[1]):null
+          }));
+          result.warnings.push('FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN');
+          return result;
+        }
         verifiedPages.push(cards.map(card=>card.routeId));
         // Phase 1: capture the entire Fleet inventory before opening any
         // aircraft detail. Detail/back AJAX callbacks can reorder or reset
@@ -644,17 +658,38 @@ export async function collectFleetWithFreshRetry(
     console.warn('[FleetFreshRetry] '+JSON.stringify({status:'PAGE_RELOADED_AUTHENTICATED'}));
     await openFleetList(page,timeout);
     const second=await new DemandReader(page,timeout,includeInflightDetails).collect();
-    const validSecond=second.complete &&
-      second.expectedRoutes===first.expectedRoutes &&
+    // Routes(N) may legitimately change between two *separate* scans while
+    // flights return or a route is added. Never mix cards across snapshots.
+    // A fresh, fully reconciled scan may replace the incomplete scan only
+    // when N is stable throughout the second scan, at most ONE route changed,
+    // and all N identities were read from the second scan itself.
+    const validCounts=typeof first.expectedRoutes==='number' &&
+      Number.isSafeInteger(first.expectedRoutes) && first.expectedRoutes>0 &&
       typeof second.expectedRoutes==='number' &&
+      Number.isSafeInteger(second.expectedRoutes) && second.expectedRoutes>0;
+    const changedTotal=validCounts && first.expectedRoutes!==second.expectedRoutes;
+    const countChangeWithinBound=validCounts &&
+      Math.abs(second.expectedRoutes!-first.expectedRoutes!)<=1;
+    // Re-read the native total AFTER the second detailed scan. A fresh scan
+    // is not valid if the heading changed again during inspection.
+    let currentTotal:number|null=null;
+    try{
+      const raw=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
+      const match=/^Routes\s*\((\d+)\)$/.exec(raw);
+      if(match)currentTotal=integerText(match[1]);
+    }catch{/* Unverified total always fails closed. */}
+    const validSecond=second.complete && validCounts && countChangeWithinBound &&
+      currentTotal===second.expectedRoutes &&
       second.aircraft.length===second.expectedRoutes &&
       new Set(second.aircraft.map(a=>a.routeId)).size===second.expectedRoutes &&
       new Set(second.aircraft.map(a=>a.aircraftId)).size===second.expectedRoutes &&
       second.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId));
     console.warn('[FleetFreshRetry] '+JSON.stringify({
-      status:validSecond?'RECOVERED':'INCOMPLETE',
+      status:validSecond?(changedTotal?'RECOVERED_FRESH_COUNT_CHANGED':'RECOVERED'):'INCOMPLETE',
       firstObserved:first.aircraft.length,secondObserved:second.aircraft.length,
-      firstExpected:first.expectedRoutes,secondExpected:second.expectedRoutes
+      firstExpected:first.expectedRoutes,secondExpected:second.expectedRoutes,
+      headingAfterSecond:currentTotal,identityComplete:second.complete,
+      changedTotal,countChangeWithinBound
     }));
     if(validSecond)return second;
     second.complete=false;

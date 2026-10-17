@@ -446,6 +446,60 @@ test('clean fresh Fleet scan recovers if bounded page replay still failed',async
   expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+async function freshRetryChangingRouteCount(page:Page,additionalRoutes:1|2,changeAgain=false){
+  await overlappingPageFixture(page,3);
+  await page.evaluate(({extra,lateChange})=>{
+    const w=window as any,original=w.render;
+    w.render=(index:number)=>{
+      if(w.reloadCount>0 && index===0){
+        document.querySelector('button')!.textContent='Routes ('+(3+extra)+')';
+      }
+      original(index);
+      if(w.reloadCount>0 && index===1){
+        for(let i=0;i<extra;i++){
+          const routeId=104+i,aircraftId=1104+i;
+          const card=document.createElement('div');
+          card.id='routeMainList'+routeId;
+          card.className='row classPAX';
+          card.innerHTML='<span class="s-text">AAA - BBB</span>';
+          const link=document.createElement('a');
+          link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id="+aircraftId+"','detailsAction');if(intro==0){$('#routeAction').hide();}");
+          const reg=document.createElement('span');
+          reg.id='acRegList'+aircraftId;reg.textContent='TEST-'+routeId;
+          link.append(reg);card.append(link);
+          document.querySelector('#routesContainer')!.append(card);
+        }
+        if(lateChange)document.querySelector('button')!.textContent='Routes ('+(4+extra)+')';
+      }
+    };
+  },{extra:additionalRoutes,lateChange:changeAgain});
+}
+test('new complete retry with +1 route and stable current heading replaces earlier partial snapshot',async({page})=>{
+  await freshRetryChangingRouteCount(page,1);
+  const result=await collectFleetWithFreshRetry(page,160,true);
+  expect(result.complete).toBe(true);
+  expect(result.expectedRoutes).toBe(4);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103','104']);
+  expect(result.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('retry total changing by more than one is not silently accepted',async({page})=>{
+  await freshRetryChangingRouteCount(page,2);
+  const result=await collectFleetWithFreshRetry(page,160,true);
+  expect(result.complete).toBe(false);
+  expect(result.expectedRoutes).toBe(5);
+  expect(result.warnings).toContain('FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('retry with a second mid-inspection heading change is not accepted',async({page})=>{
+  await freshRetryChangingRouteCount(page,1,true);
+  const result=await collectFleetWithFreshRetry(page,160,true);
+  expect(result.complete).toBe(false);
+  expect(result.warnings).toContain('FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
   await overlappingPageFixture(page,true);
   const result=await collectFleetWithFreshRetry(page,120,true);
