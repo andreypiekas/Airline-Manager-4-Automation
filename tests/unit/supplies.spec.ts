@@ -76,3 +76,19 @@ test('negative CO2 never bypasses cash reserve, quantity ceiling or safe-number 
  expect(()=>expectedSupplyStockAfterPurchase(stock,'co2',23_064_200)).toThrow('SUPPLY_POST_PURCHASE_EXPECTATION_INVALID');
  expect(planPurchase({...stock,pricePer1000:104,holding:0,remainingCapacity:0,balance:100},'co2',c).reason).toBe('STORAGE_FULL');
 });
+
+test('explicit CO2 price ceiling is not silently lowered by historical adaptive cap',async()=>{
+ const {supplyCapsForRun}=await import('../../supplies/run');
+ const obs=[40,50,60,70,80].map((pricePer1000,i)=>({
+  eventId:'co2-s'+i,type:'supply-observation' as const,kind:'co2' as const,
+  observedAt:'2026-10-16T20:00:00Z',pricePer1000,holding:100,
+  remainingCapacity:10_000,balance:1_000_000
+ }));
+ const configured=supplyConfig({MAX_CO2_PRICE:'120',MAX_FUEL_PRICE:'550'});
+ const caps=supplyCapsForRun({schemaVersion:1,scope:'test',entries:[],supplyObservations:obs},configured);
+ expect(caps.co2.effectiveMax).toBe(120);
+ expect(caps.co2.source).toBe('configured-cap');
+ const snapshot={pricePer1000:104,holding:-13_013_699,remainingCapacity:10_050_500,balance:168_815_066};
+ const actualConfig={...configured,maxPrice:{fuel:caps.fuel.effectiveMax,co2:caps.co2.effectiveMax}};
+ expect(planPurchase(snapshot,'co2',actualConfig).quantity).toBe(23_064_199);
+});
