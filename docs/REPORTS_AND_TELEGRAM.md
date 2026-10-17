@@ -100,6 +100,12 @@ O resumo não deve incluir:
 - conteúdo de formulários;
 - outros dados sensíveis da sessão.
 
+## Proxima janela de combustivel no Telegram
+
+Quando existir um preco futuro de referencia abaixo ou igual ao teto efetivo nas proximas 24 horas, o resumo apresenta uma linha `Proximo Fuel estimado` com data/hora UTC-3, preco de referencia por 1.000 lbs, preco live atual, `MAX_FUEL_PRICE`, eventual teto adaptativo, diferenca e percentual potencial.
+
+Essa linha aparece tanto no resumo normal quanto no modo semiautomatico e **nao representa reserva de compra**. O calendario de referencia nao esta verificado (OCR), e o texto da notificacao explicita isso. Mesmo se o preco atual ja estiver dentro do teto, a compra segue as verificacoes habituais de estoque, caixa e interface. Sem horario listado, nao ha alerta de oportunidade para evitar falsas promessas.
+
 ## Alertas
 
 O dashboard/notifier pode destacar:
