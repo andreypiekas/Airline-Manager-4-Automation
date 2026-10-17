@@ -111,9 +111,9 @@ test('permanently truncated native first page remains blocked after read-only pa
 });
 
 
-async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageIndex=0,validCursor=true,boundaryRepeat=false,conflictingAircraft=false){
+async function nativeShortWindowFixture(page:Page,lastPageSize:number,shortPageIndex=0,validCursor=true,boundaryRepeat=false,conflictingAircraft=false,totalRoutes=66){
   await page.route('**/*',route=>route.abort());
-  await page.setContent('<button>Routes (66)</button><div id="routeAction"><div id="routesContainer"></div></div>');
+  await page.setContent('<button>Routes ('+totalRoutes+')</button><div id="routeAction"><div id="routesContainer"></div></div>');
   await page.evaluate(({lastSize,shortAt,cursorValid,boundary,conflict})=>{
     const w=window as any;
     w.pageAdvances=0;w.mutations=0;
@@ -165,7 +165,7 @@ test('19-row first page never authorizes inventory completion when one route is 
   await nativeShortWindowFixture(page,6);
   const result=await new DemandReader(page,70).collect();
   expect(result.complete).toBe(false);
-  expect(result.aircraft).toHaveLength(59); // final 6/7 page rejected, never marked complete
+  expect(result.aircraft).toHaveLength(65); // native last 6/6 is valid; 65/66 still fails closed
   expect(result.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
@@ -189,6 +189,7 @@ test('19-route third page with 65 unique aircraft remains blocked',async({page})
   expect(result.expectedRoutes).toBe(66);
   expect(result.aircraft.length).toBeLessThan(66);
   expect(result.warnings).toContain('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
+  expect(result.warnings).toContain('ROUTE_COUNT_MISMATCH');
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
@@ -225,6 +226,37 @@ test('boundary repeat referring to a different aircraft is never reconciled',asy
   expect(r.complete).toBe(false);
   expect(r.aircraft.length).toBeLessThan(66);
   expect(r.warnings).toContain('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('real Routes(67): 20+20+19+7 is a valid native last page but must not authorize 66/67 routes',async({page})=>{
+  await nativeShortWindowFixture(page,7,2,true,false,false,67);
+  const result=await new DemandReader(page,80).collect();
+  expect(result.complete).toBe(false);
+  expect(result.expectedRoutes).toBe(67);
+  expect(result.aircraft).toHaveLength(66);
+  expect(new Set(result.aircraft.map(a=>a.routeId)).size).toBe(66);
+  expect(result.warnings).toContain('ROUTE_COUNT_MISMATCH');
+  expect(result.warnings).toContain('PAGINATION_NATIVE_OFFSET_GAP');
+  expect(result.warnings).not.toContain('COLLECTION_REASON:PAGINATION_DUPLICATE');
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(3);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('Routes(67) with last page containing the missing route can complete all 67 identities',async({page})=>{
+  await nativeShortWindowFixture(page,8,2,true,false,false,67);
+  const result=await new DemandReader(page,80).collect();
+  expect(result.complete).toBe(true);
+  expect(result.aircraft).toHaveLength(67);
+  expect(new Set(result.aircraft.map(a=>a.routeId)).size).toBe(67);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(67);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('Routes(67) with six cards in native last seven slots must still fail closed',async({page})=>{
+  await nativeShortWindowFixture(page,6,2,true,false,false,67);
+  const result=await new DemandReader(page,80).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft.length).toBeLessThan(67);
+  expect(result.warnings).toContain('PAGINATION_OVERLAP_OR_INCOMPLETE');
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
