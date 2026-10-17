@@ -14,15 +14,15 @@ async function fixture(page:Page,variant=''){
  });
  await page.goto('https://www.airlinemanager.com/synthetic');
  await page.setContent(`<span id="headerAccount">100000</span><div id="smallMainMenu"><div onclick="hideAllWhenClick();popup('fuel.php','Fuel',false,false,true);"><div><span>Fuel</span></div></div></div><div><span id="popTitle" style="display:none">Fuel</span><button onclick="closePop();document.getElementById('rewardPopup').style.display='none';">Close</button></div><div id="rewardPopup"></div><button id="popBtn2"></button><div id="fuelMain" style="display:none"></div><script>
- const variant=${JSON.stringify(variant)};let kind='fuel';window.purchases=0;let amount=1000;let stock={fuel:1000,co2:1000};let cash=100000;
- function price(){return variant==='expensive'?2000:kind==='fuel'?500:100}
+ const variant=${JSON.stringify(variant)};let kind='fuel';window.purchases=0;let amount=1000;let stock={fuel:1000,co2:variant==='negative-co2'?-13013699:1000};let cash=variant==='negative-co2'?168815066:100000;
+ function price(){return variant==='expensive'?2000:kind==='fuel'?500:variant==='negative-co2'?104:100}
  function discount(){return variant==='discount-fuel'&&kind==='fuel'?25:variant==='discount-co2'&&kind==='co2'?10:variant==='overcharge-fuel'&&kind==='fuel'?25:0}
  function totalCost(qty){return Math.round(qty*price()/1000*(1-discount()/100))+(variant==='overcharge-fuel'&&kind==='fuel'?123:0)}
  function priceClock(){return variant==='rollover-co2'&&kind==='co2'?'00:00:05':'00:15:00'}
  function $(s){return {val(){return document.querySelector(s).value},removeClass(){return this},addClass(){return this},hide(){return this}}}
  function playSound(){}function hideAllWhenClick(){}function closePop(){document.querySelector('#popTitle').style.display='none';document.querySelector('#fuelMain').style.display='none'}
- function render(){const unit=kind==='fuel'?'Lbs':'Quotas';const p=document.querySelector('#fuelMain');p.style.display='block';document.querySelector('#popTitle').style.display='block';document.querySelector('#headerAccount').textContent=String(cash);
- p.innerHTML='<div>'+(kind==='fuel'?'Current price':'Quota cost')+'</div><b>$ '+price()+'</b><div>PRICE CHANGE</div><span>'+priceClock()+'</span><div>CAPACITY</div><span>'+(10000-stock[kind])+' / 10000 '+unit+'</span><div>HOLDING</div><span>'+stock[kind]+' '+unit+'</span><div>TOTAL PRICE</div><span id="total">$'+price()+'</span><div>AMOUNT TO PURCHASE</div><input type="tel" id="amountInput" placeholder="Amount to purchase" value="1000"><button id="purchase">Purchase</button><div>'+(kind==='fuel'?'Fuel price per 1,000 Lbs':'Co2 quota cost per 1,000')+'</div>';
+ function render(){const unit=kind==='fuel'?'Lbs':'Quotas';const p=document.querySelector('#fuelMain');p.style.display='block';document.querySelector('#popTitle').style.display='block';document.querySelector('#headerAccount').textContent=String(cash);const capacity=kind==='co2'&&variant==='negative-co2'?10050500:10000;
+ p.innerHTML='<div>'+(kind==='fuel'?'Current price':'Quota cost')+'</div><b>$ '+price()+'</b><div>PRICE CHANGE</div><span>'+priceClock()+'</span><div>CAPACITY</div><span>'+(capacity-Math.max(0,stock[kind]))+' / '+capacity+' '+unit+'</span><div>HOLDING</div><span>'+stock[kind]+' '+unit+'</span><div>TOTAL PRICE</div><span id="total">$'+price()+'</span><div>AMOUNT TO PURCHASE</div><input type="tel" id="amountInput" placeholder="Amount to purchase" value="1000"><button id="purchase">Purchase</button><div>'+(kind==='fuel'?'Fuel price per 1,000 Lbs':'Co2 quota cost per 1,000')+'</div>';
  document.querySelector('#total').textContent='$'+totalCost(1000);
  if(discount()){const discountLabel=document.createElement('span');discountLabel.id='discount';discountLabel.textContent='-'+discount()+'%';document.querySelector('#total').after(discountLabel)}
  document.querySelector('#purchase').setAttribute('onclick',variant==='callback'?'window.purchases++':kind==='fuel'?${JSON.stringify(purchaseCallback('fuel'))}:${JSON.stringify(purchaseCallback('co2'))});
@@ -35,6 +35,28 @@ async function fixture(page:Page,variant=''){
 async function execute(page:Page,dryRun:boolean){const dir=await mkdtemp(join(tmpdir(),'am4-supply-'));return {dir,run:()=>runSupplies(page,dryRun,env,dir,new SupplyPort(page,800))};}
 test('dry run quotes both supplies without a purchase',async({page})=>{await fixture(page);const {dir,run}=await execute(page,true);try{const r=await run();expect(r.entries.map(e=>e.status)).toEqual(['would_buy','would_buy']);expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);}finally{await rm(dir,{recursive:true,force:true})}});
 test('production confirms both stocks and payments, rejects duplicate execution',async({page})=>{await fixture(page);const {dir,run}=await execute(page,false);try{const r=await run();expect(r.entries.map(e=>e.status)).toEqual(['purchased','purchased']);expect(r.entries[1].before.balance).toBe(95500);await expect(run()).rejects.toThrow();expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);}finally{await rm(dir,{recursive:true,force:true})}});
+
+test('real negative CO2 debt is purchased to zero and positive tank is filled, with native confirmation',async({page})=>{
+ await fixture(page,'negative-co2');
+ const {dir,run}=await execute(page,false);
+ try{
+  const report=await run();
+  expect(report.halted).toBe(false);
+  expect(report.entries.map(e=>e.status)).toEqual(['purchased','purchased']);
+  const co2=report.entries[1];
+  expect(co2).toMatchObject({
+   kind:'co2',reason:'STOCK_AND_PAYMENT_CONFIRMED',
+   before:{pricePer1000:104,holding:-13_013_699,remainingCapacity:10_050_500},
+   plan:{quantity:23_064_199},
+   after:{holding:10_050_500,remainingCapacity:0}
+  });
+  expect(co2.before.balance-co2.after.balance).toBe(co2.quotedCost);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);
+  const persisted=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
+  expect(persisted.entries[1].status).toBe('purchased');
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+
 test('pre-click CO2 price rollover is a safe skip and never becomes an uncertain purchase',async({page})=>{
  await fixture(page,'rollover-co2');
  const {dir,run}=await execute(page,false);
@@ -132,12 +154,14 @@ test('pre-mutation supply failure persists passive diagnostic',async({page})=>{
  }finally{await rm(dir,{recursive:true,force:true})}
 });
 test('missing panel and inconsistent storage are rejected',async({page})=>{await fixture(page);await expect(new SupplyPort(page,100).snapshot('fuel')).rejects.toThrow();expect(()=>parseSupplyText('CURRENT PRICE\n$ 500\nPRICE CHANGE\nCAPACITY\n900 / 1000 Lbs\nHOLDING\n200 Lbs','fuel',1000)).toThrow();});
-test('negative CO2 holding skips expensive market and blocks cheap purchase until deficit policy is verified',()=>{
+test('negative CO2 holding respects price ceiling and includes debt plus capacity when cheap',()=>{
  const snapshot={pricePer1000:160,holding:-3226210,remainingCapacity:4820500,balance:14737661};
  const expensive=supplyConfig({...env,MAX_CO2_PRICE:'120'});
  expect(planPurchase(snapshot,'co2',expensive).reason).toBe('PRICE_ABOVE_LIMIT');
  const cheap=supplyConfig({...env,MAX_CO2_PRICE:'200'});
- expect(planPurchase(snapshot,'co2',cheap)).toMatchObject({quantity:0,reason:'CO2_DEFICIT_PURCHASE_POLICY_UNVERIFIED'});
+ expect(planPurchase(snapshot,'co2',cheap)).toMatchObject({
+  quantity:8_046_710,reason:'PRICE_AND_BUDGET_ACCEPTED'
+ });
 });
 
 test('real Actions reruns rejected before opening the supply menu',async({page})=>{await fixture(page);const dir=await mkdtemp(join(tmpdir(),'am4-supply-'));try{await expect(runSupplies(page,false,{...env,GITHUB_RUN_ATTEMPT:'2'},dir)).rejects.toThrow('RERUN');expect(await page.locator('#fuelMain').isVisible()).toBe(false);}finally{await rm(dir,{recursive:true,force:true})}});
