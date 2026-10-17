@@ -215,7 +215,7 @@ export class DemandReader {
             const lastNativeMatchesOffset=isLastNativePage &&
               ids.length>=nativeRemainder && ids.length<required &&
               new Set(ids).size===ids.length &&
-              ids.every(id=>/^[1-9]\\d*$/.test(id)&&!seenRoutes.has(id)) &&
+              ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
               await next.count()===0;
             if(lastNativeMatchesOffset){
               console.warn('[FleetPageDiagnostic] '+JSON.stringify({
