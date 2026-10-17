@@ -28,10 +28,16 @@ export function planPurchase(s:SupplySnapshot,kind:Commodity,c:SupplyConfig):Pur
     (kind==='fuel'&&s.holding<0)||
     !Number.isSafeInteger(Math.max(0,s.holding)+s.remainingCapacity))return hold('INVALID_DATA');
   if(s.pricePer1000>c.maxPrice[kind])return hold('PRICE_ABOVE_LIMIT');
-  if(kind==='co2'&&s.holding<0)return hold('CO2_DEFICIT_PURCHASE_POLICY_UNVERIFIED');
-  if(s.remainingCapacity===0)return hold('STORAGE_FULL');
+  // The game displays negative CO2 holding as debt, but reports the full
+  // positive tank capacity as free. A purchase must repay that debt FIRST
+  // and then fill the physical tank; capacity only decreases once holding
+  // becomes positive. Never apply this rule to fuel.
+  const deficit=kind==='co2'&&s.holding<0?-s.holding:0;
+  const desiredQuantity=deficit+s.remainingCapacity;
+  if(!Number.isSafeInteger(desiredQuantity)||desiredQuantity<0)return hold('INVALID_DATA');
+  if(desiredQuantity===0)return hold('STORAGE_FULL');
   const available=Math.max(0,s.balance-c.minCashReserve);
-  const target=Math.min(s.remainingCapacity,c.maxQuantity[kind]||s.remainingCapacity);
+  const target=Math.min(desiredQuantity,c.maxQuantity[kind]||desiredQuantity);
   const cost=Math.ceil(target*s.pricePer1000/1000);
   if(!Number.isSafeInteger(cost))return hold('INVALID_DATA');
   // Preserve original fuel policy: fill when affordable; otherwise spend at most half of available cash.
@@ -40,3 +46,22 @@ export function planPurchase(s:SupplySnapshot,kind:Commodity,c:SupplyConfig):Pur
   if(!Number.isSafeInteger(quantity)||quantity<=0)return hold('INSUFFICIENT_BUDGET');
   return {quantity,estimatedCost:Math.ceil(quantity*s.pricePer1000/1000),budget,reason:'PRICE_AND_BUDGET_ACCEPTED'};
 }
+
+/** Expected native inventory arithmetic: CO2 debt is repaid before tank space fills. */
+export function expectedSupplyStockAfterPurchase(
+  s:Pick<SupplySnapshot,'holding'|'remainingCapacity'>,
+  kind:Commodity,quantity:number
+):Pick<SupplySnapshot,'holding'|'remainingCapacity'> {
+  const oldHolding=s.holding;
+  if(!Number.isSafeInteger(oldHolding)||!Number.isSafeInteger(s.remainingCapacity)||
+    s.remainingCapacity<0||!Number.isSafeInteger(quantity)||quantity<=0||
+    (kind==='fuel'&&oldHolding<0))throw Error('SUPPLY_POST_PURCHASE_EXPECTATION_INVALID');
+  const holding=oldHolding+quantity;
+  const occupiedBefore=Math.max(0,oldHolding);
+  const occupiedAfter=Math.max(0,holding);
+  const remainingCapacity=s.remainingCapacity-(occupiedAfter-occupiedBefore);
+  if(!Number.isSafeInteger(holding)||!Number.isSafeInteger(remainingCapacity)||
+    remainingCapacity<0)throw Error('SUPPLY_POST_PURCHASE_EXPECTATION_INVALID');
+  return {holding,remainingCapacity};
+}
+

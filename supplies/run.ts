@@ -9,14 +9,22 @@ import {optimizationConfig} from '../optimization/report';
 import {appendSupplyObservation,appendUncertainSupplyOperation,readUnresolvedSupplyKinds,unresolvedSupplyKinds,validateReturnJournal} from '../optimization/return-journal';
 import {adaptiveSupplyCap} from './adaptive-policy';
 import {calendarReference,loadReference,type FuelCalendar} from '../optimization/reference-data';
+/** CO2 follows its explicit configured ceiling; historical data only tightens fuel. */
+export function supplyCapsForRun(journal:Parameters<typeof adaptiveSupplyCap>[0],config:ReturnType<typeof supplyConfig>){
+ const co2History=adaptiveSupplyCap(journal,'co2',config.maxPrice.co2);
+ return {
+   fuel:adaptiveSupplyCap(journal,'fuel',config.maxPrice.fuel),
+   co2:{...co2History,effectiveMax:config.maxPrice.co2,source:'configured-cap' as const}
+ };
+}
 export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv=process.env,directory='test-results/demand',port=new SupplyPort(page)){
  const config=supplyConfig(env);const optimization=optimizationConfig(env);
  if(!dryRun)executionEnvironment({...readDemandConfig(env),dryRun:false},env);
  await mkdir(directory,{recursive:true});
  const journal=optimization.returnJournal?validateReturnJournal(JSON.parse(await readFile(join(optimization.returnJournal.directory,'return-journal.json'),'utf8')),optimization.returnJournal.scope,new Date()):{schemaVersion:1 as const,scope:'disabled',entries:[]};
  const blockedSupplyKinds=unresolvedSupplyKinds(journal);
- const adaptive={fuel:adaptiveSupplyCap(journal,'fuel',config.maxPrice.fuel),co2:adaptiveSupplyCap(journal,'co2',config.maxPrice.co2)};
- const effectiveConfig={...config,maxPrice:{fuel:adaptive.fuel.effectiveMax,co2:adaptive.co2.effectiveMax}};
+ const adaptive=supplyCapsForRun(journal,config);
+ const effectiveConfig={...config,maxPrice:{fuel:adaptive.fuel.effectiveMax,co2:config.maxPrice.co2}};
  const now=new Date(),local=new Date(now.getTime()-180*60000),monthLength=new Date(Date.UTC(local.getUTCFullYear(),local.getUTCMonth()+1,0)).getUTCDate();
  const calendar=await loadReference<FuelCalendar>(monthLength===30?'fuel-calendar-30.json':'fuel-calendar-31.json');
  const forecast={fuel:calendarReference(now,calendar,'fuel'),co2:calendarReference(now,calendar,'co2')};

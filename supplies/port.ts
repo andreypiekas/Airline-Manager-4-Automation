@@ -1,6 +1,6 @@
 import {expect, Page} from '@playwright/test';
 import {closeReadOnlyPopup} from '../optimization/cost-reference-reader';
-import {Commodity, SupplySnapshot} from './policy';
+import {Commodity, SupplySnapshot, expectedSupplyStockAfterPurchase} from './policy';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 const normalize=(s:string)=>s.replace(/\s/g,'');
 export class SupplyPreMutationError extends Error {
@@ -156,7 +156,11 @@ export class SupplyPort {
    if(await received.finished())throw Error('SUPPLY_OUTCOME_UNKNOWN');
    await this.open(kind);
    const after=await this.snapshot(kind);
-   if(after.holding!==before.holding+quantity||after.remainingCapacity!==before.remainingCapacity-quantity||
+   // Negative CO2 quota holding represents a debt, not occupied storage.
+   // Repay the deficit first, then fill capacity. The same exact live
+   // post-purchase verification remains mandatory as for positive stock.
+   const expected=expectedSupplyStockAfterPurchase(before,kind,quantity);
+   if(after.holding!==expected.holding||after.remainingCapacity!==expected.remainingCapacity||
      Math.abs((before.balance-after.balance)-quote.total)>1)throw Error('SUPPLY_OUTCOME_UNKNOWN');
    return after;
   }catch(error){
