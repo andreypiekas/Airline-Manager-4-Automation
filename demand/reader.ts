@@ -172,6 +172,13 @@ export class DemandReader {
         if(pageIndex>0){
           stage='PAGINATION_PAGE_VERIFY';
           const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
+          // Native offset pagination counts slots, not the rows captured by
+          // preceding pages. If a prior native window rendered 19/20 cards,
+          // the last start=60 page of Routes(67) naturally contains 7 cards;
+          // requiring 8 here falsely reports PAGINATION_DUPLICATE.
+          const nativeRemainder=Math.min(firstPageSize,
+            result.expectedRoutes-pageIndex*firstPageSize);
+          const isLastNativePage=pageIndex===maxPages-1;
           try{
             await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
           }catch{
@@ -205,7 +212,19 @@ export class DemandReader {
               verifiedPages[pageIndex-1]?.includes(overlaps[0])===true &&
               (pageIndex===1?firstWindowShort:shortIntermediatePages.includes(pageIndex-1)) &&
               ids.every(id=>/^[1-9]\d*$/.test(id)) && nativeNext;
-            if(safeShort){
+            const lastNativeMatchesOffset=isLastNativePage &&
+              ids.length>=nativeRemainder && ids.length<required &&
+              new Set(ids).size===ids.length &&
+              ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
+              await next.count()===0;
+            if(lastNativeMatchesOffset){
+              console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+                status:'FINAL_NATIVE_OFFSET_WINDOW_READ_ONLY',
+                page:pageIndex,nativeOffset:pageIndex*firstPageSize,
+                nativeExpected:nativeRemainder,remainingForFullCoverage:required,
+                visible:ids.length,missingForFullCoverage:required-ids.length
+              }));
+            }else if(safeShort){
               shortIntermediatePages.push(pageIndex);
               console.warn('[FleetPageDiagnostic] '+JSON.stringify({
                 status:'INTERMEDIATE_NATIVE_WINDOW_SHORT_READ_ONLY_CONTINUE',
@@ -338,6 +357,17 @@ export class DemandReader {
         const next = this.page.locator('#routesContainer .pagination').getByRole('link', { name: 'Next', exact: true });
         if (pageIndex===maxPages-1 || await next.count()!==1) {
           result.warnings.push('ROUTE_COUNT_MISMATCH','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
+          if(firstWindowShort||shortIntermediatePages.length)
+            result.warnings.push('PAGINATION_NATIVE_OFFSET_GAP');
+          if(firstWindowShort)result.warnings.push('PAGINATION_INITIAL_PAGE_INCOMPLETE');
+          if(shortIntermediatePages.length)result.warnings.push('PAGINATION_INTERMEDIATE_PAGE_INCOMPLETE');
+          if(overlapPages.length)result.warnings.push('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
+          console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+            status:'NATIVE_OFFSETS_EXHAUSTED_INVENTORY_INCOMPLETE',
+            observed:seenRoutes.size,expected:result.expectedRoutes,
+            pagesScanned:verifiedPages.length,shortFirst:firstWindowShort,
+            shortIntermediatePages
+          }));
           return result;
         }
         const firstId = cards[0]?.routeId;
