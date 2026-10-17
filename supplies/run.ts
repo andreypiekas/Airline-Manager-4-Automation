@@ -9,6 +9,7 @@ import {optimizationConfig} from '../optimization/report';
 import {appendSupplyObservation,appendUncertainSupplyOperation,readUnresolvedSupplyKinds,unresolvedSupplyKinds,validateReturnJournal} from '../optimization/return-journal';
 import {adaptiveSupplyCap} from './adaptive-policy';
 import {calendarReference,loadReference,type FuelCalendar} from '../optimization/reference-data';
+import {fuelPriceWindow,type FuelPriceWindow} from './fuel-price-window';
 /** CO2 follows its explicit configured ceiling; historical data only tightens fuel. */
 export function supplyCapsForRun(journal:Parameters<typeof adaptiveSupplyCap>[0],config:ReturnType<typeof supplyConfig>){
  const co2History=adaptiveSupplyCap(journal,'co2',config.maxPrice.co2);
@@ -29,13 +30,20 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
  const calendar=await loadReference<FuelCalendar>(monthLength===30?'fuel-calendar-30.json':'fuel-calendar-31.json');
  const forecast={fuel:calendarReference(now,calendar,'fuel'),co2:calendarReference(now,calendar,'co2')};
  if(!dryRun){const marker=await open(join(directory,'supplies.started'),'wx');await marker.close();}
- const report:{dryRun:boolean;enabled:boolean;entries:any[];halted:boolean;adaptive:any;forecast:any}={dryRun,enabled:config.enabled,entries:[],halted:false,adaptive,forecast};
+ const initialWindow=fuelPriceWindow(now,calendar,null,config.maxPrice.fuel,effectiveConfig.maxPrice.fuel);
+ const report:{dryRun:boolean;enabled:boolean;entries:any[];halted:boolean;adaptive:any;forecast:any;fuelPriceWindow:FuelPriceWindow}={dryRun,enabled:config.enabled,entries:[],halted:false,adaptive,forecast,fuelPriceWindow:initialWindow};
  const save=async()=>{
   const file=join(directory,'supply-report.json');await writeFile(file+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(file+'.tmp',file);
   await writeFile(join(directory,'supply-report.md'),['# Combustivel e CO2','',`Simulacao: ${dryRun}; habilitado: ${config.enabled}.`,'',
    '| Recurso | Preco / 1.000 | Teto efetivo inclusivo | Politica | Quantidade | Resultado |','| --- | --- | --- | --- | --- | --- |',
    ...report.entries.map(e=>`| ${e.kind} | ${e.before?.pricePer1000??'—'} | ${effectiveConfig.maxPrice[e.kind as Commodity]} | ${adaptive[e.kind as Commodity].source} (${adaptive[e.kind as Commodity].samples} amostras) | ${e.plan?.quantity??0} | ${e.status}: ${e.reason} |`),'',
-   `Calendario de referencia: fuel=${forecast.fuel.status}, CO2=${forecast.co2.status}. O calendario nunca autoriza compra; exige preco live.`,''].join('\n'));
+   `Calendario de referencia: fuel=${forecast.fuel.status}, CO2=${forecast.co2.status}. O calendario nunca autoriza compra; exige preco live.`,
+   '', '## Proxima janela de combustivel (referencia nao confirmada)', '',
+   `Preco live: ${report.fuelPriceWindow.currentPricePer1000??'n/d'} /1k; limite configurado: ${report.fuelPriceWindow.configuredMax}; teto efetivo: ${report.fuelPriceWindow.effectiveMax}.`,
+   report.fuelPriceWindow.nextEligible
+    ? `Proximo horario listado dentro do teto efetivo: ${report.fuelPriceWindow.nextEligible.localDate} ${report.fuelPriceWindow.nextEligible.localTime} (UTC-3), preco previsto ${report.fuelPriceWindow.nextEligible.pricePer1000}/1k, economia potencial ${report.fuelPriceWindow.nextEligible.savingVsCurrentPer1000??'n/d'} por 1k (${report.fuelPriceWindow.nextEligible.savingVsCurrentPercent??'n/d'}%).`
+    : 'Nenhum horario listado abaixo do teto efetivo nas proximas 24 horas (ou calendario incompleto).',
+   report.fuelPriceWindow.note,''].join('\n'));
  };
  await save();if(!config.enabled)return report;
  try {
@@ -43,6 +51,8 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
    const entry:any={kind,status:'reading',reason:'PENDING',before:null,plan:null};report.entries.push(entry);
    await save();
    await port.open(kind);entry.before=await port.snapshot(kind);
+   if(kind==='fuel')report.fuelPriceWindow=fuelPriceWindow(new Date(),calendar,entry.before.pricePer1000,config.maxPrice.fuel,effectiveConfig.maxPrice.fuel);
+   await save();
    if(!dryRun&&optimization.returnJournal){
     await appendSupplyObservation(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'',kind,entry.before);
     if(blockedSupplyKinds.has(kind)){
