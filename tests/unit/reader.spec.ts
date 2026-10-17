@@ -105,7 +105,7 @@ test('permanently truncated native first page remains blocked after read-only pa
   const r=await new DemandReader(page,250).collect();
   expect(r.complete).toBe(false);
   expect(r.warnings).toContain('PAGINATION_INITIAL_PAGE_INCOMPLETE');
-  expect(r.aircraft).toHaveLength(18); // partial read-only evidence is retained, never authorized
+  expect(r.aircraft).toHaveLength(19); // native final page is captured read-only; collection remains blocked
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
