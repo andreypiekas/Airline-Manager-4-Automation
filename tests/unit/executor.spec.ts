@@ -21,6 +21,27 @@ test('persist intent before exactly one native click and confirm onboard separat
  expect(r.summary).toMatchObject({departed:1,unknown:0});expect(r.entries[0].demand?.occupancyPercentage).toBe(100);expect(r.entries[0].actualOnboard?.Y).toBe(88);
  await expect(s.executor.run()).rejects.toThrow('EXECUTION_ALREADY_USED');expect(s.clicks()).toBe(1);
 });
+
+test('confirmed departure records a gross fare estimate without using it for authorization',async()=>{
+ const live=snapshot({fares:{source:'inspected-auto-control',automatic:{Y:110,J:0,F:0},current:{Y:120,J:0,F:0}}});
+ const s=setup({prepared:live});
+ const r=await s.executor.run();
+ expect(s.clicks()).toBe(1);
+ expect(r.entries[0].status).toBe('departed');
+ expect(r.entries[0].estimatedGrossTicketRevenue).toBe(88*120);
+ expect(s.saved.find(x=>x.entries[0]?.status==='attempting')?.entries[0].estimatedGrossTicketRevenue).toBeUndefined();
+});
+
+test('same airport route on separate route/aircraft IDs is not a duplicate identity blocker',async()=>{
+ const sharedDemand={Y:200,J:0,F:0};
+ const list=[snapshot({aircraftId:'1',routeId:'10',registration:'ONE',remaining:sharedDemand}),
+ snapshot({aircraftId:'2',routeId:'11',registration:'TWO',remaining:sharedDemand})];
+ const s=setup({initial:collection(list),limit:2});
+ const r=await s.executor.run();
+ expect(s.clicks()).toBe(2);
+ expect(r.summary.departed).toBe(2);
+ expect(r.entries.every(x=>x.reason!=='INITIAL_IDENTITY_OR_ROUTE_DUPLICATE')).toBe(true);
+});
 test('simulation uses same checks and never calls depart',async()=>{const s=setup({dryRun:true});expect((await s.executor.run()).summary.simulated).toBe(1);expect(s.clicks()).toBe(0);});
 test('aircraft at its own base departs on the existing route when demand is sufficient',async()=>{
  const atBase=snapshot({from:'GRU',to:'AAA',routeLabel:'GRU - AAA'});
