@@ -33,8 +33,9 @@ test('confirmed departure records a gross fare estimate without using it for aut
 });
 
 test('same airport route on separate route/aircraft IDs is not a duplicate identity blocker',async()=>{
- const list=[snapshot({aircraftId:'1',routeId:'10',registration:'ONE'}),
- snapshot({aircraftId:'2',routeId:'11',registration:'TWO'})];
+ const sharedDemand={Y:200,J:0,F:0};
+ const list=[snapshot({aircraftId:'1',routeId:'10',registration:'ONE',remaining:sharedDemand}),
+ snapshot({aircraftId:'2',routeId:'11',registration:'TWO',remaining:sharedDemand})];
  const s=setup({initial:collection(list),limit:2});
  const r=await s.executor.run();
  expect(s.clicks()).toBe(2);
