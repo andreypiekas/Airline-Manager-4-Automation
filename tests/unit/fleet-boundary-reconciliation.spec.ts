@@ -6,10 +6,10 @@ import { DemandReader } from '../../demand/reader';
  * of an otherwise complete page 1. Full fleet identity is mandatory.
  * No game endpoint or mutation is used in this fixture.
  */
-async function nativeFullBoundaryFixture(page: Page, lastPageSize: number, conflict = false) {
+async function nativeFullBoundaryFixture(page: Page, lastPageSize: number, conflict = false, nonBoundary = false) {
   await page.route('**/*', route => route.abort());
   await page.setContent('<button>Routes (69)</button><div id="routeAction"><div id="routesContainer"></div></div>');
-  await page.evaluate(({ lastCount, conflictingAircraft }) => {
+  await page.evaluate(({ lastCount, conflictingAircraft, nonBoundaryRepeat }) => {
     const w = window as any;
     w.pageAdvances = 0;
     w.mutations = 0;
@@ -19,11 +19,14 @@ async function nativeFullBoundaryFixture(page: Page, lastPageSize: number, confl
       Array.from({length:20}, (_, i) => 140 + i),
       Array.from({length:lastCount}, (_, i) => 160 + i)
     ];
+    // A native page can repeat a card from the previous page away from the
+    // boundary itself, without any read-only authorization to depart.
+    if (nonBoundaryRepeat) pages[1] = [121,122,123,124,125,126,117,...Array.from({length:13},(_,i)=>127+i)];
     w.renderNative = (index: number) => {
       const root = document.getElementById('routesContainer')!;
       root.replaceChildren();
       for (const id of pages[index]) {
-        const aircraftId = 1000 + id + (conflictingAircraft && index === 1 && id === 120 ? 5000 : 0);
+        const aircraftId = 1000 + id + (conflictingAircraft && index === 1 && id === (nonBoundaryRepeat ? 117 : 120) ? 5000 : 0);
         const row = document.createElement('div');
         row.id = 'routeMainList' + id;
         row.className = 'row classPAX';
@@ -60,7 +63,7 @@ async function nativeFullBoundaryFixture(page: Page, lastPageSize: number, confl
       }
     };
     w.renderNative(0);
-  }, { lastCount: lastPageSize, conflictingAircraft: conflict });
+  }, { lastCount: lastPageSize, conflictingAircraft: conflict, nonBoundaryRepeat: nonBoundary });
 }
 
 test('full first page with one verified boundary repeat reconciles all 69 distinct aircraft', async ({page}) => {
@@ -86,6 +89,24 @@ test('full first page repeat with only 68 identities remains blocked', async ({p
 
 test('full first page repeat with conflicting aircraft ID never reconciles', async ({page}) => {
   await nativeFullBoundaryFixture(page, 10, true);
+  const r = await new DemandReader(page, 120).collect();
+  expect(r.complete).toBe(false);
+  expect(r.aircraft.length).toBeLessThan(69);
+  expect(await page.evaluate(() => (window as any).mutations)).toBe(0);
+});
+
+test('single verified interior overlap reconciles all 69 without assuming boundary position', async ({page}) => {
+  await nativeFullBoundaryFixture(page, 10, false, true);
+  const r = await new DemandReader(page, 120).collect();
+  expect(r.complete).toBe(true);
+  expect(r.aircraft).toHaveLength(69);
+  expect(new Set(r.aircraft.map(a => a.routeId)).size).toBe(69);
+  expect(new Set(r.aircraft.map(a => a.aircraftId)).size).toBe(69);
+  expect(await page.evaluate(() => (window as any).mutations)).toBe(0);
+});
+
+test('interior repeat cannot hide conflicting aircraft identity', async ({page}) => {
+  await nativeFullBoundaryFixture(page, 10, true, true);
   const r = await new DemandReader(page, 120).collect();
   expect(r.complete).toBe(false);
   expect(r.aircraft.length).toBeLessThan(69);
