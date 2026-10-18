@@ -1,6 +1,7 @@
 import { AircraftSnapshot, Cabins, CollectionResult, DemandConfig, DemandDecision } from './types';
 import { DemandManager } from './manager';
 import type { AdaptiveThreshold } from './adaptive-threshold';
+import { estimatedGrossTicketRevenue } from './revenue';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 
 export interface DeparturePort {
@@ -31,6 +32,8 @@ export interface ExecutionEntry {
   aircraftId: string; registration: string; routeId: string; from: string; to: string;
   status: 'held' | 'would_depart' | 'attempting' | 'departed' | 'outcome_unknown';
   reason: string; demand: DemandDecision | null; actualOnboard: AircraftSnapshot['onboard'];
+  /** Verified onboard × freshly observed fares. Estimate only, not the Finance ledger. */
+  estimatedGrossTicketRevenue?: number | null;
   resourceEvidence?: {
     fuelHoldingLbsAtRunStart:number;
     fuelCommittedBefore:number;
@@ -235,7 +238,9 @@ export class IndividualDepartureExecutor {
         if(!Number.isFinite(age)||age<0||age>this.demand.maxAgeSeconds*1000)throw new Error('CONFIRM_OBSERVATION_STALE');
         if((['Y','J','F'] as const).some(k=>!Number.isSafeInteger(after.onboard![k])||after.onboard![k]<0||after.onboard![k]>after.capacity![k]))
           throw new Error('CONFIRM_ONBOARD_INVALID');
-        entry.status='departed';entry.actualOnboard=after.onboard;entry.reason='NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED';
+        entry.status='departed';entry.actualOnboard=after.onboard;
+        entry.estimatedGrossTicketRevenue=estimatedGrossTicketRevenue(after.onboard,fresh.fares);
+        entry.reason='NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED';
         reserveDemand();
         if(this.settings.fuelHoldingLbsAtRunStart!==undefined){
           // A real departure cannot reach this point without verified fuel evidence.
