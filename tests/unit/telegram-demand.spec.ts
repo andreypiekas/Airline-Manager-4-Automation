@@ -103,3 +103,77 @@ test('challenge evidence becomes an explicit Telegram alert',async()=>{
   expect(importantMessage(dir,'failure',join(dir,'missing-journal.json'))).toContain('CAPTCHA/challenge detectado');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('Telegram identifies separate aircraft sharing the same directional route',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-shared-routes-'));
+ const {sharedRouteMessage}=require('../../scripts/telegram-demand.cjs');
+ try{
+  await writeFile(join(dir,'demand-report.json'),JSON.stringify({
+   collectionComplete:true,
+   decisions:[
+    {aircraftId:'101',routeId:'201',registration:'XP-101',from:'GRU',to:'BSB'},
+    {aircraftId:'102',routeId:'202',registration:'XP-102',from:'GRU',to:'BSB'},
+    {aircraftId:'103',routeId:'203',registration:'XP-103',from:'BSB',to:'GRU'},
+    {aircraftId:'104',routeId:'204',registration:'XP-104',from:'GRU',to:'GIG'}
+   ]
+  }));
+  const summary=sharedRouteMessage(dir);
+  expect(summary).toContain('GRU→BSB: XP-101, XP-102');
+  expect(summary).not.toContain('XP-103');
+  expect(summary).not.toContain('XP-104');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('a duplicated rendered route identity is never reported as an extra aircraft',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-id-repeated-'));
+ const {sharedRouteMessage}=require('../../scripts/telegram-demand.cjs');
+ try{
+  await writeFile(join(dir,'demand-report.json'),JSON.stringify({collectionComplete:false,decisions:[
+   {aircraftId:'101',routeId:'201',registration:'XP-101',from:'GRU',to:'BSB'},
+   {aircraftId:'101',routeId:'201',registration:'XP-101',from:'GRU',to:'BSB'},
+   {aircraftId:'102',routeId:'202',registration:'XP-102',from:'GRU',to:'BSB'}
+  ]}));
+  expect(sharedRouteMessage(dir)).toBeNull();
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Telegram displays total estimated gross revenue only with complete observed fares',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-revenue-'));
+ const {departureValueMessage}=require('../../scripts/telegram-demand.cjs');
+ try{
+  const entries=[
+   {status:'departed',estimatedGrossTicketRevenue:12000},
+   {status:'departed',estimatedGrossTicketRevenue:8500},
+   {status:'held',estimatedGrossTicketRevenue:999999}
+  ];
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({dryRun:false,summary:{departed:2},entries}));
+  expect(departureValueMessage(dir)).toContain('$20,500 (2 confirmadas');
+  entries[1].estimatedGrossTicketRevenue=null as unknown as number;
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({dryRun:false,summary:{departed:2},entries}));
+  expect(departureValueMessage(dir)).toContain('n/d (tarifa verificada em 1/2)');
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({dryRun:true,summary:{departed:2},entries}));
+  expect(departureValueMessage(dir)).toContain('n/d');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Telegram summary includes both shared planes and the gross value',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-totals-'));
+ try{
+  await writeFile(join(dir,'company-dashboard.json'),JSON.stringify({
+   fleet:{seen:2,ready:2,inflight:0},demand:{sufficient:2,evaluated:2,insufficient:0,unavailable:0},
+   departures:{departed:2,evaluated:2,held:0,unknown:0}
+  }));
+  await writeFile(join(dir,'demand-report.json'),JSON.stringify({collectionComplete:true,decisions:[
+   {aircraftId:'1',routeId:'11',registration:'T-1',from:'GRU',to:'BSB'},
+   {aircraftId:'2',routeId:'12',registration:'T-2',from:'GRU',to:'BSB'}
+  ]}));
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({dryRun:false,summary:{departed:2},entries:[
+   {status:'departed',estimatedGrossTicketRevenue:500},
+   {status:'departed',estimatedGrossTicketRevenue:1200}
+  ]}));
+  const summary=runSummaryMessage(dir,'success');
+  expect(summary).toContain('Rotas compartilhadas: GRU→BSB: T-1, T-2');
+  expect(summary).toContain('Receita bruta estimada das decolagens: $1,700');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
