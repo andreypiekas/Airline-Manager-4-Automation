@@ -216,7 +216,7 @@ export class DemandReader {
               // authorized until all N distinct routes and aircraft IDs are
               // independently reconciled below.
               ids[0]===overlaps[0] &&
-              verifiedPages[pageIndex-1]?.at(-1)===overlaps[0] &&
+              verifiedPages[pageIndex-1]?.[verifiedPages[pageIndex-1].length-1]===overlaps[0] &&
               ids.every(id=>/^[1-9]\d*$/.test(id)) && nativeNext;
             const lastNativeMatchesOffset=isLastNativePage &&
               ids.length>=nativeRemainder && ids.length<required &&
