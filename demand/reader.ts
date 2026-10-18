@@ -210,7 +210,13 @@ export class DemandReader {
               ids.length===required && new Set(ids).size===ids.length &&
               overlaps.length===1 &&
               verifiedPages[pageIndex-1]?.includes(overlaps[0])===true &&
-              (pageIndex===1?firstWindowShort:shortIntermediatePages.includes(pageIndex-1)) &&
+              // A fully rendered previous native window can repeat its final
+              // card at the next boundary. Continue READ-ONLY only when the
+              // overlap is exactly that boundary card; no departures are
+              // authorized until all N distinct routes and aircraft IDs are
+              // independently reconciled below.
+              ids[0]===overlaps[0] &&
+              verifiedPages[pageIndex-1]?.at(-1)===overlaps[0] &&
               ids.every(id=>/^[1-9]\d*$/.test(id)) && nativeNext;
             const lastNativeMatchesOffset=isLastNativePage &&
               ids.length>=nativeRemainder && ids.length<required &&
