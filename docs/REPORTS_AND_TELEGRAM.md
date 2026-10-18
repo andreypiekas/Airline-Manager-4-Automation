@@ -168,3 +168,13 @@ Se uma verificação interativa, CAPTCHA ou challenge de segurança for detectad
 - o Telegram informa que a execução foi interrompida por challenge.
 
 A presença de challenge nunca é tratada como erro de UI comum que deva receber retry automático.
+
+## Rotas compartilhadas e valor das decolagens
+
+O resumo do Telegram lista `Rotas compartilhadas` quando **aeronaves diferentes, com IDs de aeronave e de rota distintos**, estão na mesma ligação **direcional** (ex.: GRU→BSB). Exibe suas matrículas. Essa situação comercial é normal e **não bloqueia decolagens por si só**; demanda, reservas de outros aviões, combustível, marketing e confirmação nativa continuam obrigatórios.
+
+A repetição do **mesmo ID de rota ou aeronave na paginação** é outro caso, de possível leitura duplicada. Nunca é tratada como uma aeronave adicional. Uma navegação de leitura pode prosseguir com recuperação controlada, mas mutações continuam condicionadas a inventário completo com N rotas e N aeronaves únicas; uma identidade incerta mantém HOLD.
+
+A linha `Receita bruta estimada das decolagens` soma somente **partidas confirmadas** e usa passageiros **embarcados observados após a decolagem** multiplicados pelas tarifas **lidas imediatamente antes da partida**. Não representa o extrato Finance, lucro, receita líquida ou valor contábil confirmado. Se faltar a tarifa de qualquer partida confirmada, o Telegram exibe `n/d`, nunca inventa ou substitui silenciosamente por zero. O valor estimado por aeronave fica em `execution-report.json`.
+
+**Estratégia por página:** a coleta do Fleet já percorre páginas de maneira somente leitura; executar partidas enquanto as páginas posteriores ainda são desconhecidas não está habilitado, porque comprometeria o inventário completo, as reservas compartilhadas de demanda e os limites de combustível. Os resultados continuam persistidos antes de cada clique de partida, e o relatório final é gerado a partir das confirmações reais.
