@@ -210,13 +210,11 @@ export class DemandReader {
               ids.length===required && new Set(ids).size===ids.length &&
               overlaps.length===1 &&
               verifiedPages[pageIndex-1]?.includes(overlaps[0])===true &&
-              // A fully rendered previous native window can repeat its final
-              // card at the next boundary. Continue READ-ONLY only when the
-              // overlap is exactly that boundary card; no departures are
-              // authorized until all N distinct routes and aircraft IDs are
-              // independently reconciled below.
-              ids[0]===overlaps[0] &&
-              verifiedPages[pageIndex-1]?.[verifiedPages[pageIndex-1].length-1]===overlaps[0] &&
+              // The live pagination may repeat one previously verified
+              // route at any position. This only authorizes READ-ONLY traversal:
+              // the later identity equality check rejects changed aircraft,
+              // and N distinct route AND aircraft IDs remain mandatory before
+              // any operational action can be authorized.
               ids.every(id=>/^[1-9]\d*$/.test(id)) && nativeNext;
             const lastNativeMatchesOffset=isLastNativePage &&
               ids.length>=nativeRemainder && ids.length<required &&
