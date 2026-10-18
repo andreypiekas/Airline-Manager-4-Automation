@@ -124,7 +124,15 @@ function sharedRouteMessage(dir) {
 function departureValueMessage(dir) {
   const execution=read(dir,'execution-report.json');
   if(!execution||execution.dryRun!==false||!Array.isArray(execution.entries))
-    return 'Receita bruta estimada das decolagens: $'+total.toLocaleString('en-US')+' ('+departed.length+' confirmadas; nao e lucro nem receita contabil)';
+    return 'Receita bruta estimada das decolagens: n/d (sem comprovantes de partidas)';
+  const departed=execution.entries.filter(x=>x?.status==='departed');
+  if(!Number.isSafeInteger(execution.summary?.departed)||departed.length!==execution.summary.departed)
+    return 'Receita bruta estimada das decolagens: n/d (resumo inconsistente)';
+  const valid=departed.filter(x=>Number.isSafeInteger(x.estimatedGrossTicketRevenue)&&x.estimatedGrossTicketRevenue>=0);
+  const total=valid.reduce((n,x)=>n+x.estimatedGrossTicketRevenue,0);
+  if(valid.length!==departed.length||!Number.isSafeInteger(total))
+    return 'Receita bruta estimada das decolagens: n/d (tarifa verificada em '+valid.length+'/'+departed.length+')';
+  return 'Receita bruta estimada das decolagens: $'+total.toLocaleString('en-US')+' ('+departed.length+' confirmadas; nao e lucro nem receita contabil)';
 }
 
 function semiAutomaticMessage(dir){
