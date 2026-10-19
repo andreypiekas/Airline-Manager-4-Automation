@@ -500,6 +500,94 @@ test('retry with a second mid-inspection heading change is not accepted',async({
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
+/**
+ * Real run #676: Routes(66) became Routes(67) while the native Fleet pages
+ * were being read. No mutation is permitted until a fresh, single-scan,
+ * unique and stable N/N inventory is independently verified.
+ */
+async function midScanRouteCountDriftFixture(page:Page,changesAgain=false){
+  await fixture(page,{pages:2}); // Intercept all external requests.
+  await page.evaluate((driftAgain)=>{
+    const w=window as any;
+    const originalRender=w.render;
+    const originalAjax=w.Ajax;
+    w.reloadCount=0;
+    w.render=(index:number)=>{
+      originalRender(index);
+      if(index===0){
+        document.querySelector('#routesContainer .pagination a')!
+          .setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
+      }
+      if(index===1 && w.reloadCount===0){
+        // Change the native total AFTER page one was observed, before page
+        // two can be admitted into the same collection.
+        document.querySelector('button')!.textContent='Routes (4)';
+      }
+      if(w.reloadCount>0){
+        document.querySelector('button')!.textContent='Routes ('+(driftAgain&&index===1?5:4)+')';
+        if(index===1){
+          const card=document.createElement('div');
+          card.id='routeMainList104';card.className='row classPAX';
+          const label=document.createElement('span');
+          label.className='s-text';label.textContent='AAA - BBB';
+          const link=document.createElement('a');
+          link.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id=1104','detailsAction');if(intro==0){$('#routeAction').hide();}");
+          const registration=document.createElement('span');
+          registration.id='acRegList1104';registration.textContent='TEST-104';
+          link.append(registration);
+          card.append(label,link);
+          document.querySelector('#routesContainer')!.append(card);
+        }
+      }
+    };
+    w.Ajax=(url:string,...args:any[])=>{
+      if(url==='routes.php'){
+        const previous=document.querySelector('#routesContainer')!;
+        const fresh=document.createElement('div');
+        fresh.id='routesContainer';
+        previous.replaceWith(fresh);
+        w.render(0);
+        return;
+      }
+      if(url==='routes.php?start=20&sort='){w.render(1);return;}
+      return originalAjax(url,...args);
+    };
+    const menu=document.createElement('button');
+    menu.id='mapRoutes';menu.textContent='Fleet menu';
+    menu.setAttribute('onclick',"hideAllWhenClick();menuFleet('Routes');");
+    document.body.append(menu);
+    w.render(0);
+  },changesAgain);
+  (page as any).reload=async()=>{
+    await page.evaluate(()=>{
+      const w=window as any;
+      w.reloadCount++;
+      w.render(0);
+    });
+    return null;
+  };
+}
+test('mid-scan heading drift only recovers after an authenticated fresh full inventory',async({page})=>{
+  await midScanRouteCountDriftFixture(page);
+  const result=await collectFleetWithFreshRetry(page,400,false);
+  expect(result.complete).toBe(true);
+  expect(result.expectedRoutes).toBe(4);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103','104']);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(4);
+  expect(result.warnings).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('fresh retry rejects another heading drift and does not authorize mutations',async({page})=>{
+  await midScanRouteCountDriftFixture(page,true);
+  const result=await collectFleetWithFreshRetry(page,400,false);
+  expect(result.complete).toBe(false);
+  expect(result.warnings).toContain('FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN');
+  expect(result.warnings).toContain('FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED');
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
 test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
   await overlappingPageFixture(page,true);
   const result=await collectFleetWithFreshRetry(page,120,true);
