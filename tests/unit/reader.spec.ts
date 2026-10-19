@@ -227,6 +227,7 @@ test('boundary repeat referring to a different aircraft is never reconciled',asy
   expect(r.complete).toBe(false);
   expect(r.aircraft.length).toBeLessThan(66);
   expect(r.warnings).toContain('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED');
+  expect(r.warnings).toContain('COLLECTION_REASON:PAGINATION_DUPLICATE_IDENTITY_CONFLICT');
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
