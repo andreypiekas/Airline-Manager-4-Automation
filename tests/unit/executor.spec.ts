@@ -4,6 +4,7 @@ import { AircraftSnapshot, CollectionResult } from '../../demand/types';
 import { readDemandConfig } from '../../demand/config';
 import { flightCountdownObservation } from '../../optimization/flight-timing';
 import { departureControlShape } from '../../demand/departure-control-evidence';
+import { hasIncompleteInitialDepartureCollection } from '../../demand/execute-run';
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
@@ -72,6 +73,16 @@ for(const [name,options] of Object.entries({
  'duplicate route':{initial:collection([snapshot(),snapshot({aircraftId:'2'})]),fresh:collection([snapshot(),snapshot({aircraftId:'2'})])},
  'control not verified':{prepareFail:true},
 })) test(`holds without clicks: ${name}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.summary.departed).toBe(0);expect(r.summary.held).toBeGreaterThan(0);expect(s.clicks()).toBe(0);});
+test('incomplete second fleet collection must fail the operational run rather than appear green',async()=>{
+  const blocked=setup({initial:collection([snapshot()],false)});
+  const report=await blocked.executor.run();
+  expect(report.summary).toMatchObject({evaluated:1,departed:0,held:1,unknown:0});
+  expect(report.entries[0].reason).toBe('INITIAL_COLLECTION_INCOMPLETE');
+  expect(hasIncompleteInitialDepartureCollection(report)).toBe(true);
+  expect(blocked.clicks()).toBe(0);
+  const benign=setup({initial:collection([snapshot({state:'inflight'})])});
+  expect(hasIncompleteInitialDepartureCollection(await benign.executor.run())).toBe(false);
+});
 for(const [index,options] of [{clickFail:true},{confirmed:null},{confirmed:snapshot({state:'ready'})},{confirmed:snapshot({state:'inflight',timing:null})}].entries())
  test(`unknown result stops without retry case ${index}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.halted).toBe(true);expect(r.summary.unknown).toBe(1);expect(s.clicks()).toBe(1);});
 test('persistence failure stops before operation',async()=>{const s=setup({saveFail:true});await expect(s.executor.run()).rejects.toThrow('disk');expect(s.clicks()).toBe(0);});
