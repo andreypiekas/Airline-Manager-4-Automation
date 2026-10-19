@@ -102,15 +102,22 @@ export class MaintenanceUtils {
             try {
                 await cardElement.waitFor({ state: 'attached', timeout: 3000 });
             } catch (e) {
-                console.log(`[Aviso] Aeronave de indice ${i} indisponivel. Continuando para a proxima.`);
-                continue;
+                // A lista mudou durante a selecao: nao afirmar manutencao completa
+                // nem executar o bulk check com uma aeronave nao inspecionada.
+                console.warn(`[Manutencao] Cartao de indice ${i} indisponivel; interrompendo verificacao em HOLD seguro.`);
+                throw new Error('MAINTENANCE_CARD_UNAVAILABLE');
             }
 
             // Jika kartu belum masuk ke area layar aktif, scroll perlahan ke posisinya
             if (!(await cardElement.isVisible())) {
-                await cardElement.scrollIntoViewIfNeeded();
-                await GeneralUtils.randomSleep(300, 600);
-                if (!(await cardElement.isVisible())) continue;
+                try {
+                    await cardElement.scrollIntoViewIfNeeded();
+                    await GeneralUtils.randomSleep(300, 600);
+                    if (!(await cardElement.isVisible())) throw new Error('MAINTENANCE_CARD_UNAVAILABLE');
+                } catch {
+                    console.warn(`[Manutencao] Cartao de indice ${i} invisivel; interrompendo verificacao em HOLD seguro.`);
+                    throw new Error('MAINTENANCE_CARD_UNAVAILABLE');
+                }
             }
 
             // Ambil text isi kartu secara keseluruhan untuk membaca sisa jam terbang
