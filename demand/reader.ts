@@ -635,6 +635,9 @@ export async function collectFleetWithFreshRetry(
   if(first.complete || !first.warnings.some(w=>
     w.startsWith('PAGINATION_') ||
     w==='ROUTE_COUNT_MISMATCH' ||
+    // A stable fresh scan can safely recover a genuine mid-scan Routes(N)
+    // drift, but only with a full unique inventory and a bounded count delta.
+    w==='FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN' ||
     w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
   )) return first;
 
