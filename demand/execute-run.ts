@@ -1,3 +1,7 @@
+export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):boolean {
+  return report.entries.some(e=>e.reason==='INITIAL_COLLECTION_INCOMPLETE');
+}
+
 import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -71,7 +75,8 @@ export async function runDemandExecution(
   if(!['true','false'].includes(campaignGateRequiredRaw)||!['true','false'].includes(campaignGateVerifiedRaw))throw Error('CAMPAIGN_GATE_INVALID');
   const campaignGateRequired=campaignGateRequiredRaw==='true';
   const campaignGateVerified=campaignGateVerifiedRaw==='true';
-  const report=await new IndividualDepartureExecutor(new PlaywrightDeparturePort(page),config,{...settings,
+  const report=await new IndividualDepartureExecutor(
+    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs),config,{...settings,
     blockedDepartureKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
@@ -85,6 +90,10 @@ export async function runDemandExecution(
     const uncertain=await appendUncertainDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'',report);
     console.log('[History] Tentativas incertas bloqueadas acrescentadas: '+uncertain+'.');
   }
+  // An incomplete second Fleet scan can hold every eligible aircraft without
+  // a click; this is an operational failure, not a successful empty cycle.
+  if(hasIncompleteInitialDepartureCollection(report))
+    throw Error('DEMAND_EXECUTION_INITIAL_COLLECTION_INCOMPLETE');
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
   return report;
 }
