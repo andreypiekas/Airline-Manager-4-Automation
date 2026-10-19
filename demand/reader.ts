@@ -638,6 +638,10 @@ export async function collectFleetWithFreshRetry(
     // A stable fresh scan can safely recover a genuine mid-scan Routes(N)
     // drift, but only with a full unique inventory and a bounded count delta.
     w==='FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN' ||
+    // All N route cards can be present yet the final identity/heading proof
+    // can fail after inspecting details. Retry one independent scan, never
+    // reuse partially verified identities or authorize mutation from it.
+    w==='FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED' ||
     w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
   )) return first;
 

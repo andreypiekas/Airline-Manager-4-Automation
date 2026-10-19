@@ -1,7 +1,7 @@
 import { Page } from '@playwright/test';
 import { DeparturePort } from './executor';
 import { AircraftSnapshot } from './types';
-import { DemandReader } from './reader';
+import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute } from './navigation';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
@@ -16,8 +16,22 @@ export function verifiedDepartureHandler(callback:string,routeId:string):boolean
 }
 export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
-  constructor(private readonly page:Page,private readonly timeout=15000){}
-  async collect(){this.prepared=null;await assertNoInteractiveChallenge(this.page,'departure:collect');await openFleetList(this.page,this.timeout);return new DemandReader(this.page,this.timeout,true).collect();}
+  constructor(private readonly page:Page,private readonly timeout=15000,
+    private readonly collectionRetryDeadlineEpochMs?:number){}
+  async collect(){
+    this.prepared=null;
+    await assertNoInteractiveChallenge(this.page,'departure:collect');
+    await openFleetList(this.page,this.timeout);
+    const result=await collectFleetWithFreshRetry(this.page,this.timeout,true,this.collectionRetryDeadlineEpochMs);
+    if(!result.complete){
+      // Operational diagnostics only: never log page DOM, URL, session or IDs.
+      console.warn('[DepartureCollection] '+JSON.stringify({
+        status:'INCOMPLETE',observed:result.aircraft.length,expected:result.expectedRoutes,
+        warnings:result.warnings.filter(w=>/^[A-Z0-9_:/.]{1,100}$/.test(w)).slice(0,15)
+      }));
+    }
+    return result;
+  }
   async prepare(expected:AircraftSnapshot){
     this.prepared=null;
     await assertNoInteractiveChallenge(this.page,'departure:prepare');

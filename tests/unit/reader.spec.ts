@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import { DemandReader, collectFleetWithFreshRetry } from '../../demand/reader';
 import { FleetUtils } from '../../utils/fleet.utils';
+import { PlaywrightDeparturePort } from '../../demand/departure-port';
 import { runDemandSimulation } from '../../demand/run';
 import { readDemandConfig } from '../../demand/config';
 import { readFile } from 'node:fs/promises';
@@ -588,6 +589,15 @@ test('fresh retry rejects another heading drift and does not authorize mutations
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
+test('departure phase uses the bounded full-fleet retry before holding eligible aircraft',async({page})=>{
+  await overlappingPageFixture(page,3);
+  const result=await new PlaywrightDeparturePort(page,120,Date.now()+300000).collect();
+  expect(result.complete).toBe(true);
+  expect(result.aircraft.map(a=>a.routeId)).toEqual(['101','102','103']);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(3);
+  expect(await page.evaluate(()=>(window as any).reloadCount)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
 test('fresh Fleet retry remains blocked on persistent overlap',async({page})=>{
   await overlappingPageFixture(page,true);
   const result=await collectFleetWithFreshRetry(page,120,true);
