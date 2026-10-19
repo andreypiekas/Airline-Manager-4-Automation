@@ -92,6 +92,8 @@ test('full first page repeat with conflicting aircraft ID never reconciles', asy
   const r = await new DemandReader(page, 120).collect();
   expect(r.complete).toBe(false);
   expect(r.aircraft.length).toBeLessThan(69);
+  expect(r.warnings).toContain('COLLECTION_REASON:PAGINATION_DUPLICATE_IDENTITY_CONFLICT');
+  expect(r.warnings).not.toContain('COLLECTION_REASON:UNCLASSIFIED');
   expect(await page.evaluate(() => (window as any).mutations)).toBe(0);
 });
 
