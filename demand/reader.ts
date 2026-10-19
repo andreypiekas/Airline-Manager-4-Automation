@@ -22,6 +22,9 @@ function collectionFailureCode(error:unknown):string {
   const message=error instanceof Error?error.message:'';
   if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')return message;
   if(message==='PAGINATION_DUPLICATE')return 'PAGINATION_DUPLICATE';
+  // Preserve the explicit fail-closed identity rejection in sanitized Actions
+  // diagnostics. Never log the conflicting route, aircraft or DOM content.
+  if(message==='PAGINATION_DUPLICATE_IDENTITY_CONFLICT')return 'PAGINATION_DUPLICATE_IDENTITY_CONFLICT';
   if(message==='ROUTE_PAGE_LIMIT_INVALID')return 'ROUTE_PAGE_LIMIT_INVALID';
   if(/Timeout|waiting for|expect\(/i.test(message))return 'UI_WAIT_TIMEOUT';
   if(/strict mode violation/i.test(message))return 'AMBIGUOUS_UI_CONTROL';
