@@ -60,11 +60,11 @@ test('main production workflow forwards the declared departure limit input inste
  expect(s).not.toContain("AM4_INPUT_MAX_DEPARTURES: '20'");
 });
 
-test('all-ready production uses bounded 100 instead of the old 20-flight artificial ceiling',()=>{
+test('all-ready production uses unlimited fleet inventory instead of an arbitrary 100-flight cap',()=>{
  expect(resolveDepartureSettings({
   AM4_INPUT_MODE:'production',AM4_INPUT_MAX_DEPARTURES:'0',AM4_REPOSITORY_MAX_DEPARTURES:'20',
   AM4_DISPATCH_ALL_READY:'true'
- })).toMatchObject({dryRun:false,maxDepartures:100,limitSource:'variable:DISPATCH_ALL_READY'});
+ })).toMatchObject({dryRun:false,maxDepartures:'all',limitSource:'variable:DISPATCH_ALL_READY'});
  expect(resolveDepartureSettings({
   AM4_INPUT_MODE:'simulation',AM4_REPOSITORY_MAX_DEPARTURES:'20',AM4_DISPATCH_ALL_READY:'true'
  })).toMatchObject({dryRun:true,maxDepartures:20});
