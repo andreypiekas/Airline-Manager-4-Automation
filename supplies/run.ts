@@ -40,7 +40,9 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
   try{preReport=JSON.parse(await readFile(join(directory,'supply-report.json'),'utf8'));}catch{
    throw Error('POST_SUPPLY_PRE_REPORT_MISSING');
   }
-  if(preReport?.dryRun!==dryRun||!Array.isArray(preReport.entries)||preReport.halted===true||
+  if(preReport?.phase!=='pre'||preReport.dryRun!==dryRun||!Array.isArray(preReport.entries)||
+     preReport.entries.length!==2||preReport.entries[0]?.kind!=='fuel'||preReport.entries[1]?.kind!=='co2'||
+     preReport.halted!==false||
      preReport.entries.some((e:any)=>!['purchased','skipped','would_buy'].includes(e?.status)))
    throw Error('POST_SUPPLY_PRE_REPORT_UNVERIFIED');
  }
