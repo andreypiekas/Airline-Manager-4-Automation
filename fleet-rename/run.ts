@@ -5,7 +5,7 @@ import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory} from './inventory';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
-import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,type RenameTarget} from './plan';
+import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
 
 export type RenamePhase='aircraft'|'route';
@@ -32,6 +32,9 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  await findFleetRoute(page,{aircraftId:expected.aircraftId,routeId:expected.routeId} as any,timeout);
  const row=page.locator('#routesContainer #routeMainList'+expected.routeId);
  if(await row.count()!==1||!await row.isVisible())throw Error('RENAME_TARGET_MISSING');
+ // Re-check native route endpoints on each field, not only aircraft/route IDs.
+ // A route can change after the global preview but before an individual save.
+ assertRenameRouteLabelUnchanged(expected.oldRouteLabel,await row.locator('span.s-text').allTextContents());
  const link=row.locator('a:has(#acRegList'+expected.aircraftId+')');
  if(await link.count()!==1||await row.locator('#acRegList'+expected.aircraftId).innerText()!==registered)
   throw Error('RENAME_AIRCRAFT_IDENTITY_CHANGED');
