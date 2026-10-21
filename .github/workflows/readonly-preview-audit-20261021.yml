@@ -1,0 +1,74 @@
+name: Auditoria pontual de frota (somente leitura)
+on:
+  push:
+    branches:
+      - audit/readonly-fleet-preview-20261021
+
+permissions:
+  contents: read
+concurrency:
+  group: airline-manager-4-main
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/audit/readonly-fleet-preview-20261021' && github.event.head_commit.message == 'audit(rename): one-shot read-only fleet preview' && github.run_attempt == 1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Conferir base de producao
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          if [ "$(git rev-parse HEAD^)" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::O commit da main mudou desde o agendamento. Nenhum login foi feito."
+            exit 1
+          fi
+      - name: Instalar e conferir tipagem
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Preparar Chromium sem gravacao
+        run: npx playwright install --with-deps chromium
+      - name: Consultar somente o Fleet do jogo
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          RENAME_OPERATION: preview
+          RENAME_AIRCRAFT_PREFIX: ''
+          RENAME_ROUTE_PREFIX: ''
+          RENAME_MAPPING_CSV: ''
+          RENAME_CONFIRMATION: ''
+          RENAME_EXPECTED_DIGEST: ''
+        run: |
+          if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::Credenciais ausentes; nenhuma tentativa de login."
+            exit 1
+          fi
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test --headed -c playwright.rename.config.ts
+      - name: Relatorio seguro no resumo
+        if: always()
+        run: |
+          if [ -f test-results/fleet-rename/rename-report.md ]; then
+            cat test-results/fleet-rename/rename-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nenhum inventario confirmado; consultar logs sem realizar mutacoes." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Enviar diagnostico somente leitura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: readonly-fleet-preview-20261021
+          path: |
+            test-results/fleet-rename/rename-report.json
+            test-results/fleet-rename/rename-report.md
+            test-results/fleet-rename/rename-template.csv
+            test-results/fleet-rename/rename-inventory.json
+          retention-days: 7
+          if-no-files-found: warn
