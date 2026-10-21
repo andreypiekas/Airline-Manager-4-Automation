@@ -50,7 +50,7 @@ test('priority is bound to aircraft AND route, and transport compaction keeps la
   reason:type==='dispatch-deferred'?'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION':'REEVALUATED_IN_NEW_RUN'
  });
  const j:Journal={schemaVersion:1,scope,entries:[],events:[
-  event(1,'dispatch-deferred'),event(2,'dispatch-deferred-rechecked'),
+  event(2,'dispatch-deferred-rechecked'),event(1,'dispatch-deferred'),
   event(3,'dispatch-deferred','1','11'),event(4,'dispatch-deferred','2','10')
  ]};
  expect([...pendingDeferredDispatchKeys(j)].sort()).toEqual(['1:11','2:10']);
