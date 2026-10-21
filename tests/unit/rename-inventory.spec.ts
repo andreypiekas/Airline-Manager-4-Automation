@@ -10,7 +10,7 @@ async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean}={})
   const ids=index===0?Array.from({length:opts.short?19:20},(_,i)=>i+1):[21];
   const root=document.getElementById('routesContainer');
   root.innerHTML=ids.map(n=>{
-   const route=n===21&&opts.duplicate?101:100+n;
+   const route=n===21&&opts.duplicate?102:100+n;
    const aircraft=1000+n;
    return '<div class="row classPAX" id="routeMainList'+route+'">'+
     '<span class="s-text">AAA - GRU</span>'+
