@@ -69,6 +69,7 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
  };
  page.on('dialog',onDialog);
  const expectedOrigin=new URL(page.url()).origin;
+ if(expectedOrigin!=='https://www.airlinemanager.com')throw Error('RENAME_SITE_ORIGIN_UNVERIFIED');
  const responsePromise=page.waitForResponse(response=>{
   try{
    const u=new URL(response.url());
@@ -134,6 +135,15 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
     let mutationStarted=false;
     try{
      const details=await inspectTarget(page,target,currentRegistration,timeout);
+     // A new explicitly approved preview may follow a previous partially
+     // completed attempt. Never click if live UI already confirms the target.
+     const alreadyCorrect=field==='aircraft'
+       ?currentRegistration===desired
+       :(await details.locator('#route-name').innerText({timeout})).trim().split(/\s+/).includes(desired);
+     if(alreadyCorrect){
+       entry.status='confirmed';entry.reason='ALREADY_MATCHES_LIVE_REGISTRATION';
+       await save();continue;
+     }
      entry.status='attempting';entry.reason='INTENT_CHECKPOINTED';
      await renameNativePrompt(page,details,target,field,desired,async()=>{
       mutationStarted=true;await save();
