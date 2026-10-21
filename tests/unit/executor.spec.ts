@@ -86,6 +86,41 @@ test('incomplete second fleet collection must fail the operational run rather th
 for(const [index,options] of [{clickFail:true},{confirmed:null},{confirmed:snapshot({state:'ready'})},{confirmed:snapshot({state:'inflight',timing:null})}].entries())
  test(`unknown result stops without retry case ${index}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.halted).toBe(true);expect(r.summary.unknown).toBe(1);expect(s.clicks()).toBe(1);});
 test('persistence failure stops before operation',async()=>{const s=setup({saveFail:true});await expect(s.executor.run()).rejects.toThrow('disk');expect(s.clicks()).toBe(0);});
+test('deferred priority is stable, identity-scoped, and does not override new demand',async()=>{
+ const one=snapshot({aircraftId:'1',routeId:'10',from:'AAA',to:'GRU',registration:'ONE'});
+ const two=snapshot({aircraftId:'2',routeId:'11',from:'BBB',to:'GRU',registration:'TWO',remaining:{Y:0,J:0,F:0}});
+ const three=snapshot({aircraftId:'3',routeId:'12',from:'CCC',to:'GRU',registration:'THREE'});
+ const list=collection([one,two,three]);
+ const seen:string[]=[];
+ const port:DeparturePort={
+  collect:async()=>list,
+  prepare:async a=>{seen.push(a.aircraftId);return a;},
+  depart:async()=>{throw Error('must never click in simulation');},
+  confirm:async()=>null
+ };
+ const report=await new IndividualDepartureExecutor(
+  port,readDemandConfig({}),{dryRun:true,maxDepartures:1,prioritizedDepartureKeys:new Set(['2:11'])},async()=>{}
+ ).run();
+ expect(report.entries.map(e=>e.aircraftId)).toEqual(['2','1','3']);
+ expect(seen).toEqual(['2','1']);
+ expect(report.entries[0].status).toBe('held');
+ expect(report.entries[0].demand?.decision).toBe('hold_insufficient');
+ expect(report.entries[1].status).toBe('would_depart');
+ expect(report.entries[2].reason).toBe('EXECUTION_LIMIT');
+});
+
+test('stale deferred queue identity never affects fresh fleet ordering',async()=>{
+ const list=collection([snapshot(),snapshot({aircraftId:'2',routeId:'11',from:'BBB',to:'GRU',registration:'TWO'})]);
+ const port:DeparturePort={
+  collect:async()=>list,prepare:async a=>a,
+  depart:async()=>{},confirm:async a=>snapshot({...a,state:'inflight'})
+ };
+ const report=await new IndividualDepartureExecutor(
+  port,readDemandConfig({}),{dryRun:true,maxDepartures:1,prioritizedDepartureKeys:new Set(['2:10'])},async()=>{}
+ ).run();
+ expect(report.entries[0].aircraftId).toBe('1');
+ expect(report.entries[0].status).toBe('would_depart');
+});
 test('all mode evaluates and dispatches all eligible aircraft, not a fixed numeric quota',async()=>{
  const list=['AAA','BBB','CCC'].map((from,index)=>snapshot({
    aircraftId:String(index+1),routeId:String(index+10),registration:'TEST-'+(index+1),
