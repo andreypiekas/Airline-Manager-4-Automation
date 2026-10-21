@@ -343,8 +343,15 @@ test('All Operations', async ({ page }) => {
         })
       );
     }
-    if (!demandConfig.dryRun && moduleEnabled('ENABLE_DEPART')
-      && phaseAllowed('departures',phaseBudgetsMs.departures)) {
+    const departureEnabled = !demandConfig.dryRun && moduleEnabled('ENABLE_DEPART');
+    const departureBudgetAllowed = departureEnabled && phaseAllowed('departures',phaseBudgetsMs.departures);
+    if (departureEnabled && !departureBudgetAllowed && simulation.report.summary.sufficient > 0) {
+      // A live run that found sufficient demand must not finish green when its
+      // departure phase is skipped for lack of time (no click is performed).
+      console.error('[DepartureRuntime] Coleta apontou demanda suficiente, mas nao restou tempo para iniciar decolagens.');
+      throw new Error('DEMAND_EXECUTION_BUDGET_EXHAUSTED_BEFORE_DISPATCH');
+    }
+    if (departureBudgetAllowed) {
       const reroutedAircraftIds=new Set(
         (routeExecutionReport?.entries||[]).filter(e=>e.status==='rerouted').map(e=>e.aircraftId)
       );
