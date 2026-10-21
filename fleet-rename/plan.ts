@@ -16,7 +16,7 @@ export function mappingTemplate(collection:CollectionResult):string{
 }
 export function verifiedFleet(collection:CollectionResult):AircraftSnapshot[]{
  if(!collection?.complete||!Number.isSafeInteger(collection.expectedRoutes)||
- collection.expectedRoutes!<=0||collection.expectedRoutes!==collection.aircraft.length)
+ collection.expectedRoutes===null||collection.expectedRoutes<=0||collection.expectedRoutes!==collection.aircraft.length)
   throw Error('RENAME_FLEET_INCOMPLETE');
  const routeIds=new Set<string>(),aircraftIds=new Set<string>();
  for(const a of collection.aircraft){
