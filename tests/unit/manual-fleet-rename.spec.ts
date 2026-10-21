@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {generateRenames,exportRenameCsv,mappingTemplate,parseRenameCsv,authorizeRenameOperation,verifiedFleet,assertRenameRouteLabelUnchanged} from '../../fleet-rename/plan';
-import {verifiedPromptRenameCallback} from '../../fleet-rename/run';
+import {verifiedPromptRenameCallback,safeRenameFailureCode} from '../../fleet-rename/run';
 import type {CollectionResult,AircraftSnapshot} from '../../demand/types';
 function item(aircraftId:string,routeId:string,registration:string):AircraftSnapshot{
  return {aircraftId,routeId,registration,routeLabel:'AAA - GRU',from:'AAA',to:'GRU',
@@ -65,6 +65,20 @@ test('pre-save route identity rejects changed endpoints even if route and aircra
   .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
  expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['unknown route label']))
   .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
+});
+test('preview errors are classified without leaking raw Playwright/browser text',()=>{
+ expect(safeRenameFailureCode(new Error('READ_ONLY_LOGIN_OR_LOADING_FAILED')))
+  .toBe('READ_ONLY_LOGIN_OR_LOADING_FAILED');
+ expect(safeRenameFailureCode(new Error('INTERACTIVE_CHALLENGE_DETECTED_STOP')))
+  .toBe('INTERACTIVE_CHALLENGE_DETECTED_STOP');
+ expect(safeRenameFailureCode(new Error('RENAME_FLEET_PAGE_INCOMPLETE')))
+  .toBe('RENAME_FLEET_PAGE_INCOMPLETE');
+ expect(safeRenameFailureCode(new Error('RESEARCH_LIST_CONTROL_UNVERIFIED')))
+  .toBe('RESEARCH_LIST_CONTROL_UNVERIFIED');
+ expect(safeRenameFailureCode(new Error('Timeout 14000ms exceeded while reading form with private details')))
+  .toBe('RENAME_UI_WAIT_TIMEOUT');
+ expect(safeRenameFailureCode(new Error('a secret credential or HTML dump')))
+  .toBe('RENAME_UNCLASSIFIED_FAILURE');
 });
 test('only one native prompt/AJAX save callback for the exact field and ID is supported',()=>{
  const original=(id:string,mode:string)=>"Ajax('fleet_details.php?id="+id+"&mode="+mode+"&reg='+prompt('Change name'),'detailsAction');";
