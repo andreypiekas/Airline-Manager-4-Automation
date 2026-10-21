@@ -1,4 +1,5 @@
 import { runSupplies } from '../supplies/run';
+import {postDispatchSupplyDecision} from '../supplies/post-dispatch';
 import { supplyConfig } from '../supplies/policy';
 import { researchConfig } from '../optimization/research-reader';
 import { optimizationConfig } from '../optimization/report';
@@ -379,7 +380,7 @@ test('All Operations', async ({ page }) => {
         console.warn('[Departure] Reroute confirmado sem pricing fresco confirmado; aeronaves em HOLD: '+
           [...postReroutePricingBlockedAircraftIds].join(','));
       }
-      await runDemandExecution(page,demandConfig,{
+      const dispatchReport=await runDemandExecution(page,demandConfig,{
         ...process.env,
         CAMPAIGN_GATE_REQUIRED: campaignRequired ? 'true' : 'false',
         CAMPAIGN_GATE_VERIFIED: campaignVerifiedForDeparture ? 'true' : 'false',
@@ -390,6 +391,18 @@ test('All Operations', async ({ page }) => {
         // its already-verified identities, and re-read every target fresh.
         verifiedFleetSnapshot:reroutedAircraftIds.size===0?simulation.collection:undefined
       });
+      const postSupplyGate=postDispatchSupplyDecision(dispatchReport);
+      const postSupplyBudget=phaseAllowed('post-dispatch-supplies',phaseBudgetsMs.supplies);
+      console.log('[PostDispatchSupplies] '+JSON.stringify({
+        eligible:postSupplyGate.allowed,reason:postSupplyGate.reason,budgetAllowed:postSupplyBudget
+      }));
+      // The departure executor throws on time starvation or any unknown click.
+      // This stage never runs on a partial/uncertain departure cycle.
+      if(postSupplyGate.allowed&&postSupplyBudget&&moduleEnabled('ENABLE_FUEL')){
+        await runSupplies(page,false,process.env,'test-results/demand',undefined,{
+          phase:'post',mutationDeadlineEpochMs:phaseDeadlineEpochMs
+        });
+      }
     }
     return;
   }
