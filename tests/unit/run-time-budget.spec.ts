@@ -41,13 +41,13 @@ test('production timeout gives departure executor 18 minutes while retaining bot
 });
 
 
-test('zero confirmed departures with time-starved aircraft cannot be a green cycle',()=>{
+test('partial or zero departures with time-starved aircraft cannot be a green cycle',()=>{
   const timeHold={status:'held',reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION'};
   const mutationHold={status:'held',reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'};
   const fuelHold={status:'held',reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY'};
   expect(hasDepartureBudgetStarvation([timeHold])).toBe(true); // run #775: all 60 time-held
   expect(hasDepartureBudgetStarvation([fuelHold,mutationHold])).toBe(true); // mixed holds, run #776
-  expect(hasDepartureBudgetStarvation([{status:'departed',reason:'NATIVE_CONFIRMED'},timeHold])).toBe(false);
+  expect(hasDepartureBudgetStarvation([{status:'departed',reason:'NATIVE_CONFIRMED'},timeHold])).toBe(true); // run #804: 16 departed + 35 time-held still incomplete
   expect(hasDepartureBudgetStarvation([fuelHold])).toBe(false); // legitimate resource hold
   expect(hasDepartureBudgetStarvation([{status:'held',reason:'DEMAND_INSUFFICIENT'}])).toBe(false);
   expect(hasDepartureBudgetStarvation([])).toBe(false);
