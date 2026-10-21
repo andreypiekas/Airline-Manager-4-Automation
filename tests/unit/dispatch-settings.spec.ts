@@ -32,11 +32,11 @@ test('semi-automatic production requires explicit confirmation for that run',()=
  })).toMatchObject({dryRun:false,automationMode:'production',semiAutomatic:true,semiConfirmed:true,modeSource:'input:confirm_semiautomatic_execution'});
 });
 
-for(const [index,env] of [{AM4_INPUT_MODE:'automatic'},{AM4_REPOSITORY_EXECUTE:'tru'},{AM4_INPUT_EXECUTE:'yes'},{AM4_SEMI_AUTOMATIC:'yes'},{AM4_SEMI_CONFIRM:'1'},{AM4_INPUT_MAX_DEPARTURES:'-1'},{AM4_INPUT_MAX_DEPARTURES:'21'},{AM4_INPUT_MAX_DEPARTURES:'1.5'},{AM4_REPOSITORY_MAX_DEPARTURES:'1\nother=secret'}].entries())
+for(const [index,env] of [{AM4_INPUT_MODE:'automatic'},{AM4_REPOSITORY_EXECUTE:'tru'},{AM4_INPUT_EXECUTE:'yes'},{AM4_SEMI_AUTOMATIC:'yes'},{AM4_SEMI_CONFIRM:'1'},{AM4_INPUT_MAX_DEPARTURES:'-1'},{AM4_INPUT_MAX_DEPARTURES:'101'},{AM4_INPUT_MAX_DEPARTURES:'1.5'},{AM4_REPOSITORY_MAX_DEPARTURES:'1\nother=secret'}].entries())
  test(`invalid settings fail before any game login case ${index}`,()=>expect(()=>resolveDepartureSettings(env)).toThrow());
 test('both workflows wire repository variables into the shared resolver and use its outputs',async()=>{
  for(const name of ['playwright.yml','individual-departures.yml']){
-  const s=await readFile('.github/workflows/'+name,'utf8');expect(s).toContain("AM4_REPOSITORY_EXECUTE: ${{ vars.EXECUTE_INDIVIDUAL || 'true' }}");expect(s).toContain("AM4_REPOSITORY_MAX_DEPARTURES: ${{ vars.MAX_INDIVIDUAL_DEPARTURES || '20' }}");expect(s).toContain("AM4_SEMI_AUTOMATIC: ${{ vars.SEMI_AUTOMATIC_MODE || 'false' }}");expect(s).toContain('AM4_SEMI_CONFIRM: ${{ inputs.confirm_semiautomatic_execution');expect(s).toContain('DEMAND_DRY_RUN: ${{ steps.departure_settings.outputs.dry_run }}');expect(s).toContain('DEMAND_MAX_DEPARTURES_PER_RUN: ${{ steps.departure_settings.outputs.max_departures }}');expect(s).toContain('group: airline-manager-4-main');expect(s).not.toContain('\n  push:');
+  const s=await readFile('.github/workflows/'+name,'utf8');expect(s).toContain("AM4_REPOSITORY_EXECUTE: ${{ vars.EXECUTE_INDIVIDUAL || 'true' }}");expect(s).toContain("AM4_REPOSITORY_MAX_DEPARTURES: ${{ vars.MAX_INDIVIDUAL_DEPARTURES || '20' }}");expect(s).toContain("AM4_DISPATCH_ALL_READY: ${{ vars.DISPATCH_ALL_READY || 'true' }}");expect(s).toContain("AM4_SEMI_AUTOMATIC: ${{ vars.SEMI_AUTOMATIC_MODE || 'false' }}");expect(s).toContain('AM4_SEMI_CONFIRM: ${{ inputs.confirm_semiautomatic_execution');expect(s).toContain('DEMAND_DRY_RUN: ${{ steps.departure_settings.outputs.dry_run }}');expect(s).toContain('DEMAND_MAX_DEPARTURES_PER_RUN: ${{ steps.departure_settings.outputs.max_departures }}');expect(s).toContain('group: airline-manager-4-main');expect(s).not.toContain('\n  push:');
  }
 });
 test('resolver CLI produces safe Action outputs and explicit operational-mode log without credentials',async()=>{
@@ -60,14 +60,26 @@ test('main production workflow forwards the declared departure limit input inste
  expect(s).not.toContain("AM4_INPUT_MAX_DEPARTURES: '20'");
 });
 
-test('legacy repository limit above hard safety cap is bounded to twenty and reported as clamped',()=>{
- expect(resolveDepartureSettings({AM4_INPUT_MAX_DEPARTURES:'0',AM4_REPOSITORY_MAX_DEPARTURES:'30'})).toMatchObject({
-  maxDepartures:20,limitSource:'variable:MAX_INDIVIDUAL_DEPARTURES:clamped-to-20'
- });
- expect(resolveDepartureSettings({AM4_REPOSITORY_MAX_DEPARTURES:'99'}).maxDepartures).toBe(20);
+test('all-ready production uses bounded 100 instead of the old 20-flight artificial ceiling',()=>{
+ expect(resolveDepartureSettings({
+  AM4_INPUT_MODE:'production',AM4_INPUT_MAX_DEPARTURES:'0',AM4_REPOSITORY_MAX_DEPARTURES:'20',
+  AM4_DISPATCH_ALL_READY:'true'
+ })).toMatchObject({dryRun:false,maxDepartures:100,limitSource:'variable:DISPATCH_ALL_READY'});
+ expect(resolveDepartureSettings({
+  AM4_INPUT_MODE:'simulation',AM4_REPOSITORY_MAX_DEPARTURES:'20',AM4_DISPATCH_ALL_READY:'true'
+ })).toMatchObject({dryRun:true,maxDepartures:20});
+ expect(resolveDepartureSettings({
+  AM4_INPUT_MODE:'production',AM4_REPOSITORY_MAX_DEPARTURES:'20',AM4_DISPATCH_ALL_READY:'false'
+ })).toMatchObject({dryRun:false,maxDepartures:20,limitSource:'variable:MAX_INDIVIDUAL_DEPARTURES'});
 });
-test('explicit manual limit above twenty still fails instead of being silently clamped',()=>{
- expect(()=>resolveDepartureSettings({AM4_INPUT_MAX_DEPARTURES:'21',AM4_REPOSITORY_MAX_DEPARTURES:'30'})).toThrow();
+test('explicit manual limit overrides all-ready mode, and 100 is a hard maximum',()=>{
+ expect(resolveDepartureSettings({
+  AM4_INPUT_MODE:'production',AM4_INPUT_MAX_DEPARTURES:'5',AM4_DISPATCH_ALL_READY:'true'
+ })).toMatchObject({maxDepartures:5,limitSource:'input:limit'});
+ expect(resolveDepartureSettings({AM4_INPUT_MAX_DEPARTURES:'100'}).maxDepartures).toBe(100);
+ expect(()=>resolveDepartureSettings({AM4_INPUT_MAX_DEPARTURES:'101'})).toThrow();
+ expect(()=>resolveDepartureSettings({AM4_REPOSITORY_MAX_DEPARTURES:'101'})).toThrow();
+ expect(()=>resolveDepartureSettings({AM4_DISPATCH_ALL_READY:'yes'})).toThrow();
 });
 
 
