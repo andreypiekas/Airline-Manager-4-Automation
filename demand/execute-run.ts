@@ -6,7 +6,7 @@ import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDemandConfig } from './config';
-import { DemandConfig } from './types';
+import { DemandConfig, CollectionResult } from './types';
 import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
 import { optimizationConfig } from '../optimization/report';
@@ -40,6 +40,8 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
   return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs};
 }
 export interface DemandExecutionPrerequisites {
+  /** Fully verified Fleet inventory already collected in the same production run. */
+  verifiedFleetSnapshot?:CollectionResult;
   postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;
   currentRouteFuelEvidence?:ReadonlyMap<string,{
     aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -79,7 +81,7 @@ export async function runDemandExecution(
   const campaignGateRequired=campaignGateRequiredRaw==='true';
   const campaignGateVerified=campaignGateVerifiedRaw==='true';
   const report=await new IndividualDepartureExecutor(
-    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs),config,{...settings,
+    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot),config,{...settings,
     blockedDepartureKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
