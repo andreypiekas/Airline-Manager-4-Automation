@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/audit/readonly-fleet-preview-20261021' && github.event.head_commit.message == 'audit(rename): one-shot read-only fleet preview' && github.run_attempt == 1
+    if: github.ref == 'refs/heads/audit/readonly-fleet-preview-20261021' && startsWith(github.event.head_commit.message, 'audit-renaming-once') && github.run_attempt == 1
     runs-on: ubuntu-22.04
     timeout-minutes: 18
     steps:
