@@ -2,7 +2,7 @@ import { Page } from '@playwright/test';
 import { DeparturePort } from './executor';
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
-import { openFleetList,findFleetRoute } from './navigation';
+import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
 /** Complete handler grammar observed in Actions 36917592989/36918147380 on 2026-10-01.
@@ -37,11 +37,15 @@ export function validatedDispatchSnapshot(
 
 export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
+  private verifiedRouteCount:number|null=null;
+  private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
+  navigationMetrics(){return {...this.metrics};}
   constructor(private readonly page:Page,private readonly timeout=15000,
     private readonly collectionRetryDeadlineEpochMs?:number,
     private readonly verifiedEarlierFleet?:CollectionResult){}
   async collect(){
     this.prepared=null;
+    const collectStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:collect');
     await openFleetList(this.page,this.timeout);
     // Read only the freshly rendered Fleet count. The earlier complete inventory
@@ -60,13 +64,18 @@ export class PlaywrightDeparturePort implements DeparturePort {
         ready:reused.aircraft.filter(a=>a.state==='ready').length,
         freshPerTargetValidation:true
       }));
+      this.verifiedRouteCount=reused.expectedRoutes;
+      this.metrics.dispatchCollectMs=Date.now()-collectStarted;
       return reused;
     }
     if(this.verifiedEarlierFleet)console.warn('[DepartureInventory] '+JSON.stringify({
       status:'FULL_FLEET_RESCAN_REQUIRED',snapshotExpected:this.verifiedEarlierFleet.expectedRoutes,
       currentRouteTotal
     }));
+    this.metrics.fullFleetScans++;
     const result=await collectFleetWithFreshRetry(this.page,this.timeout,true,this.collectionRetryDeadlineEpochMs);
+    this.verifiedRouteCount=result.complete?result.expectedRoutes:null;
+    this.metrics.dispatchCollectMs=Date.now()-collectStarted;
     if(!result.complete){
       // Operational diagnostics only: never log page DOM, URL, session or IDs.
       console.warn('[DepartureCollection] '+JSON.stringify({
@@ -78,12 +87,29 @@ export class PlaywrightDeparturePort implements DeparturePort {
   }
   async prepare(expected:AircraftSnapshot){
     this.prepared=null;
+    const prepareStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:prepare');
-    await openFleetList(this.page,this.timeout);await findFleetRoute(this.page,expected,this.timeout);
+    // Reuse an already-displayed native page whenever the requested route is
+    // visible and the live Routes(N) count remains unchanged. Only the target
+    // details will authorize its subsequent one-shot departure.
+    const samePage=this.verifiedRouteCount!==null &&
+      await reuseCurrentFleetPageForTarget(this.page,expected,this.verifiedRouteCount,this.timeout);
+    if(samePage)this.metrics.pageReuses++;
+    else {
+      this.metrics.fullListNavigations++;
+      await openFleetList(this.page,this.timeout);
+      await findFleetRoute(this.page,expected,this.timeout);
+      if(this.verifiedRouteCount!==null){
+        const heading=(await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout})).trim();
+        const count=/^Routes\s*\((\d+)\)$/.exec(heading);
+        if(!count||Number(count[1])!==this.verifiedRouteCount)throw new Error('DEPARTURE_FLEET_COUNT_CHANGED');
+      }
+    }
     const fresh=await new DemandReader(this.page,this.timeout,true).readReadyAircraftDetails(expected);
     const control=this.page.locator('#detailsAction #routeViewDepart');
     const handler=await control.getAttribute('onclick')||'';
     if(await control.count()!==1||!await control.isVisible()||!await control.isEnabled()||!verifiedDepartureHandler(handler,fresh.routeId))throw Error('DEPARTURE_HANDLER_UNVERIFIED');
+    this.metrics.targetPreparationMs+=Date.now()-prepareStarted;
     this.prepared={aircraft:fresh,handler};return fresh;
   }
   async depart(expected:AircraftSnapshot){

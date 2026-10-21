@@ -16,10 +16,11 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 ## M2 — Page-oriented dispatch and recoverable queue
 
 - [ ] Build a read-only native Fleet cursor that establishes unique `aircraftId`/`routeId` once, without opening every detail.
-- [ ] Dispatch page-by-page, reusing the verified native current page when available, with fresh per-aircraft details and no repeated full-list navigation.
-- [ ] Checkpoint every page and confirmed departure in persistent run state; preserve uncertain-click quarantine.
-- [ ] Resume deferred aircraft on a later scheduled cycle, never replaying a confirmed or uncertain click. Compare against newly verified fleet state and demand.
-- [ ] Instrument stage latencies, page revisits, safe holds and number of full scans.
+- [x] Reuse the verified native current Fleet page for adjacent aircraft when it contains the target and Routes(N) is unchanged; fall back to a fresh full-list navigation otherwise. Each target's details remain freshly checked.
+- [x] Persist every confirmed departure and uncertain-click event in the durable return journal **before** the next aircraft; persist per-aircraft JSONL and atomic run reports. GitHub transports the return journal on run completion.
+- [ ] Persist the deferred-aircraft queue itself across scheduled runs and prioritize it using a **new** full identity/demand verification. Existing scheduled runs already re-evaluate ready aircraft; uncertain outcomes remain quarantined.
+- [x] Record Fleet-page reuse, full-list navigations, full Fleet rescans and preparation latency in `departure-navigation.json`.
+- [ ] Add end-to-end latency per stage and reliable native-page offsets/checkpoints that survive across runs.
 - [ ] Ensure eligible aircraft are not blocked only by a count cap, and all unfinished work has a precise status.
 
 ## M3 — Post-dispatch supply top-up
