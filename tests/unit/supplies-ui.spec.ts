@@ -186,7 +186,7 @@ test('post-departure purchases use independent report and respect total per-run 
   expect(post.entries[1].after.holding).toBe(7000);
   expect(await page.evaluate(()=>(window as any).purchases)).toBe(4);
   expect(JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8')).phase).toBe('pre');
-  expect(JSON.parse(await readFile(join(dir,'supply-post-report.json'),'utf8')).entries.map(e=>e.status))
+  expect(JSON.parse(await readFile(join(dir,'supply-post-report.json'),'utf8')).entries.map((e:{status:string})=>e.status))
    .toEqual(['purchased','purchased']);
   await expect(runSupplies(page,false,capped,dir,new SupplyPort(page,800),{
    phase:'post',mutationDeadlineEpochMs:Date.now()+120000
