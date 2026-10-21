@@ -18,7 +18,7 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 - [ ] Build a read-only native Fleet cursor that establishes unique `aircraftId`/`routeId` once, without opening every detail.
 - [x] Reuse the verified native current Fleet page for adjacent aircraft when it contains the target and Routes(N) is unchanged; fall back to a fresh full-list navigation otherwise. Each target's details remain freshly checked.
 - [x] Persist every confirmed departure and uncertain-click event in the durable return journal **before** the next aircraft; persist per-aircraft JSONL and atomic run reports. GitHub transports the return journal on run completion.
-- [ ] Persist the deferred-aircraft queue itself across scheduled runs and prioritize it using a **new** full identity/demand verification. Existing scheduled runs already re-evaluate ready aircraft; uncertain outcomes remain quarantined.
+- [x] Persist **time-deferred** aircraft into the existing append-only GitHub return journal; on a later run, exact `aircraftId:routeId` matches get priority after the complete fresh Fleet collection, while demand, fuel, campaigns, UI, deadline and uncertainty gates remain mandatory. Fresh rechecks clear old hints. No extra GitHub branch or scheduling was created.
 - [x] Record Fleet-page reuse, full-list navigations, full Fleet rescans and preparation latency in `departure-navigation.json`.
 - [ ] Add end-to-end latency per stage and reliable native-page offsets/checkpoints that survive across runs.
 - [ ] Ensure eligible aircraft are not blocked only by a count cap, and all unfinished work has a precise status.
@@ -49,3 +49,9 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 ### Safety invariants
 
 No unattended re-click after unknown departure outcome. Never bypass a challenge/CAPTCHA. Always confirm native controls and current target state. No guessed Fuel/CO2 requirement, purchase price, or aircraft identity. All code changes travel through a tested pull request; offline CI does not access the game.
+
+## M2 cross-run deferred dispatch queue: policy
+
+The last complete departure cycle records only `RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION` and `RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION` as priorities in the existing durable journal. It does **not** persist dispatch authorization. At the beginning of a new production cycle, `readPendingDeferredDispatchKeys` restores hints from the company-scoped return journal. Hints are matched against the complete freshly observed inventory by exact `aircraftId:routeId`; absent, inflight or rerouted aircraft are not promoted. Fresh demand, shared-pool ceilings, fuel, campaigns, native UI control, deadline and persisted unknown-operation quarantine are still enforced. After recheck, earlier matching hints are cleared, unless the aircraft was deferred again. Journal transport compaction keeps only the latest hint state per identity; safety-critical events remain preserved. Failures before a complete verified cycle cannot erase an outstanding queue. `departure-queue.json` summarizes the checkpoint.
+
+Manual production execution and post-flight supply refills are not introduced by this change. Ordinary scheduled runs are the only live verification opportunity.
