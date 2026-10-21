@@ -23,27 +23,7 @@ export function verifiedPromptRenameCallback(callback:string,id:string,mode:'reg
  // Require the prompt return value to be concatenated directly into the
  // ONLY AJAX command, for the correct field and ID. A handler that merely
  // mentions 'prompt' and 'Ajax' is not sufficient to authorize mutation.
- const exact=new RegExp(`^Ajax\\('${escaped}[A-Za-z0-9_]+='\\+prompt\\('[^']{1,160}'\\),'[A-Za-z0-9_-]+'\\);import type {Page} from '@playwright/test';
-import {mkdir,open,writeFile,rename} from 'node:fs/promises';
-import {join} from 'node:path';
-import {loginForReadOnlyCollection} from '../utils/read-only-login';
-import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
-import {collectRenameInventory} from './inventory';
-import {openFleetList,findFleetRoute} from '../demand/navigation';
-import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,type RenameTarget} from './plan';
-import type {CollectionResult} from '../demand/types';
-
-export type RenamePhase='aircraft'|'route';
-export interface RenameOutcome {
- aircraftId:string;routeId:string;field:RenamePhase;
- desired:string;status:'attempting'|'confirmed'|'held'|'outcome_unknown';
- reason:string;
-}
-function compactCallback(s:string){return s.replace(/\s/g,'');}
-/** Browser dialog/native AJAX only, never forge server requests or use a direct API. */
-export function verifiedPromptRenameCallback(callback:string,id:string,mode:'reg'|'routeReg'):boolean {
- const plain=compactCallback(callback);
-);
+ const exact=new RegExp("^Ajax\\('" + escaped + "[A-Za-z0-9_]+='\\+prompt\\('[^']{1,160}'\\),'[A-Za-z0-9_-]+'\\);$");
  return exact.test(plain);
 }
 async function inspectTarget(page:Page,expected:RenameTarget,registered:string,timeout:number){
