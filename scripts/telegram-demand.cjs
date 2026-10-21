@@ -20,6 +20,7 @@ function importantMessage(dir='test-results/demand',botResult=process.env.BOT_RE
   const execution=read(dir,'execution-report.json');
   const pricing=read(dir,'pricing-execution.json');
   const supply=read(dir,'supply-report.json');
+  const postSupply=read(dir,'supply-post-report.json');
   const candidate=read(dir,'candidate-data.json');
   const modules=read(dir,'operational-modules.json');
   if(botResult&&botResult!=='success')events.push('falha do run: '+botResult);
@@ -36,6 +37,7 @@ function importantMessage(dir='test-results/demand',botResult=process.env.BOT_RE
   unknown('reroute',route);
   unknown('pricing',pricing);
   if(supply?.halted===true)events.push('suprimentos interrompidos por fail-safe');
+  if(postSupply?.halted===true)events.push('reposicao pos-decolagens interrompida por fail-safe');
   const fuelHeld=(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length;
   if(fuelHeld>0)events.push('decolagens retidas por combustivel insuficiente verificado: '+fuelHeld);
   const reroutePricingHeld=(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='REROUTE_PRICING_NOT_VERIFIED').length;
@@ -188,6 +190,9 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
     return label+': '+bits.join(' • ');
   };
   if(d?.supplies)lines.push('Suprimentos: '+supply('Fuel',d.supplies.fuel)+' | '+supply('CO₂',d.supplies.co2));
+  if(d?.postDispatchSupplies?.observed)
+    lines.push('Reposição após decolagens: '+
+      supply('Fuel',d.postDispatchSupplies.fuel)+' | '+supply('CO₂',d.postDispatchSupplies.co2));
   const fuelForecastLine=fuelWindowMessage(d?.fuelPriceWindow);
   if(fuelForecastLine)lines.push(fuelForecastLine);
   if(d?.campaign){
