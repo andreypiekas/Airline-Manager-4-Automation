@@ -165,3 +165,73 @@ test('negative CO2 holding respects price ceiling and includes debt plus capacit
 });
 
 test('real Actions reruns rejected before opening the supply menu',async({page})=>{await fixture(page);const dir=await mkdtemp(join(tmpdir(),'am4-supply-'));try{await expect(runSupplies(page,false,{...env,GITHUB_RUN_ATTEMPT:'2'},dir)).rejects.toThrow('RERUN');expect(await page.locator('#fuelMain').isVisible()).toBe(false);}finally{await rm(dir,{recursive:true,force:true})}});
+
+test('post-departure purchases use independent report and respect total per-run quantity caps',async({page})=>{
+ await fixture(page);
+ const dir=await mkdtemp(join(tmpdir(),'am4-supply-post-'));
+ const capped={...env,MAX_FUEL_PURCHASE_PER_RUN:'12000',MAX_CO2_PURCHASE_PER_RUN:'12000'};
+ try{
+  const first=await runSupplies(page,false,capped,dir,new SupplyPort(page,800));
+  expect(first.entries.map(e=>e.plan.quantity)).toEqual([9000,9000]);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);
+  // Simulated consumption after verified departures, without invoking the game.
+  await page.evaluate('stock.fuel -= 6000; stock.co2 -= 6000');
+  const post=await runSupplies(page,false,capped,dir,new SupplyPort(page,800),{
+   phase:'post',mutationDeadlineEpochMs:Date.now()+120000
+  });
+  expect(post.phase).toBe('post');
+  expect(post.entries.map(e=>e.status)).toEqual(['purchased','purchased']);
+  expect(post.entries.map(e=>e.plan.quantity)).toEqual([3000,3000]);
+  expect(post.entries[0].after.holding).toBe(7000);
+  expect(post.entries[1].after.holding).toBe(7000);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(4);
+  expect(JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8')).phase).toBe('pre');
+  expect(JSON.parse(await readFile(join(dir,'supply-post-report.json'),'utf8')).entries.map(e=>e.status))
+   .toEqual(['purchased','purchased']);
+  await expect(runSupplies(page,false,capped,dir,new SupplyPort(page,800),{
+   phase:'post',mutationDeadlineEpochMs:Date.now()+120000
+  })).rejects.toThrow();
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(4);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('post-departure resupply refills verified capacity when no per-run quantity cap',async({page})=>{
+ await fixture(page);
+ const dir=await mkdtemp(join(tmpdir(),'am4-supply-post-'));
+ try{
+  await runSupplies(page,false,env,dir,new SupplyPort(page,800));
+  await page.evaluate('stock.fuel -= 5000; stock.co2 -= 7000');
+  const r=await runSupplies(page,false,env,dir,new SupplyPort(page,800),{
+   phase:'post',mutationDeadlineEpochMs:Date.now()+120000
+  });
+  expect(r.entries.map(e=>e.plan.quantity)).toEqual([5000,7000]);
+  expect(r.entries.every(e=>e.after.remainingCapacity===0)).toBe(true);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(4);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('post-departure purchase expires safely before opening the market',async({page})=>{
+ await fixture(page);
+ const dir=await mkdtemp(join(tmpdir(),'am4-supply-post-'));
+ try{
+  await runSupplies(page,false,env,dir,new SupplyPort(page,800));
+  const r=await runSupplies(page,false,env,dir,new SupplyPort(page,800),{
+   phase:'post',mutationDeadlineEpochMs:Date.now()+1000
+  });
+  expect(r.entries.map(e=>e.reason)).toEqual([
+   'POST_SUPPLY_TIME_BUDGET_EXHAUSTED','POST_SUPPLY_TIME_BUDGET_EXHAUSTED'
+  ]);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('post-dispatch pass refuses missing or inconclusive first supply run',async({page})=>{
+ await fixture(page);
+ const dir=await mkdtemp(join(tmpdir(),'am4-supply-post-'));
+ try{
+  await expect(runSupplies(page,false,env,dir,new SupplyPort(page,800),{
+   phase:'post',mutationDeadlineEpochMs:Date.now()+120000
+  })).rejects.toThrow('POST_SUPPLY_PRE_REPORT_MISSING');
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
