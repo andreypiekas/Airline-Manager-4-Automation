@@ -13,7 +13,7 @@ export interface DeparturePort {
 }
 export interface ExecutionSettings {
   dryRun: boolean;
-  maxDepartures: number;
+  maxDepartures: number | 'all';
   /** Absolute deadline after which no new departure mutation may start. */
   mutationDeadlineEpochMs?: number;
   blockedDepartureKeys?: ReadonlySet<string>;
@@ -92,7 +92,7 @@ export class IndividualDepartureExecutor {
   constructor(private readonly port: DeparturePort,private readonly demand: DemandConfig,
     private readonly settings: ExecutionSettings,private readonly save: (report: ExecutionReport)=>Promise<void>,
     private readonly adaptive:ReadonlyMap<string,AdaptiveThreshold>=new Map()) {
-    if (!demand.enabled || !demand.failSafe || !Number.isSafeInteger(settings.maxDepartures) || settings.maxDepartures<1 || settings.maxDepartures>100)
+    if (!demand.enabled || !demand.failSafe || (settings.maxDepartures!=='all' && (!Number.isSafeInteger(settings.maxDepartures) || settings.maxDepartures<1 || settings.maxDepartures>100)))
       throw new Error('EXECUTION_SETTINGS_INVALID');
   }
   async run(): Promise<ExecutionReport> {
@@ -139,7 +139,7 @@ export class IndividualDepartureExecutor {
       }
       if(this.attemptedAircraft.has(expected.aircraftId)||this.attemptedRoutes.has(expected.routeId)){entry.reason='ALREADY_ATTEMPTED';continue;}
       if(this.settings.blockedDepartureKeys?.has(expected.aircraftId+':'+expected.routeId)){entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK';continue;}
-      if(this.attemptedAircraft.size>=this.settings.maxDepartures){entry.reason='EXECUTION_LIMIT';continue;}
+      if(this.settings.maxDepartures!=='all' && this.attemptedAircraft.size>=this.settings.maxDepartures){entry.reason='EXECUTION_LIMIT';continue;}
       if(!initial.complete){entry.reason='INITIAL_COLLECTION_INCOMPLETE';continue;}
       if((aircraftCounts.get(expected.aircraftId)||0)!==1||(routeCounts.get(expected.routeId)||0)!==1){
         entry.reason='INITIAL_IDENTITY_OR_ROUTE_DUPLICATE';continue;
