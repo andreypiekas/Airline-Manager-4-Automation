@@ -105,7 +105,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   const fleet:CollectionResult=await collectFleetWithFreshRetry(page,timeout,false);
   // The snapshot is identity-checked even before a name is planned.
   let plan;
-  if(!(env.RENAME_MAPPING_CSV||'').trim()&&!(env.RENAME_AIRCRAFT_PREFIX||'').trim()&&operation==='preview'){
+  if(!(env.RENAME_MAPPING_CSV||'').trim()&&!(env.RENAME_AIRCRAFT_PREFIX||'').trim()&&!(env.RENAME_ROUTE_PREFIX||'').trim()&&operation==='preview'){
    const {verifiedFleet}=await import('./plan');const aircraft=verifiedFleet(fleet);
    report.fleetCount=aircraft.length;
    await writeFile(join(directory,'rename-template.csv'),mappingTemplate(fleet));
