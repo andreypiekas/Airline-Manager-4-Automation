@@ -384,7 +384,12 @@ test('All Operations', async ({ page }) => {
         CAMPAIGN_GATE_REQUIRED: campaignRequired ? 'true' : 'false',
         CAMPAIGN_GATE_VERIFIED: campaignVerifiedForDeparture ? 'true' : 'false',
         DEMAND_EXECUTION_MUTATION_DEADLINE_EPOCH_MS:String(departureMutationDeadlineEpochMs)
-      },'test-results/demand',{postReroutePricingBlockedAircraftIds,currentRouteFuelEvidence});
+      },'test-results/demand',{
+        postReroutePricingBlockedAircraftIds,currentRouteFuelEvidence,
+        // Route mutation invalidates the earlier inventory. Otherwise reuse
+        // its already-verified identities, and re-read every target fresh.
+        verifiedFleetSnapshot:reroutedAircraftIds.size===0?simulation.collection:undefined
+      });
     }
     return;
   }

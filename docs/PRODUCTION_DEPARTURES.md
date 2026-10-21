@@ -29,7 +29,7 @@ Antes de um clique real, o executor exige:
 
 ## Fluxo
 
-1. coletar a frota completa;
+1. aproveitar o inventário completo e verificado na análise anterior da mesma execução quando a contagem live de rotas não mudou; caso contrário, refazer a coleta completa por segurança;
 2. selecionar aeronaves que não estão em voo;
 3. validar identidade e unicidade;
 4. reabrir os detalhes do alvo;
@@ -66,7 +66,8 @@ Sem evidência suficiente, a política pode manter a aeronave em HOLD em vez de 
 Principais parâmetros:
 
 ```text
-MAX_INDIVIDUAL_DEPARTURES=20
+DISPATCH_ALL_READY=true
+MAX_INDIVIDUAL_DEPARTURES=20  # usado apenas quando DISPATCH_ALL_READY=false
 MIN_DEMAND_PERCENTAGE=80
 DEMAND_THRESHOLD_MODE=aggregate
 DEMAND_POOL_SCOPE=airport-pair
@@ -89,3 +90,9 @@ DEMAND_MAX_AGE_SECONDS=300
 - passageiros embarcados quando disponíveis.
 
 Uma run verde com zero departures pode ser comportamento correto.
+
+## Registro incremental — M1
+
+A execução grava `execution-report.json` atomicamente antes e depois de cada tentativa e `execution-events.jsonl` com as transições de estado de cada aeronave. O relatório Markdown é produzido ao final. Isso reduz a geração repetida do mesmo relatório, mas não equivale a uma fila persistente entre ciclos; a retomada por página/entre runs faz parte do M2 no [roadmap](./ROADMAP_AUTOMATION_2026.md).
+
+No modo `DISPATCH_ALL_READY=true`, a configuração encaminha `max_departures=all`: não há teto numérico arbitrário, mas cada partida continua sujeita a verificações de demanda, identidade, combustível, campanhas, registro de tentativa e prazo de mutação. Qualquer limite manual explícito continua prevalecendo.

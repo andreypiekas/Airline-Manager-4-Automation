@@ -3,10 +3,10 @@ export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):
 }
 
 import { Page } from '@playwright/test';
-import { mkdir,open,rename,writeFile,readFile } from 'node:fs/promises';
+import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDemandConfig } from './config';
-import { DemandConfig } from './types';
+import { DemandConfig, CollectionResult } from './types';
 import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
 import { optimizationConfig } from '../optimization/report';
@@ -26,8 +26,10 @@ async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undef
 }
 
 export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=process.env){
-  const maxDepartures=Number(env.DEMAND_MAX_DEPARTURES_PER_RUN||'1');
-  if(!Number.isSafeInteger(maxDepartures)||maxDepartures<1||maxDepartures>100)throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
+  const rawMax=(env.DEMAND_MAX_DEPARTURES_PER_RUN||'1').trim();
+  const maxDepartures: number | 'all'=rawMax==='all'?'all':Number(rawMax);
+  if(maxDepartures!=='all'&&(!/^[1-9]\d*$/.test(rawMax)||!Number.isSafeInteger(maxDepartures)||maxDepartures>100))
+    throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
   if(!config.enabled||!config.failSafe)throw Error('DEMAND_EXECUTION_DISABLED');
   if(!config.dryRun&&(config.poolScope!=='airport-pair'||env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'||env.GITHUB_ACTIONS!=='true'||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY||'')||!/^[1-9]\d*$/.test(env.GITHUB_RUN_ID||'')||
@@ -38,6 +40,8 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
   return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs};
 }
 export interface DemandExecutionPrerequisites {
+  /** Fully verified Fleet inventory already collected in the same production run. */
+  verifiedFleetSnapshot?:CollectionResult;
   postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;
   currentRouteFuelEvidence?:ReadonlyMap<string,{
     aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -57,9 +61,29 @@ export async function runDemandExecution(
   // Exclusive marker survives repeated calls in this runner; Actions rejects every real rerun attempt.
   const marker=await open(join(directory,'individual-execution.started'),'wx');await marker.close();
   const safe=(s:string)=>s.replace(/[|\r\n<>]/g,' ');
+  // Append a compact record for every state transition. A crash leaves the
+  // latest atomic JSON checkpoint plus the already written transition journal.
+  const savedTransitions=new Map<string,string>();
   const save=async(report:ExecutionReport)=>{
     const target=join(directory,'execution-report.json');
     await writeFile(target+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(target+'.tmp',target);
+    const transitions:string[]=[];
+    for(const entry of report.entries){
+      const key=entry.aircraftId+':'+entry.routeId;
+      const fingerprint=JSON.stringify([entry.status,entry.reason,entry.actualOnboard,entry.estimatedGrossTicketRevenue]);
+      if(savedTransitions.get(key)===fingerprint)continue;
+      transitions.push(JSON.stringify({
+        schemaVersion:1,recordedAt:new Date().toISOString(),
+        aircraftId:entry.aircraftId,routeId:entry.routeId,registration:entry.registration,
+        from:entry.from,to:entry.to,status:entry.status,reason:entry.reason,
+        actualOnboard:entry.actualOnboard,estimatedGrossTicketRevenue:entry.estimatedGrossTicketRevenue??null
+      }));
+      savedTransitions.set(key,fingerprint);
+    }
+    if(transitions.length)await appendFile(join(directory,'execution-events.jsonl'),transitions.join('\n')+'\n');
+    // The full human-readable report is derived once after processing, rather
+    // than recreated at each pre-click and post-click checkpoint.
+    if(!report.completedAt&&!report.halted)return;
     await writeFile(join(directory,'execution-report.md'),[
       `# Decolagens individuais — ${report.dryRun?'simulacao':'execucao real'}`,'',
       `Escopo: qualquer aeronave pronta em uma rota existente, independentemente do aeroporto/base atual. Avaliadas: ${report.summary.evaluated}; decolagens confirmadas: ${report.summary.departed}; simuladas: ${report.summary.simulated}; retidas: ${report.summary.held}; resultado incerto: ${report.summary.unknown}.`,'',
@@ -77,7 +101,7 @@ export async function runDemandExecution(
   const campaignGateRequired=campaignGateRequiredRaw==='true';
   const campaignGateVerified=campaignGateVerifiedRaw==='true';
   const report=await new IndividualDepartureExecutor(
-    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs),config,{...settings,
+    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot),config,{...settings,
     blockedDepartureKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
