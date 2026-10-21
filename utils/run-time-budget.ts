@@ -51,12 +51,12 @@ export function evaluateRunPhaseBudget(
 }
 
 /**
- * A green job with no confirmed departures and time-starved aircraft is a
- * false operational success. Resource/demand-only HOLDs are not failures.
- * Never infer that a departure was possible; report only the observed budget gate.
+ * Any held aircraft due to exhausted execution time is a partial operational
+ * cycle, even when other departures succeeded. A successful GitHub job cannot
+ * imply that the fleet was fully dispatched while such holds remain.
+ * Fuel/demand-only holds are legitimate and must not cause false failures.
  */
 export function hasDepartureBudgetStarvation(entries:ReadonlyArray<{status:string;reason:string}>):boolean {
-  if (entries.some(e=>e.status==='departed')) return false;
   return entries.some(e=>e.status==='held' && (
     e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION' ||
     e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'
