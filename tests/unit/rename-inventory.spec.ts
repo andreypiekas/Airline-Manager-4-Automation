@@ -37,6 +37,8 @@ test('fast identity-only inventory covers all native Fleet pages without opening
 test('short or repeated native page identities prevent renaming any aircraft',async({page})=>{
  await fixture(page,{short:true});
  await expect(collectRenameInventory(page,500)).rejects.toThrow();
+ // Reload a fresh JS realm before the second synthetic native page.
+ await page.goto('about:blank');
  await fixture(page,{duplicate:true});
  await expect(collectRenameInventory(page,1500)).rejects.toThrow('RENAME_FLEET_DUPLICATE_OR_INVALID_IDENTITY');
 });
