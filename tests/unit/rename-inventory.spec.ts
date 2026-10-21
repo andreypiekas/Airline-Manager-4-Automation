@@ -16,7 +16,7 @@ async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean}={})
     '<span class="s-text">AAA - GRU</span>'+
     '<a onclick="playSound(\\'neutral_click\\');Ajax(\\'fleet_details.php?id='+aircraft+'\\',\\'detailsAction\\');if(intro==0){$(\\'#routeAction\\').hide();}">'+
     '<span id="acRegList'+aircraft+'">N-'+n+'</span> - Plane</a></div>';
-  }).join('')+(index===0?'<div class="pagination"><a onclick="Ajax(\\'routes.php?start=20&sort=\\',\\'routeAction\\',this);">Next</a></div>':'');
+  }).join('')+(index===0?'<div class="pagination"><a href="#" onclick="Ajax(\\'routes.php?start=20&sort=\\',\\'routeAction\\',this);">Next</a></div>':'');
  }
  function Ajax(url){if(url.includes('routes.php?start=20')){window.pageAdvances++;render(1);}else window.detailsOpened++;}
  function playSound(){}const intro=0;function $(s){return {hide(){}}}
