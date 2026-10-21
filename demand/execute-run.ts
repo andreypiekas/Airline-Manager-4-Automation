@@ -3,7 +3,7 @@ export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):
 }
 
 import { Page } from '@playwright/test';
-import { mkdir,open,rename,writeFile,readFile } from 'node:fs/promises';
+import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDemandConfig } from './config';
 import { DemandConfig, CollectionResult } from './types';
@@ -61,9 +61,29 @@ export async function runDemandExecution(
   // Exclusive marker survives repeated calls in this runner; Actions rejects every real rerun attempt.
   const marker=await open(join(directory,'individual-execution.started'),'wx');await marker.close();
   const safe=(s:string)=>s.replace(/[|\r\n<>]/g,' ');
+  // Append a compact record for every state transition. A crash leaves the
+  // latest atomic JSON checkpoint plus the already written transition journal.
+  const savedTransitions=new Map<string,string>();
   const save=async(report:ExecutionReport)=>{
     const target=join(directory,'execution-report.json');
     await writeFile(target+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(target+'.tmp',target);
+    const transitions:string[]=[];
+    for(const entry of report.entries){
+      const key=entry.aircraftId+':'+entry.routeId;
+      const fingerprint=JSON.stringify([entry.status,entry.reason,entry.actualOnboard,entry.estimatedGrossTicketRevenue]);
+      if(savedTransitions.get(key)===fingerprint)continue;
+      transitions.push(JSON.stringify({
+        schemaVersion:1,recordedAt:new Date().toISOString(),
+        aircraftId:entry.aircraftId,routeId:entry.routeId,registration:entry.registration,
+        from:entry.from,to:entry.to,status:entry.status,reason:entry.reason,
+        actualOnboard:entry.actualOnboard,estimatedGrossTicketRevenue:entry.estimatedGrossTicketRevenue??null
+      }));
+      savedTransitions.set(key,fingerprint);
+    }
+    if(transitions.length)await appendFile(join(directory,'execution-events.jsonl'),transitions.join('\n')+'\n');
+    // The full human-readable report is derived once after processing, rather
+    // than recreated at each pre-click and post-click checkpoint.
+    if(!report.completedAt&&!report.halted)return;
     await writeFile(join(directory,'execution-report.md'),[
       `# Decolagens individuais — ${report.dryRun?'simulacao':'execucao real'}`,'',
       `Escopo: qualquer aeronave pronta em uma rota existente, independentemente do aeroporto/base atual. Avaliadas: ${report.summary.evaluated}; decolagens confirmadas: ${report.summary.departed}; simuladas: ${report.summary.simulated}; retidas: ${report.summary.held}; resultado incerto: ${report.summary.unknown}.`,'',
