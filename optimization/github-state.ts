@@ -59,7 +59,9 @@ export function compactReturnJournalForTransport(journal: any): any {
     // evidence. Keep only the most recent state per aircraft/route to prevent
     // unbounded state growth, including 'rechecked' tombstones.
     const deferred = tailPerKey(
-      journal.events.filter((e: any) => e?.type === 'dispatch-deferred' || e?.type === 'dispatch-deferred-rechecked'),
+      journal.events.filter((e: any) => e?.type === 'dispatch-deferred' || e?.type === 'dispatch-deferred-rechecked')
+        .sort((a: any,b: any) => Date.parse(a.observedAt)-Date.parse(b.observedAt) ||
+          String(a.eventId).localeCompare(String(b.eventId))),
       1,(e: any) => String(e?.aircraftId || '') + ':' + String(e?.routeId || '')
     );
     const safetyEvents = journal.events.filter(
