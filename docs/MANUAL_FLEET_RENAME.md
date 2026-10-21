@@ -33,6 +33,8 @@ Para cada aeronave, a ordem é: validar `aircraftId` e `routeId`; abrir os detal
 
 **Limitação importante:** o jogo pode mudar seus editores. A rotina de aplicação suporta apenas botões cujo callback já exibe uma operação nativa AJAX com `prompt()` para o ID e campo exatos. Se o controle real for diferente, a execução fará **HOLD**, sem tentar enviar uma requisição inventada. Se o servidor responder sem confirmação visual do novo valor, será marcado como **resultado incerto**, sem retry. O workflow pode parar após modificar apenas parte da frota; **não deve ser repetido automaticamente**. Examine o artefato antes de iniciar nova operação.
 
+O inventário é **leve e somente leitura**: percorre as páginas nativas de Fleet/Routes e confere 1:1 com `Routes(N)`, sem abrir todos os detalhes ou reler demanda de cada aeronave. Uma página incompleta, repetida ou com callback desconhecido bloqueia a operação. O escopo são todas as aeronaves **visíveis em Fleet/Routes**, não aeronaves eventualmente sem rota que não apareçam nessa tela.
+
 O hash inclui os IDs, o registro atual de cada aeronave e a descrição original de sua rota; mudanças relevantes entre prévia e aplicação exigem nova prévia. Não use nomes para identificar aeronaves nos demais módulos: os identificadores técnicos permanecem `aircraftId` e `routeId`.
 
 ## Segurança e histórico
