@@ -45,7 +45,7 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
 /** A supported game UI exposes a one-shot native prompt + AJAX save action.
  * Unknown UI shapes are held, not guessed and not clicked.
  */
-async function renameNativePrompt(page:Page,details:Awaited<ReturnType<typeof inspectTarget>>,
+export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<typeof inspectTarget>>,
  target:RenameTarget,field:RenamePhase,desired:string,save:()=>Promise<void>,timeout:number){
  const id=field==='aircraft'?target.aircraftId:target.routeId;
  const mode=field==='aircraft'?'reg':'routeReg';
