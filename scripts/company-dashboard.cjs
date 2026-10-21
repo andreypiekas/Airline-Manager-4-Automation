@@ -6,7 +6,7 @@ const safe=s=>String(s??'').replace(/[|\r\n<>]/g,' ');
 
 function build(dir='test-results/demand',logPath='test-results/bot.log',journalPath='.am4-state/github/return-journal.json'){
   const demand=read(dir,'demand-report.json'),fleet=read(dir,'fleet-observations.json'),execution=read(dir,'execution-report.json'),
-    routeExecution=read(dir,'route-execution.json'),routeResearch=read(dir,'route-research.json'),candidateData=read(dir,'candidate-data.json'),supplies=read(dir,'supply-report.json'),pricing=read(dir,'pricing-execution.json'),modules=read(dir,'operational-modules.json'),
+    routeExecution=read(dir,'route-execution.json'),routeResearch=read(dir,'route-research.json'),candidateData=read(dir,'candidate-data.json'),supplies=read(dir,'supply-report.json'),postSupplies=read(dir,'supply-post-report.json'),pricing=read(dir,'pricing-execution.json'),modules=read(dir,'operational-modules.json'),
     uiHealth=read(dir,'ui-health.json'),challenge=read(dir,'challenge-detected.json'),semi=read(dir,'semi-automatic-summary.json'),runBudget=read(dir,'run-time-budget.json'),ownedBases=read(dir,'owned-airline-bases.json');
   const log=(()=>{try{return fs.readFileSync(logPath,'utf8')}catch{return ''}})();
   const journal=readPath(journalPath),events=Array.isArray(journal?.events)?journal.events:[];
@@ -52,6 +52,12 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
   const count=s=>states.filter(x=>x.state===s).length;
   const supply={};
   for(const x of supplies?.entries||[])supply[x.kind]={status:x.status,reason:x.reason,pricePer1000:x.before?.pricePer1000??null,quantity:x.plan?.quantity??null,estimatedCost:x.plan?.estimatedCost??null};
+  const postSupply={};
+  for(const x of postSupplies?.entries||[])postSupply[x.kind]={
+    status:x.status,reason:x.reason,pricePer1000:x.before?.pricePer1000??null,
+    quantity:x.plan?.quantity??null,estimatedCost:x.plan?.estimatedCost??null,
+    confirmedCost:x.status==='purchased'?x.quotedCost??null:null
+  };
   for(const [kind,policy] of Object.entries(supplies?.adaptive||{}))if(supply[kind])Object.assign(supply[kind],{effectiveMax:policy?.effectiveMax??null,policySource:policy?.source??null,samples:policy?.samples??null});
   const dashboard={
     schemaVersion:1,generatedAt:new Date().toISOString(),source:'observed-run-artifacts-only',
@@ -99,6 +105,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
       allRequiredVerified:modules?.campaign?.evidence?.allRequiredVerified??null,
       departureAuthorized:modules?.campaign?.evidence?.departureAuthorized??null},
     supplies:supply,
+    postDispatchSupplies:{observed:postSupplies?.phase==='post',halted:postSupplies?.halted??null,fuel:postSupply.fuel??null,co2:postSupply.co2??null},
     fuelPriceWindow:supplies?.fuelPriceWindow??null,
     uiHealth:{status:uiHealth?.status??'not_observed',mutationAuthorized:uiHealth?.mutationAuthorized??null,
       unhealthyChecks:(uiHealth?.checks||[]).filter(x=>x?.status!=='healthy').length},
@@ -144,6 +151,9 @@ function markdown(d,states){
   `| Orçamento de tempo | **${d.timeBudget.blocked===0?'OK':'BLOQUEIOS'}** | ${fmt(d.timeBudget.blocked)} fase(s) bloqueada(s) de ${fmt(d.timeBudget.decisions)} |`,'',
   '## Suprimentos e módulos','',
   `- ${supplyText('Fuel',fuel)}.`,`- ${supplyText('CO₂',co2)}.`,
+  d.postDispatchSupplies?.observed
+    ? `- **Reposição após decolagens:** ${supplyText('Fuel',d.postDispatchSupplies.fuel)}; ${supplyText('CO₂',d.postDispatchSupplies.co2)}.`
+    : '- **Reposição após decolagens:** não executada.',
   d.fuelPriceWindow?.nextEligible
     ? `- **Proxima janela estimada de Fuel (nao verificada):** ${d.fuelPriceWindow.nextEligible.localDate} ${d.fuelPriceWindow.nextEligible.localTime} UTC-3, referencia ${fmt(d.fuelPriceWindow.nextEligible.pricePer1000)}/1k; agora ${fmt(d.fuelPriceWindow.currentPricePer1000)}/1k; teto configurado ${fmt(d.fuelPriceWindow.configuredMax)}/1k, teto efetivo ${fmt(d.fuelPriceWindow.effectiveMax)}/1k; diferenca potencial ${fmt(d.fuelPriceWindow.nextEligible.savingVsCurrentPer1000)}/1k (${d.fuelPriceWindow.nextEligible.savingVsCurrentPercent??'n/d'}%). **Exige preco live para comprar.**`
     : '- **Janela estimada de Fuel:** sem horario listado elegivel nas proximas 24h, ou referencia indisponivel. A compra depende do preco live.',

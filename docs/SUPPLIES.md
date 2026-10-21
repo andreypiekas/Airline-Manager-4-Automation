@@ -80,3 +80,18 @@ Se uma compra foi tentada, mas o resultado não pôde ser confirmado:
 - evidência pós-compra quando disponível.
 
 O Summary exibe apenas a consolidação executiva.
+
+## Reposição após decolagens (M3)
+
+Após **um ciclo real de partidas inteiramente avaliado** e pelo menos uma partida confirmada, o executor pode reler os mercados de Fuel e CO₂ e completar novamente os estoques. Somente o preço e os dados **live** do jogo autorizam a operação; preços iguais aos tetos efetivos são permitidos.
+
+A segunda fase não é executada se:
+- a execução for simulada, não houver partidas confirmadas ou o despacho terminar incompleto por tempo/limite;
+- uma partida ficar incerta, ou o relatório operacional estiver ausente/inconsistente;
+- o suprimento inicial tiver resultado desconhecido/incompleto;
+- faltar margem de tempo para comprar, confirmar e preservar o estado;
+- os valores excederem o teto, reserva mínima de caixa ou limite **total por recurso e por execução** (compras antes + depois).
+
+Não há compra em massa sem confirmação: cada recurso usa novamente o controle nativo, cotação e snapshot fresco do mercado, saldo e pagamento confirmados. Resultado incerto não é repetido. O segundo ciclo é exclusivo (`supplies-post.started`) e tem relatório independente `supply-post-report.json/.md`. O abastecimento inicial permanece em `supply-report.json/.md`.
+
+A fase não tenta compensar um despacho incompleto nem alterar os bloqueios de demanda/fuel: aeronaves retidas por falta de demanda ou recursos continuam seguindo seus próprios gates. O fim da fase de decolagens apenas determina quando se pode reavaliar os mercados.

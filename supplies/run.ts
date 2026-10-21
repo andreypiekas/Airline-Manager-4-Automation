@@ -18,10 +18,34 @@ export function supplyCapsForRun(journal:Parameters<typeof adaptiveSupplyCap>[0]
    co2:{...co2History,effectiveMax:config.maxPrice.co2,source:'configured-cap' as const}
  };
 }
-export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv=process.env,directory='test-results/demand',port=new SupplyPort(page)){
+export interface SupplyRunOptions{
+ phase?:'pre'|'post';
+ /** Same finalization-reserved deadline as the departure executor. */
+ mutationDeadlineEpochMs?:number;
+}
+export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv=process.env,directory='test-results/demand',
+ port=new SupplyPort(page),options:SupplyRunOptions={}){
+ const phase=options.phase??'pre',post=phase==='post';
+ if(phase!=='pre'&&phase!=='post')throw Error('SUPPLY_PHASE_INVALID');
  const config=supplyConfig(env);const optimization=optimizationConfig(env);
  if(!dryRun)executionEnvironment({...readDemandConfig(env),dryRun:false},env);
+ if(post&&(!Number.isSafeInteger(options.mutationDeadlineEpochMs)||options.mutationDeadlineEpochMs===undefined||options.mutationDeadlineEpochMs<=0))
+   throw Error('POST_SUPPLY_DEADLINE_INVALID');
  await mkdir(directory,{recursive:true});
+ let preReport:any=null;
+ if(post){
+  // A second pass is never allowed if the first purchase pass was interrupted
+  // or a prior purchase outcome is unknown. First-pass volume caps remain
+  // binding across BOTH passes in the same GitHub Actions execution.
+  try{preReport=JSON.parse(await readFile(join(directory,'supply-report.json'),'utf8'));}catch{
+   throw Error('POST_SUPPLY_PRE_REPORT_MISSING');
+  }
+  if(preReport?.phase!=='pre'||preReport.dryRun!==dryRun||!Array.isArray(preReport.entries)||
+     preReport.entries.length!==2||preReport.entries[0]?.kind!=='fuel'||preReport.entries[1]?.kind!=='co2'||
+     preReport.halted!==false||
+     preReport.entries.some((e:any)=>!['purchased','skipped','would_buy'].includes(e?.status)))
+   throw Error('POST_SUPPLY_PRE_REPORT_UNVERIFIED');
+ }
  const journal=optimization.returnJournal?validateReturnJournal(JSON.parse(await readFile(join(optimization.returnJournal.directory,'return-journal.json'),'utf8')),optimization.returnJournal.scope,new Date()):{schemaVersion:1 as const,scope:'disabled',entries:[]};
  const blockedSupplyKinds=unresolvedSupplyKinds(journal);
  const adaptive=supplyCapsForRun(journal,config);
@@ -29,12 +53,13 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
  const now=new Date(),local=new Date(now.getTime()-180*60000),monthLength=new Date(Date.UTC(local.getUTCFullYear(),local.getUTCMonth()+1,0)).getUTCDate();
  const calendar=await loadReference<FuelCalendar>(monthLength===30?'fuel-calendar-30.json':'fuel-calendar-31.json');
  const forecast={fuel:calendarReference(now,calendar,'fuel'),co2:calendarReference(now,calendar,'co2')};
- if(!dryRun){const marker=await open(join(directory,'supplies.started'),'wx');await marker.close();}
+ if(!dryRun){const marker=await open(join(directory,post?'supplies-post.started':'supplies.started'),'wx');await marker.close();}
  const initialWindow=fuelPriceWindow(now,calendar,null,config.maxPrice.fuel,effectiveConfig.maxPrice.fuel);
- const report:{dryRun:boolean;enabled:boolean;entries:any[];halted:boolean;adaptive:any;forecast:any;fuelPriceWindow:FuelPriceWindow}={dryRun,enabled:config.enabled,entries:[],halted:false,adaptive,forecast,fuelPriceWindow:initialWindow};
+ const report:{phase:'pre'|'post';dryRun:boolean;enabled:boolean;entries:any[];halted:boolean;adaptive:any;forecast:any;fuelPriceWindow:FuelPriceWindow}={phase,dryRun,enabled:config.enabled,entries:[],halted:false,adaptive,forecast,fuelPriceWindow:initialWindow};
  const save=async()=>{
-  const file=join(directory,'supply-report.json');await writeFile(file+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(file+'.tmp',file);
-  await writeFile(join(directory,'supply-report.md'),['# Combustivel e CO2','',`Simulacao: ${dryRun}; habilitado: ${config.enabled}.`,'',
+  const name=post?'supply-post-report':'supply-report';
+  const file=join(directory,name+'.json');await writeFile(file+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(file+'.tmp',file);
+  await writeFile(join(directory,name+'.md'),['# Combustivel e CO2 — '+(post?'reposicao apos decolagens':'abastecimento inicial'),'',`Simulacao: ${dryRun}; habilitado: ${config.enabled}.`,'',
    '| Recurso | Preco / 1.000 | Teto efetivo inclusivo | Politica | Quantidade | Resultado |','| --- | --- | --- | --- | --- | --- |',
    ...report.entries.map(e=>`| ${e.kind} | ${e.before?.pricePer1000??'—'} | ${effectiveConfig.maxPrice[e.kind as Commodity]} | ${adaptive[e.kind as Commodity].source} (${adaptive[e.kind as Commodity].samples} amostras) | ${e.plan?.quantity??0} | ${e.status}: ${e.reason} |`),'',
    `Calendario de referencia: fuel=${forecast.fuel.status}, CO2=${forecast.co2.status}. O calendario nunca autoriza compra; exige preco live.`,
@@ -50,6 +75,10 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
   for(const kind of ['fuel','co2'] as const){
    const entry:any={kind,status:'reading',reason:'PENDING',before:null,plan:null};report.entries.push(entry);
    await save();
+   if(post&&Date.now()>options.mutationDeadlineEpochMs!-45000){
+    entry.status='skipped';entry.reason='POST_SUPPLY_TIME_BUDGET_EXHAUSTED';
+    await save();continue;
+   }
    await port.open(kind);entry.before=await port.snapshot(kind);
    if(kind==='fuel')report.fuelPriceWindow=fuelPriceWindow(new Date(),calendar,entry.before.pricePer1000,config.maxPrice.fuel,effectiveConfig.maxPrice.fuel);
    await save();
@@ -61,7 +90,19 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
      entry.reconciliation={status:'resolved',reason:'NEWER_VERIFIED_SUPPLY_SNAPSHOT',mutationAuthorized:false};
     }
    }
-   entry.plan=planPurchase(entry.before,kind,effectiveConfig);
+   const spentEarlier=post?(preReport.entries||[])
+     .filter((e:any)=>e.kind===kind&&e.status==='purchased')
+     .reduce((sum:number,e:any)=>sum+e.plan?.quantity,0):0;
+   const originalCap=config.maxQuantity[kind];
+   if(post&&originalCap>0&&(!Number.isSafeInteger(spentEarlier)||spentEarlier<0||spentEarlier>originalCap))
+    throw Error('POST_SUPPLY_PRE_QUANTITY_INVALID');
+   if(post&&originalCap>0&&spentEarlier>=originalCap){
+    entry.status='skipped';entry.reason='RUN_QUANTITY_LIMIT_ALREADY_USED';
+    await save();continue;
+   }
+   const availableCap=originalCap===0?0:originalCap-spentEarlier;
+   const phaseConfig={...effectiveConfig,maxQuantity:{...effectiveConfig.maxQuantity,[kind]:availableCap}};
+   entry.plan=planPurchase(entry.before,kind,phaseConfig);
    if(entry.plan.reason==='INVALID_DATA')throw Error('SUPPLY_DATA_INVALID');
    if(!entry.plan.quantity){entry.status='skipped';entry.reason=entry.plan.reason;await save();continue;}
    const quote=await port.quote(kind,entry.plan.quantity);
@@ -72,6 +113,10 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
      entry.quotedCost>entry.plan.estimatedCost||Math.abs(entry.quotedCost-expectedCost)>=1)throw Error('SUPPLY_QUOTE_CHANGED_OR_OVER_BUDGET');
    entry.reason='PRICE_AND_BUDGET_ACCEPTED';
    if(dryRun){entry.status='would_buy';await save();continue;}
+   if(post&&Date.now()>options.mutationDeadlineEpochMs!-45000){
+    entry.status='skipped';entry.reason='POST_SUPPLY_TIME_BUDGET_EXHAUSTED';
+    await save();continue;
+   }
    entry.status='attempting';await save();
    try{
     entry.after=await port.purchase(kind,entry.plan.quantity,entry.before,quote);

@@ -25,11 +25,11 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 
 ## M3 — Post-dispatch supply top-up
 
-- [ ] After a fully verified dispatch cycle, re-read **live** Fuel and CO2 stock, price and cash.
-- [ ] Replenish towards verified storage capacity when price <= configured effective ceilings, within purchase budget and minimum cash reserve.
-- [ ] Prevent duplicate purchases and quarantine unknown outcomes.
-- [ ] Distinguish pre-dispatch purchase from post-dispatch replenishment in the summary and Telegram.
-- [ ] No post-dispatch purchase when the cycle is incomplete or another operation is uncertain.
+- [x] After a complete, verified real dispatch cycle with confirmed departures, start a second read of **live** Fuel and CO2 price, stock and cash, subject to finalization time budget.
+- [x] Replenish towards verified storage capacity when live price <= configured effective ceilings and native quote passes, within purchase budget, minimum cash reserve and cumulative per-run commodity caps.
+- [x] Use an exclusive second-pass marker; never repeat unknown outcomes, skip on incomplete first supply pass and honor persisted unknown quarantines.
+- [x] Persist `supply-post-report.json/.md` separately from initial supplies and expose both in the dashboard/Telegram.
+- [x] Post-dispatch purchases require a complete real dispatch report with no time, limit or outcome-unknown holds. A safe hold from insufficient demand/fuel remains a legitimate evaluated hold.
 
 ## M4 — Manual aircraft and route registration renaming
 
