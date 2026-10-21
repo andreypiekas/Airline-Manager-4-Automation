@@ -26,7 +26,7 @@ export function validatedDispatchSnapshot(
     snapshot.expectedRoutes!==currentRouteTotal||snapshot.aircraft.length!==currentRouteTotal)return null;
   const routes=new Set<string>(),aircraft=new Set<string>();
   for(const a of snapshot.aircraft){
-    if(!/^[1-9]\d*$/.test(a.routeId)||!/^[1-9]\\d*$/.test(a.aircraftId)||
+    if(!/^[1-9]\d*$/.test(a.routeId)||!/^[1-9]\d*$/.test(a.aircraftId)||
       !a.registration.trim()||!/^[A-Z0-9]{3}$/.test(a.from)||!/^[A-Z0-9]{3}$/.test(a.to)||
       a.from===a.to||routes.has(a.routeId)||aircraft.has(a.aircraftId))return null;
     if(a.state==='ready'&&(!a.capacity||!a.remaining||!a.dailyTotal||a.issue))return null;
