@@ -26,7 +26,11 @@ jobs:
       - name: Conferir base de producao
         run: |
           git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
-          if [ "$(git rev-parse HEAD^)" != "$(git rev-parse origin/main)" ]; then
+          # Auditoria pontual: pin do commit main efetivamente revisado.
+          # Não depender de HEAD^: checkout@v4 usa histórico raso e a branch tem mais de um commit.
+          EXPECTED_MAIN_SHA="e0693d2879afb80817ce7f603617f5dad57c0ae1"
+          ACTUAL_MAIN_SHA="$(git rev-parse --verify refs/remotes/origin/main)"
+          if [ "$ACTUAL_MAIN_SHA" != "$EXPECTED_MAIN_SHA" ]; then
             echo "::error::O commit da main mudou desde o agendamento. Nenhum login foi feito."
             exit 1
           fi
