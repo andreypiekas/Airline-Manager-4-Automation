@@ -8,7 +8,7 @@ import { hasIncompleteInitialDepartureCollection } from '../../demand/execute-ru
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
-function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number;prepareFail?:boolean;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>}={}) {
+function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number|'all';prepareFail?:boolean;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>}={}) {
   let reads=0,clicks=0;const saved:ExecutionReport[]=[];
   const port:DeparturePort={collect:async()=>{reads++;if(options.collectFail)throw Error('loading');return options.initial??collection([snapshot()]);},
     prepare:async a=>{if(options.prepareFail)throw Error('unverified');return options.prepared??snapshot(a);},
@@ -86,6 +86,17 @@ test('incomplete second fleet collection must fail the operational run rather th
 for(const [index,options] of [{clickFail:true},{confirmed:null},{confirmed:snapshot({state:'ready'})},{confirmed:snapshot({state:'inflight',timing:null})}].entries())
  test(`unknown result stops without retry case ${index}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.halted).toBe(true);expect(r.summary.unknown).toBe(1);expect(s.clicks()).toBe(1);});
 test('persistence failure stops before operation',async()=>{const s=setup({saveFail:true});await expect(s.executor.run()).rejects.toThrow('disk');expect(s.clicks()).toBe(0);});
+test('all mode evaluates and dispatches all eligible aircraft, not a fixed numeric quota',async()=>{
+ const list=['AAA','BBB','CCC'].map((from,index)=>snapshot({
+   aircraftId:String(index+1),routeId:String(index+10),registration:'TEST-'+(index+1),
+   from,to:'GRU',routeLabel:from+' - GRU'
+ }));
+ const s=setup({initial:collection(list),limit:'all'});
+ const r=await s.executor.run();
+ expect(s.clicks()).toBe(3);
+ expect(r.summary).toMatchObject({evaluated:3,departed:3,held:0,unknown:0});
+ expect(r.entries.some(e=>e.reason==='EXECUTION_LIMIT')).toBe(false);
+});
 test('real departure cap prevents additional attempts',async()=>{const list=[snapshot(),snapshot({aircraftId:'2',routeId:'11'})];const s=setup({initial:collection(list),fresh:collection(list)});const r=await s.executor.run();expect(s.clicks()).toBe(1);expect(r.entries[1].reason).toBe('EXECUTION_LIMIT');});
 test('multiple aircraft use one complete fleet snapshot and targeted fresh reads',async()=>{
  const list=[snapshot(),snapshot({aircraftId:'2',routeId:'11',from:'BBB',to:'GRU',routeLabel:'BBB - GRU'})];
