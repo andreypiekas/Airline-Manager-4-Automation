@@ -33,10 +33,10 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 
 ## M4 — Manual aircraft and route registration renaming
 
-- [ ] Separate `workflow_dispatch` entrypoint; **no cron** and no call from production.
-- [ ] Preview mappings or import CSV; validate native edit controls for BOTH available name/registration fields.
-- [ ] Require explicit manual confirmation; verify each saved field, log success/failure, support dry-run.
-- [ ] Never use mutable display names as persistent technical identity.
+- [x] Separate **manual-only** `workflow_dispatch` entrypoint; no cron and no call from production.
+- [x] Read-only full-fleet preview, strict full CSV or two-prefix numbering; inspect native prompt/AJAX controls separately for aircraft `mode=reg` and route `mode=routeReg` and fail-closed when changed.
+- [x] Require matching SHA256 of the preview and explicit approval for apply; write per-field checkpoints, verify UI after saves, refuse uncertain retry. Preview mode cannot mutate.
+- [x] Use exact immutable `aircraftId` and `routeId` as targets; registrations never become permanent technical IDs.
 
 ## M5 — Route intelligence (strictly last)
 
@@ -55,3 +55,5 @@ No unattended re-click after unknown departure outcome. Never bypass a challenge
 The last complete departure cycle records only `RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION` and `RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION` as priorities in the existing durable journal. It does **not** persist dispatch authorization. At the beginning of a new production cycle, `readPendingDeferredDispatchKeys` restores hints from the company-scoped return journal. Hints are matched against the complete freshly observed inventory by exact `aircraftId:routeId`; absent, inflight or rerouted aircraft are not promoted. Fresh demand, shared-pool ceilings, fuel, campaigns, native UI control, deadline and persisted unknown-operation quarantine are still enforced. After recheck, earlier matching hints are cleared, unless the aircraft was deferred again. Journal transport compaction keeps only the latest hint state per identity; safety-critical events remain preserved. Failures before a complete verified cycle cannot erase an outstanding queue. `departure-queue.json` summarizes the checkpoint.
 
 Manual production execution and post-flight supply refills are not introduced by this change. Ordinary scheduled runs are the only live verification opportunity.
+
+M4 user guide: [manual fleet rename](./MANUAL_FLEET_RENAME.md). The native game rename UI has not yet been exercised on a real account: preview is safe, and apply stops if its native handler or post-save evidence differs from the supported prompt-based editor. Manual preview/apply must be explicitly invoked by a user; CI checks are offline only.
