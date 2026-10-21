@@ -14,6 +14,20 @@ export function mappingTemplate(collection:CollectionResult):string{
  const fleet=verifiedFleet(collection);
  return [header,...fleet.map(a=>[a.aircraftId,a.routeId,'',''].join(','))].join('\n')+'\n';
 }
+/** Verify the current route endpoints at the moment a rename target is opened.
+ * IDs alone cannot prove a route is still the one from the approved preview.
+ * This is read-only and refuses mismatches or ambiguous native labels.
+ */
+export function assertRenameRouteLabelUnchanged(expected:string,labels:string[]):void{
+ const normalize=(value:string)=>{
+  const match=/^([A-Z0-9]{3})\s*-\s*([A-Z0-9]{3})$/.exec(value.trim());
+  return match?match[1]+'-'+match[2]:null;
+ };
+ const baseline=normalize(expected);
+ const current=labels.map(normalize).filter((value):value is string=>value!==null);
+ if(!baseline||current.length===0||current.some(value=>value!==baseline))
+  throw Error('RENAME_ROUTE_IDENTITY_CHANGED');
+}
 export function verifiedFleet(collection:CollectionResult):AircraftSnapshot[]{
  if(!collection?.complete||!Number.isSafeInteger(collection.expectedRoutes)||
  collection.expectedRoutes===null||collection.expectedRoutes<=0||collection.expectedRoutes!==collection.aircraft.length)
