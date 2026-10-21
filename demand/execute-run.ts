@@ -27,7 +27,7 @@ async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undef
 
 export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=process.env){
   const maxDepartures=Number(env.DEMAND_MAX_DEPARTURES_PER_RUN||'1');
-  if(!Number.isSafeInteger(maxDepartures)||maxDepartures<1||maxDepartures>20)throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
+  if(!Number.isSafeInteger(maxDepartures)||maxDepartures<1||maxDepartures>100)throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
   if(!config.enabled||!config.failSafe)throw Error('DEMAND_EXECUTION_DISABLED');
   if(!config.dryRun&&(config.poolScope!=='airport-pair'||env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'||env.GITHUB_ACTIONS!=='true'||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY||'')||!/^[1-9]\d*$/.test(env.GITHUB_RUN_ID||'')||
