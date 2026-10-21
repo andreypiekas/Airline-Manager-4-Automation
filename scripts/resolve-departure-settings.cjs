@@ -73,9 +73,9 @@ function resolveDepartureSettings(env) {
     maxDepartures = inputLimit;
     limitSource = 'input:limit';
   } else if (dispatchAllReady && execute) {
-    // Opt-in via workflow/repository variable: evaluate all ready aircraft.
-    // The executor still stops on deadline, fuel, demand, identity and uncertainty.
-    maxDepartures = 100;
+    // No artificial count cap for production. The executor enumerates the
+    // verified Fleet inventory and still enforces all per-aircraft safety gates.
+    maxDepartures = 'all';
     limitSource = 'variable:DISPATCH_ALL_READY';
   } else if (repositoryLimit === null || repositoryLimit === 0) {
     maxDepartures = 1;
@@ -85,7 +85,7 @@ function resolveDepartureSettings(env) {
     limitSource = 'variable:MAX_INDIVIDUAL_DEPARTURES';
   }
 
-  if (!Number.isSafeInteger(maxDepartures) || maxDepartures < 1 || maxDepartures > 100) {
+  if (maxDepartures !== 'all' && (!Number.isSafeInteger(maxDepartures) || maxDepartures < 1 || maxDepartures > 100)) {
     throw new Error('Limite de decolagens deve ser inteiro de 1 a 100.');
   }
 
