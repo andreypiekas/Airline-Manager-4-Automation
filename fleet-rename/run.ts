@@ -29,7 +29,7 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  await findFleetRoute(page,{aircraftId:expected.aircraftId,routeId:expected.routeId} as any,timeout);
  const row=page.locator('#routesContainer #routeMainList'+expected.routeId);
  if(await row.count()!==1||!await row.isVisible())throw Error('RENAME_TARGET_MISSING');
- const link=row.locator('a').filter({has:row.locator('#acRegList'+expected.aircraftId)});
+ const link=row.locator('a:has(#acRegList'+expected.aircraftId+')');
  if(await link.count()!==1||await row.locator('#acRegList'+expected.aircraftId).innerText()!==registered)
   throw Error('RENAME_AIRCRAFT_IDENTITY_CHANGED');
  const expectedCallback=`playSound('neutral_click');Ajax('fleet_details.php?id=${expected.aircraftId}','detailsAction');if(intro==0){$('#routeAction').hide();}`;
