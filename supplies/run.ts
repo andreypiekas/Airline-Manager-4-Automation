@@ -29,7 +29,7 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
  if(phase!=='pre'&&phase!=='post')throw Error('SUPPLY_PHASE_INVALID');
  const config=supplyConfig(env);const optimization=optimizationConfig(env);
  if(!dryRun)executionEnvironment({...readDemandConfig(env),dryRun:false},env);
- if(post&&(!Number.isSafeInteger(options.mutationDeadlineEpochMs)||options.mutationDeadlineEpochMs!<=0))
+ if(post&&(!Number.isSafeInteger(options.mutationDeadlineEpochMs)||options.mutationDeadlineEpochMs===undefined||options.mutationDeadlineEpochMs<=0))
    throw Error('POST_SUPPLY_DEADLINE_INVALID');
  await mkdir(directory,{recursive:true});
  let preReport:any=null;
