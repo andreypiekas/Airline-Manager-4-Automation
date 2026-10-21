@@ -64,6 +64,8 @@ export async function runDemandExecution(
   // Append a compact record for every state transition. A crash leaves the
   // latest atomic JSON checkpoint plus the already written transition journal.
   const savedTransitions=new Map<string,string>();
+  const checkpointedDepartures=new Set<string>();
+  const checkpointedUncertain=new Set<string>();
   const save=async(report:ExecutionReport)=>{
     const target=join(directory,'execution-report.json');
     await writeFile(target+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(target+'.tmp',target);
@@ -81,6 +83,25 @@ export async function runDemandExecution(
       savedTransitions.set(key,fingerprint);
     }
     if(transitions.length)await appendFile(join(directory,'execution-events.jsonl'),transitions.join('\n')+'\n');
+    if(!settings.dryRun&&optimization.returnJournal){
+      // A confirmed flight or unknown outcome must reach the durable return
+      // journal BEFORE processing the next aircraft. The workflow then
+      // transports that same append-only journal into its dedicated state branch.
+      // This also preserves uncertain-click quarantine on partial-run failure.
+      const runId=env.GITHUB_RUN_ID||'';
+      const departed=report.entries.filter(e=>e.status==='departed'&&!checkpointedDepartures.has(e.aircraftId+':'+e.routeId));
+      if(departed.length){
+        const count=await appendConfirmedDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,runId,{entries:departed});
+        if(count!==departed.length)throw Error('DEPARTURE_CHECKPOINT_INCOMPLETE');
+        for(const e of departed)checkpointedDepartures.add(e.aircraftId+':'+e.routeId);
+      }
+      const unknown=report.entries.filter(e=>e.status==='outcome_unknown'&&!checkpointedUncertain.has(e.aircraftId+':'+e.routeId));
+      if(unknown.length){
+        const count=await appendUncertainDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,runId,{entries:unknown});
+        if(count!==unknown.length)throw Error('DEPARTURE_UNCERTAIN_CHECKPOINT_INCOMPLETE');
+        for(const e of unknown)checkpointedUncertain.add(e.aircraftId+':'+e.routeId);
+      }
+    }
     // The full human-readable report is derived once after processing, rather
     // than recreated at each pre-click and post-click checkpoint.
     if(!report.completedAt&&!report.halted)return;
@@ -100,13 +121,21 @@ export async function runDemandExecution(
   if(!['true','false'].includes(campaignGateRequiredRaw)||!['true','false'].includes(campaignGateVerifiedRaw))throw Error('CAMPAIGN_GATE_INVALID');
   const campaignGateRequired=campaignGateRequiredRaw==='true';
   const campaignGateVerified=campaignGateVerifiedRaw==='true';
+  const departurePort=new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot);
   const report=await new IndividualDepartureExecutor(
-    new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot),config,{...settings,
+    departurePort,config,{...settings,
     blockedDepartureKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
     currentRouteFuelEvidence:prerequisites.currentRouteFuelEvidence},save,adaptive).run();
   console.log('[IndividualDepartures] '+JSON.stringify(report.summary));
+  const navigation=departurePort.navigationMetrics();
+  console.log('[DepartureNavigation] '+JSON.stringify(navigation));
+  await writeFile(join(directory,'departure-navigation.json'),JSON.stringify({
+    schemaVersion:1,generatedAt:new Date().toISOString(),...navigation,
+    departed:report.summary.departed,held:report.summary.held,
+    totalEvaluated:report.summary.evaluated
+  },null,2)+'\n');
   if(!settings.dryRun&&optimization.returnJournal){
     const held=await appendDemandHoldObservations(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'',report);
     console.log('[History] Holds de demanda observados acrescentados: '+held+'.');
