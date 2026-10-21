@@ -20,4 +20,9 @@ test('real mode needs acknowledgement and a first Actions attempt; analysis stil
 });
 for(const [key,value] of Object.entries({GITHUB_RUN_ATTEMPT:'2',GITHUB_RUN_ID:'',GITHUB_ACTIONS:'false',GITHUB_REPOSITORY:'invalid-repository',DEMAND_EXECUTION_ACK:'',DEMAND_MAX_DEPARTURES_PER_RUN:'0'}))
  test(`rejects real environment ${key}`,()=>expect(()=>executionEnvironment(readDemandConfig(realEnv),{...realEnv,[key]:value})).toThrow());
+test('all-ready runtime permits up to 100 strictly individual departures but rejects 101',()=>{
+ const config=readDemandConfig(realEnv);
+ expect(executionEnvironment(config,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:'100'}).maxDepartures).toBe(100);
+ expect(()=>executionEnvironment(config,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:'101'})).toThrow('DEMAND_EXECUTION_LIMIT_INVALID');
+});
 test('cannot select legacy bulk departure with real demand mode',()=>expect(()=>readDemandConfig({...realEnv,ENABLE_DEMAND_MANAGER:'false'})).toThrow());
