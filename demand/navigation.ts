@@ -30,6 +30,46 @@ export async function openFleetList(page: Page, timeout: number) {
   if (await page.locator('#newRouteInfo').isVisible()) throw new Error('RESEARCH_QUOTE_NOT_CLOSED');
 }
 
+/** Return to an already-rendered native Fleet page ONLY when its current target
+ * card is visible and the live route count still matches our verified inventory.
+ * This skips a redundant Fleet reset and page replay for adjacent aircraft.
+ * It never authorizes a mutation; DemandReader still reopens the target details
+ * and validates its identity, demand, capacity and native Depart handler.
+ */
+export async function reuseCurrentFleetPageForTarget(
+  page:Page, expected:AircraftSnapshot, expectedRoutes:number, timeout:number
+):Promise<boolean>{
+  if(!/^[1-9]\d*$/.test(expected.routeId)||!/^[1-9]\d*$/.test(expected.aircraftId)||
+    !Number.isSafeInteger(expectedRoutes)||expectedRoutes<1)return false;
+  const routeAction=page.locator('#routeAction');
+  if(!await routeAction.isVisible()){
+    const back=page.locator('#route-name .glyphicons-chevron-left');
+    if(await back.count()!==1||!await back.isVisible())return false;
+    await back.click({timeout});
+    await routeAction.waitFor({state:'visible',timeout});
+  }
+  const container=page.locator('#routesContainer');
+  if(!await container.isVisible())return false;
+  const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
+  if(await heading.count()!==1)return false;
+  const label=(await heading.innerText({timeout})).trim();
+  const matched=/^Routes\s*\((\d+)\)$/.exec(label);
+  if(!matched||Number(matched[1])!==expectedRoutes)
+    throw new Error('DEPARTURE_FLEET_COUNT_CHANGED');
+  const row=container.locator('#routeMainList'+expected.routeId);
+  if(await row.count()!==1||!await row.isVisible())return false;
+  const callbacks=await row.locator('a').evaluateAll(es=>
+    es.map(e=>e.getAttribute('onclick')||''));
+  const matches=callbacks.filter(s=>{
+    const callback=s.replace(/\s/g,'');
+    return callback.includes("fleet_details.php?id="+expected.aircraftId+"'") &&
+      callback.startsWith("playSound('neutral_click');Ajax('fleet_details.php?id=");
+  });
+  // If identity is missing/ambiguous, fall back to the normal fresh Fleet
+  // navigation and let DemandReader reject any conflicting target.
+  return matches.length===1;
+}
+
 export async function findFleetRoute(page: Page, aircraft: AircraftSnapshot, timeout: number) {
   const heading=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
   const matchCount=heading.match(/^Routes\s*\((\d+)\)$/);
