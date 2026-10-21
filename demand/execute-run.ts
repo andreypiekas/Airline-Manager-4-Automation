@@ -13,6 +13,7 @@ import { optimizationConfig } from '../optimization/report';
 import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
 import { hasDepartureBudgetStarvation } from '../utils/run-time-budget';
+import { DepartureTerminalCheckpoints } from './terminal-checkpoints';
 
 async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undefined>{
   try{
@@ -64,8 +65,9 @@ export async function runDemandExecution(
   // Append a compact record for every state transition. A crash leaves the
   // latest atomic JSON checkpoint plus the already written transition journal.
   const savedTransitions=new Map<string,string>();
-  const checkpointedDepartures=new Set<string>();
-  const checkpointedUncertain=new Set<string>();
+  const terminalCheckpoints=!settings.dryRun&&optimization.returnJournal
+    ?new DepartureTerminalCheckpoints(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'')
+    :null;
   const save=async(report:ExecutionReport)=>{
     const target=join(directory,'execution-report.json');
     await writeFile(target+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(target+'.tmp',target);
@@ -83,25 +85,7 @@ export async function runDemandExecution(
       savedTransitions.set(key,fingerprint);
     }
     if(transitions.length)await appendFile(join(directory,'execution-events.jsonl'),transitions.join('\n')+'\n');
-    if(!settings.dryRun&&optimization.returnJournal){
-      // A confirmed flight or unknown outcome must reach the durable return
-      // journal BEFORE processing the next aircraft. The workflow then
-      // transports that same append-only journal into its dedicated state branch.
-      // This also preserves uncertain-click quarantine on partial-run failure.
-      const runId=env.GITHUB_RUN_ID||'';
-      const departed=report.entries.filter(e=>e.status==='departed'&&!checkpointedDepartures.has(e.aircraftId+':'+e.routeId));
-      if(departed.length){
-        const count=await appendConfirmedDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,runId,{entries:departed});
-        if(count!==departed.length)throw Error('DEPARTURE_CHECKPOINT_INCOMPLETE');
-        for(const e of departed)checkpointedDepartures.add(e.aircraftId+':'+e.routeId);
-      }
-      const unknown=report.entries.filter(e=>e.status==='outcome_unknown'&&!checkpointedUncertain.has(e.aircraftId+':'+e.routeId));
-      if(unknown.length){
-        const count=await appendUncertainDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,runId,{entries:unknown});
-        if(count!==unknown.length)throw Error('DEPARTURE_UNCERTAIN_CHECKPOINT_INCOMPLETE');
-        for(const e of unknown)checkpointedUncertain.add(e.aircraftId+':'+e.routeId);
-      }
-    }
+    if(terminalCheckpoints)await terminalCheckpoints.flush(report.entries);
     // The full human-readable report is derived once after processing, rather
     // than recreated at each pre-click and post-click checkpoint.
     if(!report.completedAt&&!report.halted)return;
