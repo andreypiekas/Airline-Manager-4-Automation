@@ -62,3 +62,8 @@ export function hasDepartureBudgetStarvation(entries:ReadonlyArray<{status:strin
     e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'
   ));
 }
+
+/** A skipped production departure phase with observed sufficient demand is operationally incomplete. */
+export function isSkippedDeparturePhaseFailure(enabled:boolean,allowed:boolean,sufficientDemand:number):boolean {
+  return enabled && !allowed && Number.isSafeInteger(sufficientDemand) && sufficientDemand > 0;
+}
