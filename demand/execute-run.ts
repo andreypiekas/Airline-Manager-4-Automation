@@ -27,7 +27,7 @@ async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undef
 
 export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=process.env){
   const maxDepartures=Number(env.DEMAND_MAX_DEPARTURES_PER_RUN||'1');
-  if(!Number.isSafeInteger(maxDepartures)||maxDepartures<1||maxDepartures>20)throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
+  if(!Number.isSafeInteger(maxDepartures)||maxDepartures<1||maxDepartures>100)throw Error('DEMAND_EXECUTION_LIMIT_INVALID');
   if(!config.enabled||!config.failSafe)throw Error('DEMAND_EXECUTION_DISABLED');
   if(!config.dryRun&&(config.poolScope!=='airport-pair'||env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'||env.GITHUB_ACTIONS!=='true'||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY||'')||!/^[1-9]\d*$/.test(env.GITHUB_RUN_ID||'')||
@@ -97,10 +97,17 @@ export async function runDemandExecution(
     throw Error('DEMAND_EXECUTION_INITIAL_COLLECTION_INCOMPLETE');
   // Green test status must not mask fleet-ready dispatches skipped only because
   // expensive read-only phases consumed the mutation completion window.
-  if(!settings.dryRun&&hasDepartureBudgetStarvation(report.entries)){
-    console.error('[DepartureRuntime] Zero decolagens confirmadas; ao menos uma aeronave foi bloqueada pelo limite de tempo.');
-    throw Error('DEMAND_EXECUTION_BUDGET_EXHAUSTED_WITHOUT_DEPARTURE');
-  }
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
+  if(!settings.dryRun&&hasDepartureBudgetStarvation(report.entries)){
+    const deferred=report.entries.filter(e=>e.status==='held' &&
+      (e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION'||
+       e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION')).length;
+    console.error('[DepartureRuntime] '+JSON.stringify({
+      status:'INCOMPLETE_DUE_TO_TIME_BUDGET',
+      departed:report.summary.departed,heldByTime:deferred,
+      message:'Relatorio persistido; acoes confirmadas nao serao repetidas nesta run.'
+    }));
+    throw Error('DEMAND_EXECUTION_INCOMPLETE_TIME_BUDGET');
+  }
   return report;
 }

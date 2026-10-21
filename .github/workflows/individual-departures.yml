@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
       max_departures:
-        description: 'Limite 1 a 20; 0 usa MAX_INDIVIDUAL_DEPARTURES'
+        description: 'Limite manual 1 a 100; 0 usa MAX_INDIVIDUAL_DEPARTURES'
         type: number
         default: 0
       confirm_semiautomatic_execution:
@@ -54,6 +54,7 @@ jobs:
           AM4_INPUT_MAX_DEPARTURES: ${{ inputs.max_departures }}
           AM4_REPOSITORY_EXECUTE: ${{ vars.EXECUTE_INDIVIDUAL || 'true' }}
           AM4_REPOSITORY_MAX_DEPARTURES: ${{ vars.MAX_INDIVIDUAL_DEPARTURES || '20' }}
+          AM4_DISPATCH_ALL_READY: ${{ vars.DISPATCH_ALL_READY || 'true' }}
           AM4_SEMI_AUTOMATIC: ${{ vars.SEMI_AUTOMATIC_MODE || 'false' }}
           AM4_SEMI_CONFIRM: ${{ inputs.confirm_semiautomatic_execution && 'true' || 'false' }}
         run: node scripts/resolve-departure-settings.cjs

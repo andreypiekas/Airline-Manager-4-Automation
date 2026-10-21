@@ -39,6 +39,7 @@ function resolveDepartureSettings(env) {
   const semiAutomatic = booleanValue(env.AM4_SEMI_AUTOMATIC, 'SEMI_AUTOMATIC_MODE');
   const semiConfirm = booleanValue(env.AM4_SEMI_CONFIRM, 'confirm_semiautomatic_execution');
   const semiConfirmed = semiAutomatic && semiConfirm;
+  const dispatchAllReady = booleanValue(env.AM4_DISPATCH_ALL_READY, 'DISPATCH_ALL_READY');
 
   const requestedExecute =
     mode === 'production' ||
@@ -68,8 +69,14 @@ function resolveDepartureSettings(env) {
   let limitSource;
 
   if (!useRepositoryLimit) {
+    // Explicit manual caps always win, including a deliberate limit of 1.
     maxDepartures = inputLimit;
     limitSource = 'input:limit';
+  } else if (dispatchAllReady && execute) {
+    // Opt-in via workflow/repository variable: evaluate all ready aircraft.
+    // The executor still stops on deadline, fuel, demand, identity and uncertainty.
+    maxDepartures = 100;
+    limitSource = 'variable:DISPATCH_ALL_READY';
   } else if (repositoryLimit === null || repositoryLimit === 0) {
     maxDepartures = 1;
     limitSource = 'default:1';
@@ -78,13 +85,8 @@ function resolveDepartureSettings(env) {
     limitSource = 'variable:MAX_INDIVIDUAL_DEPARTURES';
   }
 
-  if (!useRepositoryLimit && maxDepartures > 20) {
-    throw new Error('Limite de decolagens manual deve ser inteiro de 1 a 20.');
-  }
-
-  if (useRepositoryLimit && maxDepartures > 20) {
-    maxDepartures = 20;
-    limitSource = 'variable:MAX_INDIVIDUAL_DEPARTURES:clamped-to-20';
+  if (!Number.isSafeInteger(maxDepartures) || maxDepartures < 1 || maxDepartures > 100) {
+    throw new Error('Limite de decolagens deve ser inteiro de 1 a 100.');
   }
 
   const automationMode = semiAutomatic && !semiConfirmed

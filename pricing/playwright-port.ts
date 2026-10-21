@@ -74,11 +74,41 @@ export class PlaywrightPricingPort implements PricingPort {
   }
 
   async confirm(expected:AircraftSnapshot,desired:Record<Cabin,number>){
-    const result=await this.collect();
-    if(!result.complete)return null;
-    const matches=result.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&a.routeId===expected.routeId);
-    if(matches.length!==1)return null;
-    const current=matches[0].fares?.current;
-    return current&&CLASSES.every(k=>current[k]===desired[k])?matches[0]:null;
+    // The save was authorized by one *complete* unique Fleet inventory and a
+    // fresh native target before the click. Its confirmation needs only a
+    // new, individually identity-checked read of the affected aircraft.
+    // Do not re-scan every aircraft just to confirm one route's fares.
+    await assertNoInteractiveChallenge(this.page,'pricing:confirm');
+    await openFleetList(this.page,this.timeout);
+    await findFleetRoute(this.page,expected,this.timeout);
+    const fresh=await new DemandReader(this.page,this.timeout,true).readReadyAircraftDetails(expected);
+    return verifiedTargetPricingConfirmation(expected,fresh,desired)?fresh:null;
   }
+}
+
+/**
+ * Verify the outcome of an already-attempted native route Save. Never use
+ * a stale snapshot or a matching route alone to infer that its fares changed.
+ */
+export function verifiedTargetPricingConfirmation(
+  expected:AircraftSnapshot,
+  observed:AircraftSnapshot,
+  desired:Record<Cabin,number>,
+  now=Date.now()
+):boolean {
+  const age=now-Date.parse(observed.observedAt);
+  return Number.isFinite(age)&&age>=0&&age<=300_000 &&
+    observed.aircraftId===expected.aircraftId&&observed.routeId===expected.routeId&&
+    observed.registration===expected.registration&&observed.from===expected.from&&
+    observed.to===expected.to&&observed.state==='ready'&&!observed.issue&&
+    !!observed.capacity&&!!expected.capacity&&
+    CLASSES.every(k=>observed.capacity![k]===expected.capacity![k]) &&
+    observed.fares?.source==='inspected-auto-control'&&
+    observed.fares.saveControl?.endpointVerified===true&&
+    observed.fares.saveControl?.target==='route'&&
+    observed.fares.saveControl?.targetMatchesContext===true&&
+    !!observed.fares.current&&CLASSES.every(k=>
+      Number.isSafeInteger(desired[k])&&desired[k]>0 &&
+      observed.fares!.current![k]===desired[k]
+    );
 }
