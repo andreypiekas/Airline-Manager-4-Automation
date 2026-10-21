@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, hasDepartureBudgetStarvation, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -52,4 +52,13 @@ test('zero confirmed departures with time-starved aircraft cannot be a green cyc
   expect(hasDepartureBudgetStarvation([{status:'held',reason:'DEMAND_INSUFFICIENT'}])).toBe(false);
   expect(hasDepartureBudgetStarvation([])).toBe(false);
   expect(hasDepartureBudgetStarvation([{status:'held',reason:'INITIAL_COLLECTION_INCOMPLETE'}])).toBe(false);
+});
+
+
+test('production skip with sufficient demand fails instead of silently appearing green',()=>{
+  expect(isSkippedDeparturePhaseFailure(true,false,60)).toBe(true); // run #775 demand snapshot
+  expect(isSkippedDeparturePhaseFailure(true,false,0)).toBe(false); // no candidate ready
+  expect(isSkippedDeparturePhaseFailure(true,true,60)).toBe(false); // execution runs its own gates
+  expect(isSkippedDeparturePhaseFailure(false,false,60)).toBe(false); // module deliberately disabled
+  expect(isSkippedDeparturePhaseFailure(true,false,Number.NaN)).toBe(false); // invalid evidence never infers eligibility
 });
