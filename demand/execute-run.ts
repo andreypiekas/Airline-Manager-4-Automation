@@ -14,6 +14,7 @@ import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainD
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
 import { hasDepartureBudgetStarvation } from '../utils/run-time-budget';
 import { DepartureTerminalCheckpoints } from './terminal-checkpoints';
+import {readPendingDeferredDispatchKeys,checkpointDeferredDispatchQueue} from '../optimization/deferred-dispatch';
 
 async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undefined>{
   try{
@@ -58,6 +59,10 @@ export async function runDemandExecution(
 ){
   const settings=executionEnvironment(config,env),optimization=optimizationConfig(env);
   const blockedDepartureKeys=optimization.returnJournal?await readUnresolvedDepartureKeys(optimization.returnJournal.directory,optimization.returnJournal.scope):new Set<string>();
+  const prioritizedDepartureKeys=!settings.dryRun&&optimization.returnJournal
+    ?await readPendingDeferredDispatchKeys(optimization.returnJournal.directory,optimization.returnJournal.scope)
+    :new Set<string>();
+  console.log('[DepartureQueue] '+JSON.stringify({pendingFromPriorRuns:prioritizedDepartureKeys.size,mode:'PRIORITY_ONLY_FRESH_GATES_REQUIRED'}));
   await mkdir(directory,{recursive:true});
   // Exclusive marker survives repeated calls in this runner; Actions rejects every real rerun attempt.
   const marker=await open(join(directory,'individual-execution.started'),'wx');await marker.close();
@@ -86,6 +91,21 @@ export async function runDemandExecution(
     }
     if(transitions.length)await appendFile(join(directory,'execution-events.jsonl'),transitions.join('\n')+'\n');
     if(terminalCheckpoints)await terminalCheckpoints.flush(report.entries);
+    if(report.completedAt&&!report.halted&&!hasIncompleteInitialDepartureCollection(report)&&
+      !settings.dryRun&&optimization.returnJournal){
+      // Store only time-deferred aircraft as cross-run priority hints.
+      // A normal recheck clears matching old hints, but cannot authorize a
+      // future click. The outer runner still reports time starvation as failure.
+      const queue=await checkpointDeferredDispatchQueue(
+        optimization.returnJournal.directory,optimization.returnJournal.scope,
+        env.GITHUB_RUN_ID||'',report.entries
+      );
+      console.log('[DepartureQueue] '+JSON.stringify(queue));
+      await writeFile(join(directory,'departure-queue.json'),JSON.stringify({
+        schemaVersion:1,generatedAt:new Date().toISOString(),
+        restoredPriorityKeys:prioritizedDepartureKeys.size,...queue
+      },null,2)+'\n');
+    }
     // The full human-readable report is derived once after processing, rather
     // than recreated at each pre-click and post-click checkpoint.
     if(!report.completedAt&&!report.halted)return;
@@ -108,7 +128,7 @@ export async function runDemandExecution(
   const departurePort=new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot);
   const report=await new IndividualDepartureExecutor(
     departurePort,config,{...settings,
-    blockedDepartureKeys,fuelHoldingLbsAtRunStart,
+    blockedDepartureKeys,prioritizedDepartureKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
     currentRouteFuelEvidence:prerequisites.currentRouteFuelEvidence},save,adaptive).run();

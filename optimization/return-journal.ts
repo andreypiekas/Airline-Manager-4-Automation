@@ -21,7 +21,8 @@ export interface DepartureHistoryEvent { eventId:string; type:'departure'; aircr
 export interface SupplyObservationEvent { eventId:string; type:'supply-observation'; kind:'fuel'|'co2'; observedAt:string; pricePer1000:number; holding:number; remainingCapacity:number; balance:number }
 export interface UiHealthObservation { eventId:string; type:'ui-health'; observedAt:string; status:'healthy'; surfaces:string[] }
 export interface DemandHoldObservation { eventId:string; type:'demand-hold'; aircraftId:string; routeId:string; observedAt:string; occupancyPercentage:number; reason:'hold_insufficient' }
-export interface Journal { schemaVersion: 1; scope: string; entries: Entry[]; events?:Array<DepartureHistoryEvent|FlightHistoryAnchorEvent|UncertainDepartureEvent|ResolvedUncertainDepartureEvent|UncertainSupplyEvent|UncertainRouteEvent|UncertainPricingEvent|ArrivalObservationEvent>; supplyObservations?:SupplyObservationEvent[]; holdObservations?:DemandHoldObservation[]; uiHealthObservations?:UiHealthObservation[] }
+export interface DeferredDispatchEvent { eventId:string; type:'dispatch-deferred'|'dispatch-deferred-rechecked'; aircraftId:string; routeId:string; observedAt:string; sourceRunId:string; reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION'|'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'|'REEVALUATED_IN_NEW_RUN' }
+export interface Journal { schemaVersion: 1; scope: string; entries: Entry[]; events?:Array<DepartureHistoryEvent|FlightHistoryAnchorEvent|UncertainDepartureEvent|ResolvedUncertainDepartureEvent|UncertainSupplyEvent|UncertainRouteEvent|UncertainPricingEvent|ArrivalObservationEvent|DeferredDispatchEvent>; supplyObservations?:SupplyObservationEvent[]; holdObservations?:DemandHoldObservation[]; uiHealthObservations?:UiHealthObservation[] }
 export interface JournalOptions {
   /** Durable directory supplied by the caller; ephemeral Actions runners require explicit transport. */
   directory: string;
@@ -254,6 +255,17 @@ export function unresolvedRouteAircraftIds(journal:Journal):ReadonlySet<string>{
 export async function readUnresolvedRouteAircraftIds(directory:string,scope:string,now=new Date()):Promise<ReadonlySet<string>>{return unresolvedRouteAircraftIds(validateReturnJournal(JSON.parse(await readFile(join(directory,'return-journal.json'),'utf8')),scope,now));}
 export function unresolvedPricingRouteIds(journal:Journal):ReadonlySet<string>{return new Set((journal.events||[]).filter((e):e is UncertainPricingEvent=>e.type==='pricing-uncertain').map(e=>e.routeId));}
 export async function readUnresolvedPricingRouteIds(directory:string,scope:string,now=new Date()):Promise<ReadonlySet<string>>{return unresolvedPricingRouteIds(validateReturnJournal(JSON.parse(await readFile(join(directory,'return-journal.json'),'utf8')),scope,now));}
+const validDeferredDispatchEvent=(v:unknown,now:Date):v is DeferredDispatchEvent=>{
+ if(!v||typeof v!=='object')return false;
+ const e=v as DeferredDispatchEvent;
+ return Object.keys(e).sort().join(',')==='aircraftId,eventId,observedAt,reason,routeId,sourceRunId,type' &&
+  validId(e.eventId)&&validId(e.aircraftId)&&validId(e.routeId)&&validId(e.sourceRunId) &&
+  ['dispatch-deferred','dispatch-deferred-rechecked'].includes(e.type) &&
+  (e.type==='dispatch-deferred'
+   ?['RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION','RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'].includes(e.reason)
+   :e.reason==='REEVALUATED_IN_NEW_RUN') &&
+  typeof e.observedAt==='string'&&Number.isFinite(Date.parse(e.observedAt))&&Date.parse(e.observedAt)<=now.getTime();
+};
 const validDepartureEvent=(v:unknown,now:Date):v is DepartureHistoryEvent=>{
   if(!v||typeof v!=='object')return false;const x=v as DepartureHistoryEvent;
   return Object.keys(x).sort().join(',')==='actualOnboard,aircraftId,demand,eventId,from,observedAt,registration,result,routeId,to,type'&&validId(x.eventId)&&x.type==='departure'&&validId(x.aircraftId)&&
@@ -279,7 +291,7 @@ export function validateReturnJournal(value: unknown, scope: string, now: Date):
     seen.add(key(e));
   }
   const eventIds=new Set<string>();
-  for(const e of data.events||[]){const type=(e as any)?.type;const ok=type==='departure'?validDepartureEvent(e,now):type==='departure-uncertain'?validUncertainDepartureEvent(e,now):type==='departure-uncertain-resolved'?validResolvedUncertainDepartureEvent(e,now):type==='supply-uncertain'?validUncertainSupplyEvent(e,now):type==='route-uncertain'?validUncertainRouteEvent(e,now):type==='pricing-uncertain'?validUncertainPricingEvent(e,now):type==='arrival-observed'?validArrivalObservationEvent(e,now):type==='flight-history-anchor'?validFlightHistoryAnchor(e,now):false;if(!ok||eventIds.has((e as any).eventId))throw new Error('JOURNAL_INVALID');eventIds.add((e as any).eventId);}
+  for(const e of data.events||[]){const type=(e as any)?.type;const ok=type==='departure'?validDepartureEvent(e,now):type==='departure-uncertain'?validUncertainDepartureEvent(e,now):type==='departure-uncertain-resolved'?validResolvedUncertainDepartureEvent(e,now):type==='supply-uncertain'?validUncertainSupplyEvent(e,now):type==='route-uncertain'?validUncertainRouteEvent(e,now):type==='pricing-uncertain'?validUncertainPricingEvent(e,now):type==='arrival-observed'?validArrivalObservationEvent(e,now):type==='flight-history-anchor'?validFlightHistoryAnchor(e,now):type==='dispatch-deferred'||type==='dispatch-deferred-rechecked'?validDeferredDispatchEvent(e,now):false;if(!ok||eventIds.has((e as any).eventId))throw new Error('JOURNAL_INVALID');eventIds.add((e as any).eventId);}
   for(const e of data.events||[])if(e.type==='arrival-observed'){const source=(data.events||[]).filter((x):x is DepartureHistoryEvent=>x.type==='departure'&&x.eventId===e.departureEventId);if(source.length!==1)throw new Error('JOURNAL_INVALID');const d=source[0];if(d.aircraftId!==e.aircraftId||d.registration!==e.registration||d.routeId!==e.routeId||d.from!==e.from||d.to!==e.to||d.observedAt!==e.departedAt)throw new Error('JOURNAL_INVALID');}
   for(const e of data.events||[])if(e.type==='departure-uncertain-resolved'){
     const source=(data.events||[]).filter((x):x is UncertainDepartureEvent=>x.type==='departure-uncertain'&&x.eventId===e.uncertainEventId);
