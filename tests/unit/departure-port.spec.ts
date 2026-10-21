@@ -25,4 +25,10 @@ test('all-ready runtime permits up to 100 strictly individual departures but rej
  expect(executionEnvironment(config,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:'100'}).maxDepartures).toBe(100);
  expect(()=>executionEnvironment(config,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:'101'})).toThrow('DEMAND_EXECUTION_LIMIT_INVALID');
 });
+test('all-fleet departures use explicit all mode; malformed caps still fail',()=>{
+ const cfg=readDemandConfig(realEnv);
+ expect(executionEnvironment(cfg,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:'all'}).maxDepartures).toBe('all');
+ for(const invalid of ['ALL','unlimited','0','101','3.5','-1'])
+  expect(()=>executionEnvironment(cfg,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:invalid})).toThrow('DEMAND_EXECUTION_LIMIT_INVALID');
+});
 test('cannot select legacy bulk departure with real demand mode',()=>expect(()=>readDemandConfig({...realEnv,ENABLE_DEMAND_MANAGER:'false'})).toThrow());
