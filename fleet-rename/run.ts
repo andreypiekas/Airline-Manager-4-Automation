@@ -8,6 +8,16 @@ import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
 
+/** Only stable diagnostic codes; never persist or log raw Playwright exceptions,
+ * DOM contents, callback source, credentials or the current page URL. */
+export function safeRenameFailureCode(error:unknown):string{
+ const msg=error instanceof Error?error.message:'';
+ if(['INTERACTIVE_CHALLENGE_DETECTED_STOP','READ_ONLY_LOGIN_OR_LOADING_FAILED',
+     'READ_ONLY_CREDENTIALS_MISSING'].includes(msg))return msg;
+ if(/^(?:RENAME|RESEARCH)_[A-Z0-9_]{1,100}$/.test(msg))return msg;
+ if(/timeout|timed out|toBe\(/i.test(msg))return 'RENAME_UI_WAIT_TIMEOUT';
+ return 'RENAME_UNCLASSIFIED_FAILURE';
+}
 export type RenamePhase='aircraft'|'route';
 export interface RenameOutcome {
  aircraftId:string;routeId:string;field:RenamePhase;
@@ -101,15 +111,32 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   throw Error('RENAME_REAL_CONTEXT_UNAUTHORIZED');
  await mkdir(directory,{recursive:true});
  const report:{schemaVersion:1;operation:string;generatedAt:string;complete:boolean;halted:boolean;
-  fleetCount:number;digest:string|null;results:RenameOutcome[];reason:string}={
+  fleetCount:number;digest:string|null;results:RenameOutcome[];reason:string;
+  stage:string;failureCode:string|null}={
   schemaVersion:1,operation,generatedAt:new Date().toISOString(),complete:false,halted:false,
-  fleetCount:0,digest:null,results:[],reason:'INITIALIZING'};
+  fleetCount:0,digest:null,results:[],reason:'INITIALIZING',
+  stage:'INITIALIZING',failureCode:null};
+ const knownLoginStages=new Set([
+  'LOGIN_OPEN_SITE','LOGIN_OPEN_GAME','LOGIN_OPEN_LOGIN','LOGIN_FILL_LOGIN',
+  'LOGIN_SUBMIT_LOGIN','LOGIN_WAIT_COMPANY','LOGIN_WAIT_INTRO'
+ ]);
+ const markStage=(stage:string)=>{
+  report.stage=stage;
+  console.log('[RenamePreview] stage='+stage);
+ };
  const save=async()=>{const out=join(directory,'rename-report.json');await writeFile(out+'.tmp',JSON.stringify(report,null,2)+'\n');await rename(out+'.tmp',out);};
  await save();
  try{
-  await loginForReadOnlyCollection(page,env,90000);
+  markStage('LOGIN_OPEN_SITE');
+  await loginForReadOnlyCollection(page,env,90000,(phase)=>{
+   const code='LOGIN_'+phase.toUpperCase();
+   if(knownLoginStages.has(code))markStage(code);
+  });
+  markStage('OPEN_FLEET');
   await openFleetList(page,timeout);
+  markStage('COLLECT_FLEET');
   const fleet:CollectionResult=await collectRenameInventory(page,timeout);
+  markStage('BUILD_PLAN');
   // The snapshot is identity-checked even before a name is planned.
   let plan;
   if(!(env.RENAME_MAPPING_CSV||'').trim()&&!(env.RENAME_AIRCRAFT_PREFIX||'').trim()&&!(env.RENAME_ROUTE_PREFIX||'').trim()&&operation==='preview'){
@@ -175,14 +202,16 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   report.complete=true;report.reason='ALL_FIELDS_NATIVE_VERIFIED';await save();return report;
  }catch(e){
   report.halted=true;
+  report.failureCode=safeRenameFailureCode(e);
   if(report.reason==='INITIALIZING')report.reason='RENAME_PREVIEW_OR_LOGIN_FAILED';
+  console.log('[RenamePreview] failed stage='+report.stage+' code='+report.failureCode);
   await save();
   throw Error(report.reason);
  }finally{
   await writeFile(join(directory,'rename-report.md'),[
    '# Renomeação manual da frota','',
    'Modo: '+htmlSafe(operation)+'; frota: '+report.fleetCount+'; hash: '+(report.digest||'não disponível')+
-   '; resultado: '+htmlSafe(report.reason),'',
+   '; resultado: '+htmlSafe(report.reason)+'; fase: '+htmlSafe(report.stage)+'; falha: '+htmlSafe(report.failureCode||'nenhuma'),'',
    '| Aircraft ID | Route ID | Campo | Destino | Estado | Motivo |',
    '| --- | --- | --- | --- | --- | --- |',
    ...report.results.map(e=>`| ${e.aircraftId} | ${e.routeId} | ${e.field} | ${htmlSafe(e.desired)} | ${e.status} | ${htmlSafe(e.reason)} |`),'',
