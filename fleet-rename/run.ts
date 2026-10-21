@@ -3,7 +3,7 @@ import {mkdir,open,writeFile,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
-import {collectFleetWithFreshRetry} from '../demand/reader';
+import {collectRenameInventory} from './inventory';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
@@ -103,7 +103,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
  try{
   await loginForReadOnlyCollection(page,env,90000);
   await openFleetList(page,timeout);
-  const fleet:CollectionResult=await collectFleetWithFreshRetry(page,timeout,false);
+  const fleet:CollectionResult=await collectRenameInventory(page,timeout);
   // The snapshot is identity-checked even before a name is planned.
   let plan;
   if(!(env.RENAME_MAPPING_CSV||'').trim()&&!(env.RENAME_AIRCRAFT_PREFIX||'').trim()&&!(env.RENAME_ROUTE_PREFIX||'').trim()&&operation==='preview'){
