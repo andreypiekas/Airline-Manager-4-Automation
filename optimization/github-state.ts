@@ -55,11 +55,19 @@ export function compactReturnJournalForTransport(journal: any): any {
     const arrivals = journal.events.filter(
       (e: any) => e?.type === 'arrival-observed' && departureIds.has(e.departureEventId)
     );
+    // Deferred-priority observations are scheduling hints, not safety
+    // evidence. Keep only the most recent state per aircraft/route to prevent
+    // unbounded state growth, including 'rechecked' tombstones.
+    const deferred = tailPerKey(
+      journal.events.filter((e: any) => e?.type === 'dispatch-deferred' || e?.type === 'dispatch-deferred-rechecked'),
+      1,(e: any) => String(e?.aircraftId || '') + ':' + String(e?.routeId || '')
+    );
     const safetyEvents = journal.events.filter(
-      (e: any) => !['departure', 'arrival-observed', 'flight-history-anchor'].includes(e?.type)
+      (e: any) => !['departure', 'arrival-observed', 'flight-history-anchor',
+        'dispatch-deferred', 'dispatch-deferred-rechecked'].includes(e?.type)
     );
     const retained = new Set(
-      [...departures, ...anchors, ...arrivals, ...safetyEvents].map((e: any) => e.eventId)
+      [...departures, ...anchors, ...arrivals, ...deferred, ...safetyEvents].map((e: any) => e.eventId)
     );
     compacted.events = journal.events.filter((e: any) => retained.has(e.eventId));
   }
