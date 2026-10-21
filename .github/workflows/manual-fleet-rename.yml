@@ -1,0 +1,103 @@
+name: Renomear frota manualmente
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'preview: só CSV e hash; apply: requer aprovação e hash exato da prévia'
+        type: choice
+        default: preview
+        required: true
+        options: [preview, apply]
+      aircraft_prefix:
+        description: 'Padrão para todas as aeronaves, por ex. XP (deixe vazio para usar CSV)'
+        required: false
+        type: string
+      route_prefix:
+        description: 'Padrão para todos os registros de rota, por ex. XR (use com aircraft_prefix)'
+        required: false
+        type: string
+      mapping_csv:
+        description: 'Opcional: CSV completo com aircraftId,routeId,aircraftRegistration,routeRegistration; substitui ambos prefixos'
+        required: false
+        type: string
+      expected_preview_sha256:
+        description: 'Somente apply: hash SHA256 da prévia anterior, para bloquear mudanças na frota'
+        required: false
+        type: string
+      confirmation:
+        description: 'Somente apply: escreva APLICAR_RENOMEACAO_TOTAL'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: airline-manager-4-main
+  cancel-in-progress: false
+
+jobs:
+  rename:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 29
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build:state
+      - run: npx playwright install --with-deps chromium
+      - name: Validar proteções offline sem acessar jogo
+        run: npm test
+      - name: Limpar dados sinteticos anteriores
+        run: rm -rf test-results/fleet-rename
+      - name: Verificar SHA atual antes do login
+        run: |
+          git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          if [ "$(git rev-parse refs/remotes/origin/main)" != "$GITHUB_SHA" ]; then
+            echo "::error::Main alterada desde o agendamento; nenhuma renomeação será realizada."
+            exit 1
+          fi
+      - name: Executar operação manual da frota
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          RENAME_OPERATION: ${{ inputs.operation }}
+          RENAME_AIRCRAFT_PREFIX: ${{ inputs.aircraft_prefix }}
+          RENAME_ROUTE_PREFIX: ${{ inputs.route_prefix }}
+          RENAME_MAPPING_CSV: ${{ inputs.mapping_csv }}
+          RENAME_EXPECTED_DIGEST: ${{ inputs.expected_preview_sha256 }}
+          RENAME_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::EMAIL e PASSWORD são exigidos para a consulta da frota."
+            exit 1
+          fi
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test -c playwright.rename.config.ts
+      - name: Publicar prévia e resultado
+        if: always()
+        run: |
+          if [ -f test-results/fleet-rename/rename-report.md ]; then
+            cat test-results/fleet-rename/rename-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Renomeação: nenhum relatório confirmado. Nenhum reenvio automático permitido." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: CSV, plano e evidências individuais
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-fleet-rename-report
+          path: |
+            test-results/fleet-rename/rename-report.json
+            test-results/fleet-rename/rename-report.md
+            test-results/fleet-rename/rename-template.csv
+            test-results/fleet-rename/rename-inventory.json
+            test-results/fleet-rename/rename-proposal.csv
+            test-results/fleet-rename/rename-proposal.json
+          retention-days: 14
+          if-no-files-found: warn
