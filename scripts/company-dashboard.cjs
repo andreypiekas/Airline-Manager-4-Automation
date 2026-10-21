@@ -151,6 +151,9 @@ function markdown(d,states){
   `| Orçamento de tempo | **${d.timeBudget.blocked===0?'OK':'BLOQUEIOS'}** | ${fmt(d.timeBudget.blocked)} fase(s) bloqueada(s) de ${fmt(d.timeBudget.decisions)} |`,'',
   '## Suprimentos e módulos','',
   `- ${supplyText('Fuel',fuel)}.`,`- ${supplyText('CO₂',co2)}.`,
+  d.postDispatchSupplies?.observed
+    ? `- **Reposição após decolagens:** ${supplyText('Fuel',d.postDispatchSupplies.fuel)}; ${supplyText('CO₂',d.postDispatchSupplies.co2)}.`
+    : '- **Reposição após decolagens:** não executada.',
   d.fuelPriceWindow?.nextEligible
     ? `- **Proxima janela estimada de Fuel (nao verificada):** ${d.fuelPriceWindow.nextEligible.localDate} ${d.fuelPriceWindow.nextEligible.localTime} UTC-3, referencia ${fmt(d.fuelPriceWindow.nextEligible.pricePer1000)}/1k; agora ${fmt(d.fuelPriceWindow.currentPricePer1000)}/1k; teto configurado ${fmt(d.fuelPriceWindow.configuredMax)}/1k, teto efetivo ${fmt(d.fuelPriceWindow.effectiveMax)}/1k; diferenca potencial ${fmt(d.fuelPriceWindow.nextEligible.savingVsCurrentPer1000)}/1k (${d.fuelPriceWindow.nextEligible.savingVsCurrentPercent??'n/d'}%). **Exige preco live para comprar.**`
     : '- **Janela estimada de Fuel:** sem horario listado elegivel nas proximas 24h, ou referencia indisponivel. A compra depende do preco live.',
