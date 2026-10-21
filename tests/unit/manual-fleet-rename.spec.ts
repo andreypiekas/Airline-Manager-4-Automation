@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-import {generateRenames,exportRenameCsv,mappingTemplate,parseRenameCsv,authorizeRenameOperation,verifiedFleet} from '../../fleet-rename/plan';
+import {generateRenames,exportRenameCsv,mappingTemplate,parseRenameCsv,authorizeRenameOperation,verifiedFleet,assertRenameRouteLabelUnchanged} from '../../fleet-rename/plan';
 import {verifiedPromptRenameCallback} from '../../fleet-rename/run';
 import type {CollectionResult,AircraftSnapshot} from '../../demand/types';
 function item(aircraftId:string,routeId:string,registration:string):AircraftSnapshot{
@@ -55,6 +55,16 @@ test('an incomplete or ambiguous fleet cannot produce a mutation plan',()=>{
   .toThrow('RENAME_FLEET_IDENTITY_UNVERIFIED');
  const wrongCount=fleet();wrongCount.expectedRoutes=4;
  expect(()=>mappingTemplate(wrongCount)).toThrow('RENAME_FLEET_INCOMPLETE');
+});
+test('pre-save route identity rejects changed endpoints even if route and aircraft IDs persist',()=>{
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - GRU'])).not.toThrow();
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA-GRU','AAA - GRU'])).not.toThrow();
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - LAX']))
+  .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - GRU','GRU - AAA']))
+  .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['unknown route label']))
+  .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
 });
 test('only one native prompt/AJAX save callback for the exact field and ID is supported',()=>{
  const original=(id:string,mode:string)=>"Ajax('fleet_details.php?id="+id+"&mode="+mode+"&reg='+prompt('Change name'),'detailsAction');";
