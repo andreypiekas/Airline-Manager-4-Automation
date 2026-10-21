@@ -51,7 +51,7 @@ export function generateRenames(
  let rows:Array<Pick<RenameTarget,'aircraftId'|'routeId'|'aircraftRegistration'|'routeRegistration'>>;
  if(hasCsv)rows=parseRenameCsv(options.csv!);
  else{
-  const aircraftPrefix=options.aircraftPrefix!.trim(),routePrefix=options.routePrefix!.trim();
+  const aircraftPrefix=options.aircraftPrefix?.trim()||'',routePrefix=options.routePrefix?.trim()||'';
   if(!code.test(aircraftPrefix)||!code.test(routePrefix)||aircraftPrefix.length>20||routePrefix.length>20)
    throw Error('RENAME_PREFIX_INVALID');
   const width=Math.max(3,String(fleet.length).length);
