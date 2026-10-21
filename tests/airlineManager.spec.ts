@@ -11,7 +11,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -343,8 +343,15 @@ test('All Operations', async ({ page }) => {
         })
       );
     }
-    if (!demandConfig.dryRun && moduleEnabled('ENABLE_DEPART')
-      && phaseAllowed('departures',phaseBudgetsMs.departures)) {
+    const departureEnabled = !demandConfig.dryRun && moduleEnabled('ENABLE_DEPART');
+    const departureBudgetAllowed = departureEnabled && phaseAllowed('departures',phaseBudgetsMs.departures);
+    if (isSkippedDeparturePhaseFailure(departureEnabled,departureBudgetAllowed,simulation.report.summary.sufficient)) {
+      // A live run that found sufficient demand must not finish green when its
+      // departure phase is skipped for lack of time (no click is performed).
+      console.error('[DepartureRuntime] Coleta apontou demanda suficiente, mas nao restou tempo para iniciar decolagens.');
+      throw new Error('DEMAND_EXECUTION_BUDGET_EXHAUSTED_BEFORE_DISPATCH');
+    }
+    if (departureBudgetAllowed) {
       const reroutedAircraftIds=new Set(
         (routeExecutionReport?.entries||[]).filter(e=>e.status==='rerouted').map(e=>e.aircraftId)
       );

@@ -12,6 +12,7 @@ import { PlaywrightDeparturePort } from './departure-port';
 import { optimizationConfig } from '../optimization/report';
 import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
+import { hasDepartureBudgetStarvation } from '../utils/run-time-budget';
 
 async function verifiedFuelHoldingFromRun(directory:string):Promise<number|undefined>{
   try{
@@ -94,6 +95,12 @@ export async function runDemandExecution(
   // a click; this is an operational failure, not a successful empty cycle.
   if(hasIncompleteInitialDepartureCollection(report))
     throw Error('DEMAND_EXECUTION_INITIAL_COLLECTION_INCOMPLETE');
+  // Green test status must not mask fleet-ready dispatches skipped only because
+  // expensive read-only phases consumed the mutation completion window.
+  if(!settings.dryRun&&hasDepartureBudgetStarvation(report.entries)){
+    console.error('[DepartureRuntime] Zero decolagens confirmadas; ao menos uma aeronave foi bloqueada pelo limite de tempo.');
+    throw Error('DEMAND_EXECUTION_BUDGET_EXHAUSTED_WITHOUT_DEPARTURE');
+  }
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
   return report;
 }
