@@ -17,6 +17,8 @@ export interface ExecutionSettings {
   /** Absolute deadline after which no new departure mutation may start. */
   mutationDeadlineEpochMs?: number;
   blockedDepartureKeys?: ReadonlySet<string>;
+  /** Scheduling hint from durable journal; never a departure authorization. */
+  prioritizedDepartureKeys?: ReadonlySet<string>;
   /** Verified fuel holding observed in this same run. Used only to block unsafe clicks. */
   fuelHoldingLbsAtRunStart?: number;
   /** False means required marketing campaigns were not freshly confirmed in this run. */
@@ -125,10 +127,19 @@ export class IndividualDepartureExecutor {
       poolRemaining.set(key,current?minCabins(current,a.remaining):{...a.remaining});
     }
 
+    // A prior run may have stopped before evaluating these aircraft. Put them
+    // first *only after* this run has collected and checked a fresh fleet
+    // inventory. Exact aircraft/route IDs are required and every safety gate
+    // below still runs against freshly observed game state.
+    const waiting=this.settings.prioritizedDepartureKeys??new Set<string>();
+    const ordered=initial.aircraft.filter(a=>a.state!=='inflight');
+    if(initial.complete&&waiting.size){
+      ordered.sort((a,b)=>Number(waiting.has(b.aircraftId+':'+b.routeId))-
+        Number(waiting.has(a.aircraftId+':'+a.routeId)));
+    }
     // One complete fleet snapshot establishes global identity/pool integrity. Each
     // target is then re-read individually immediately before a possible mutation.
-    // This avoids O(N) full-fleet rescans while preserving fresh target evidence.
-    for(const expected of initial.aircraft.filter(a=>a.state!=='inflight')) {
+    for(const expected of ordered) {
       const entry: ExecutionEntry={aircraftId:expected.aircraftId,registration:expected.registration,routeId:expected.routeId,
         from:expected.from,to:expected.to,status:'held',reason:'DATA_UNAVAILABLE',demand:null,actualOnboard:null};
       report.entries.push(entry);
