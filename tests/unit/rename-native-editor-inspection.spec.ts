@@ -2,7 +2,10 @@ import {test,expect,type Page} from '@playwright/test';
 import {inspectNativeRenameEditors,sanitizedRenameCallbackShape} from '../../fleet-rename/run';
 import {readFile} from 'node:fs/promises';
 
-async function fixture(page:Page,unsafeAircraft=false,wrongRoute=false,hiddenEditors=false){
+async function fixture(
+ page:Page,unsafeAircraft=false,wrongRoute=false,hiddenEditors=false,
+ visibilityCase:'hidden'|'override'|null=null
+){
  const first=unsafeAircraft
   ?"Ajax('fleet_details.php?id=1001&mode=reg&reg='+prompt('Sensitive Aircraft','old-name'),'detailsAction');"
   :"Ajax('fleet_details.php?id=1001&mode=reg&reg='+prompt('Sensitive Aircraft'),'detailsAction');";
@@ -11,7 +14,10 @@ async function fixture(page:Page,unsafeAircraft=false,wrongRoute=false,hiddenEdi
   '<button id="routeReg" onclick="'+second+'">Route rename</button>';
  const detailHtml='<div id="ff-name">N-1</div>'+
   '<div class="col-5"><span class="l-text">'+(wrongRoute?'CCC':'AAA')+'</span><span class="l-text">GRU</span></div>'+
-  (hiddenEditors?'<div style="display:none">'+nativeButtons+'</div>':nativeButtons);
+  (hiddenEditors?'<div style="display:none">'+nativeButtons+'</div>':
+   visibilityCase==='hidden'?'<div style="visibility:hidden">'+nativeButtons+'</div>':
+   visibilityCase==='override'?'<div style="visibility:hidden"><div style="visibility:visible">'+nativeButtons+'</div></div>':
+   nativeButtons);
  await page.setContent(`<button>Routes (1)</button>
   <div id="routesContainer"><div id="routeMainList101">
    <span class="s-text">AAA - GRU</span>
@@ -60,6 +66,25 @@ test('read-only inspection explains hidden ancestors and never clicks either edi
    callbackVerified:false,layoutCause:'ANCESTOR_DISPLAY_NONE',hiddenAncestorDepth:1}
  ]);
  expect(JSON.stringify(data)).not.toContain('Sensitive');
+ expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
+});
+test('inherited visibility is attributed to parent only when editor is actually hidden',async({page})=>{
+ await fixture(page,false,false,false,'hidden');
+ const data=await inspectNativeRenameEditors(page,1500);
+ expect(data.allVerified).toBe(false);
+ expect(data.editors).toMatchObject([
+  {visible:false,layoutCause:'ANCESTOR_VISIBILITY_HIDDEN',hiddenAncestorDepth:1},
+  {visible:false,layoutCause:'ANCESTOR_VISIBILITY_HIDDEN',hiddenAncestorDepth:1}
+ ]);
+ expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
+ await page.goto('about:blank');
+ await fixture(page,false,false,false,'override');
+ const overridden=await inspectNativeRenameEditors(page,1500);
+ expect(overridden.allVerified).toBe(true);
+ expect(overridden.editors).toMatchObject([
+  {visible:true,layoutCause:'LAYOUT_PRESENT',hiddenAncestorDepth:null},
+  {visible:true,layoutCause:'LAYOUT_PRESENT',hiddenAncestorDepth:null}
+ ]);
  expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
 });
 test('unverified two-argument prompt is detected and redacted; no editor is clicked',async({page})=>{
