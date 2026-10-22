@@ -27,6 +27,8 @@ export interface RenameEditorFormInspection {
  matchingInputKind:'TEXT'|'TEXTAREA'|'OTHER'|'NONE'|'AMBIGUOUS';
  matchingInputVisible:boolean;
  openerCount:number;openerShapes:string[];
+ openerStrictlyVerified:boolean;openerActivated:boolean;
+ buttonVisibleAfterOpener:boolean;inputVisibleAfterOpener:boolean;
 }
 export interface NativeRenameEditorObservation {
  field:RenamePhase;candidateCount:number;visible:boolean;enabled:boolean;
@@ -59,6 +61,16 @@ export function verifiedPromptRenameCallback(callback:string,id:string,mode:'reg
 /** Never persist raw native callback strings or page text. Literals, identifiers
  * and numbers become coarse tokens, keeping the operator/prompt structure
  * needed to diagnose unsupported UI safely. */
+/** Only UI hide + UI show of the exact native hidden region (optional
+ * neutral sound) is safe to click as a read-only probe. Strictly rejects
+ * AJAX, forms, input writes, arbitrary JavaScript and unknown handlers. */
+export function verifiedReadOnlyNativeOpener(callback:string,hiddenRegionId:string):boolean{
+ if(!/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(hiddenRegionId))return false;
+ const normalized=callback.replace(/\s/g,'');
+ if(normalized.length>300)return false;
+ const match=/^\$\('(#[-A-Za-z0-9_]+)'\)\.hide\(\);\$\('(#[-A-Za-z0-9_]+)'\)\.show\(\);(?:playSound\('neutral_click'\);)?$/.exec(normalized);
+ return !!match&&match[2]==='#'+hiddenRegionId&&match[1]!==match[2];
+}
 export function sanitizedRenameCallbackShape(raw:string):string{
  if(raw.length>1200)return 'TOO_LONG';
  const replaced=raw.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,'Q');
@@ -72,7 +84,7 @@ export function sanitizedRenameCallbackShape(raw:string):string{
 /** Audit exactly one native aircraft's two rename editors via read-only
  * navigation. NEVER click either editor, accept a prompt or send an edit AJAX. */
 export async function inspectNativeRenameEditors(
- page:Page,timeout=14000
+ page:Page,timeout=14000,openVerifiedNativeForms=false
 ):Promise<NativeRenameEditorInspection>{
  await assertNoInteractiveChallenge(page,'rename:editor-inspection');
  const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
@@ -161,6 +173,7 @@ export async function inspectNativeRenameEditors(
     }
    }
    const result={hiddenRegionFound:!!hidden,hiddenRegionHasId:!!hidden?.id,
+    hiddenRegionId:hidden?.id||'',matchingInputId:'',
     inputCount:0,matchingInputCount:0,
     matchingInputKind:'NONE' as 'TEXT'|'TEXTAREA'|'OTHER'|'NONE'|'AMBIGUOUS',
     matchingInputVisible:false,openerCodes:[] as string[],openerCount:0};
@@ -176,6 +189,7 @@ export async function inspectNativeRenameEditors(
    result.matchingInputCount=matches.length;
    if(matches.length===1){
     const input=matches[0];
+    result.matchingInputId=input.id;
     result.matchingInputKind=input.tagName==='TEXTAREA'?'TEXTAREA':
      input instanceof HTMLInputElement&&
      (input.type==='text'||input.type==='search')?'TEXT':'OTHER';
@@ -197,6 +211,33 @@ export async function inspectNativeRenameEditors(
    }
    return result;
   },cb):null;
+  const openerStrictlyVerified=!!rawForm&&rawForm.openerCount===1&&
+   rawForm.matchingInputCount===1&&rawForm.matchingInputKind==='TEXT'&&
+   verifiedReadOnlyNativeOpener(rawForm.openerCodes[0],rawForm.hiddenRegionId);
+  let openerActivated=false,buttonVisibleAfterOpener=false,inputVisibleAfterOpener=false;
+  if(openVerifiedNativeForms&&openerStrictlyVerified&&rawForm){
+   // Never use force, evaluate handler code, set values or issue a native AJAX.
+   // Click only an exact, unique, visible DOM control whose entire handler
+   // has passed verifiedReadOnlyNativeOpener. Stop on any ambiguity.
+   const actions=details.locator('[onclick]');
+   const openerIndices=await actions.evaluateAll((els,callback)=>
+    els.flatMap((el,index)=>(el.getAttribute('onclick')||'')===callback?[index]:[]),
+    rawForm.openerCodes[0]);
+   if(openerIndices.length===1){
+    const opener=actions.nth(openerIndices[0]);
+    if(await opener.isVisible()&&await opener.isEnabled()){
+     await assertNoInteractiveChallenge(page,'rename:inspect-open-before-click');
+     await opener.click({timeout});
+     openerActivated=true;
+     buttonVisibleAfterOpener=await button!.isVisible();
+     if(/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(rawForm.matchingInputId)){
+      const input=details.locator('[id="'+rawForm.matchingInputId+'"]');
+      inputVisibleAfterOpener=await input.count()===1&&await input.isVisible();
+     }
+     await assertNoInteractiveChallenge(page,'rename:inspect-open-after-click');
+    }
+   }
+  }
   const form:RenameEditorFormInspection=rawForm?{
    hiddenRegionFound:rawForm.hiddenRegionFound,
    hiddenRegionHasId:rawForm.hiddenRegionHasId,
@@ -204,11 +245,14 @@ export async function inspectNativeRenameEditors(
    matchingInputKind:rawForm.matchingInputKind,
    matchingInputVisible:rawForm.matchingInputVisible,
    openerCount:rawForm.openerCount,
-   openerShapes:rawForm.openerCodes.map(sanitizedRenameCallbackShape)
+   openerShapes:rawForm.openerCodes.map(sanitizedRenameCallbackShape),
+   openerStrictlyVerified,openerActivated,buttonVisibleAfterOpener,inputVisibleAfterOpener
   }:{
    hiddenRegionFound:false,hiddenRegionHasId:false,
    inputCount:0,matchingInputCount:0,matchingInputKind:'NONE',
-   matchingInputVisible:false,openerCount:0,openerShapes:[]
+   matchingInputVisible:false,openerCount:0,openerShapes:[],
+   openerStrictlyVerified:false,openerActivated:false,
+   buttonVisibleAfterOpener:false,inputVisibleAfterOpener:false
   };
   editors.push({field,candidateCount:indices.length,visible,enabled,
    callbackVerified:!!button&&visible&&enabled&&verifiedPromptRenameCallback(cb,id,mode),
@@ -306,7 +350,7 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
 function htmlSafe(s:string){return s.replace(/[|<>\r\n]/g,' ');}
 export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=process.env,directory='test-results/fleet-rename'){
  const timeout=14000,operation=(env.RENAME_OPERATION||'preview').trim();
- if(!['inspect','preview','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
+ if(!['inspect','inspect-open','preview','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
  // Applied runs require first-attempt manual dispatch; no workflow cron or reruns.
  if(operation==='apply'&&(env.GITHUB_ACTIONS!=='true'||env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
   env.GITHUB_RUN_ATTEMPT!=='1'||env.RENAME_CONFIRMATION!=='APLICAR_RENOMEACAO_TOTAL'))
@@ -336,9 +380,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   });
   markStage('OPEN_FLEET');
   await openFleetList(page,timeout,phase=>markStage('OPEN_FLEET_'+phase));
-  if(operation==='inspect'){
-   markStage('INSPECT_NATIVE_EDITORS');
-   const inspection=await inspectNativeRenameEditors(page,timeout);
+  if(operation==='inspect'||operation==='inspect-open'){
+   markStage(operation==='inspect'?'INSPECT_NATIVE_EDITORS':'INSPECT_NATIVE_OPENERS');
+   const inspection=await inspectNativeRenameEditors(page,timeout,operation==='inspect-open');
    report.inspection=inspection;report.fleetCount=inspection.routeCount;
    report.complete=true;
    report.reason=inspection.allVerified?
@@ -431,9 +475,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
      '| --- | ---: | --- | --- | --- | --- | ---: | --- |',
      ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${e.layoutCause} | ${e.hiddenAncestorDepth??'-'} | ${htmlSafe(e.callbackShape)} |`),
      '','## Formulários de edição (estrutura somente leitura)',
-     '| Campo | Região oculta | Possui ID | Inputs | Input usado pelo botão | Tipo | Aberturas candidatas | Estrutura dos controles (anônima) |',
-     '| --- | --- | --- | ---: | ---: | --- | ---: | --- |',
-     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.form.hiddenRegionFound} | ${e.form.hiddenRegionHasId} | ${e.form.inputCount} | ${e.form.matchingInputCount} | ${e.form.matchingInputKind} | ${e.form.openerCount} | ${e.form.openerShapes.map(htmlSafe).join(' ; ')} |`)]:[]),
+     '| Campo | Região oculta | Possui ID | Inputs | Input usado pelo botão | Tipo | Aberturas | Verificado | Acionado | Botão visível | Input visível | Callback anônimo |',
+     '| --- | --- | --- | ---: | ---: | --- | ---: | --- | --- | --- | --- | --- |',
+     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.form.hiddenRegionFound} | ${e.form.hiddenRegionHasId} | ${e.form.inputCount} | ${e.form.matchingInputCount} | ${e.form.matchingInputKind} | ${e.form.openerCount} | ${e.form.openerStrictlyVerified} | ${e.form.openerActivated} | ${e.form.buttonVisibleAfterOpener} | ${e.form.inputVisibleAfterOpener} | ${e.form.openerShapes.map(htmlSafe).join(' ; ')} |`)]:[]),
    'Não repetir automaticamente controles com resultado incerto. Os modos inspect e preview não alteram o jogo.'
   ].join('\n')+'\n');
  }
