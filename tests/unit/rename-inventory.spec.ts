@@ -1,7 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {collectRenameInventory,renameCardIdentityIssue} from '../../fleet-rename/inventory';
 
-async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean}={}){
+async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean;siblingRegistration?:boolean;duplicateRegistration?:boolean}={}){
  await page.setContent(`<button>Routes (21)</button>
  <div id="routesContainer"></div><script>
  const opts=${JSON.stringify(options)};
@@ -15,7 +15,11 @@ async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean}={})
    return '<div class="row classPAX" id="routeMainList'+route+'">'+
     '<span class="s-text">AAA - GRU</span>'+
     '<a onclick="playSound(\\'neutral_click\\');Ajax(\\'fleet_details.php?id='+aircraft+'\\',\\'detailsAction\\');if(intro==0){$(\\'#routeAction\\').hide();}">'+
-    '<span id="acRegList'+aircraft+'">N-'+n+'</span> - Plane</a></div>';
+    (opts.siblingRegistration?'':'<span id="acRegList'+aircraft+'">N-'+n+'</span>')+
+    ' - Plane</a>'+
+    (opts.siblingRegistration?'<span id="acRegList'+aircraft+'">N-'+n+'</span>':'')+
+    (opts.duplicateRegistration?'<span id="acRegList'+aircraft+'">WRONG</span>':'')+
+    '</div>';
   }).join('')+(index===0?'<div class="pagination"><a href="#" onclick="Ajax(\\'routes.php?start=20&sort=\\',\\'routeAction\\',this);">Next</a></div>':'');
  }
  function Ajax(url){if(url.includes('routes.php?start=20')){window.pageAdvances++;render(1);}else window.detailsOpened++;}
@@ -33,6 +37,17 @@ test('fast identity-only inventory covers all native Fleet pages without opening
  expect(result.aircraft.at(-1)).toMatchObject({aircraftId:'1021',routeId:'121'});
  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+});
+test('Fleet inventory accepts a unique ID-matched registration sibling, not a foreign or ambiguous name',async({page})=>{
+ await fixture(page,{siblingRegistration:true});
+ const result=await collectRenameInventory(page,1400);
+ expect(result.complete).toBe(true);
+ expect(result.aircraft).toHaveLength(21);
+ expect(result.aircraft[0].registration).toBe('N-1');
+ expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+ await page.goto('about:blank');
+ await fixture(page,{siblingRegistration:true,duplicateRegistration:true});
+ await expect(collectRenameInventory(page,1400)).rejects.toThrow('RENAME_FLEET_REGISTRATION_MISSING');
 });
 test('Fleet rejection has safe distinct codes without including identifiers or private labels',()=>{
  const good={routeId:'101',aircraftId:'1001',registration:'N-1',

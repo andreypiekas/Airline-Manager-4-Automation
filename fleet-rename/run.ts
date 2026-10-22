@@ -45,12 +45,23 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  // Re-check native route endpoints on each field, not only aircraft/route IDs.
  // A route can change after the global preview but before an individual save.
  assertRenameRouteLabelUnchanged(expected.oldRouteLabel,await row.locator('span.s-text').allTextContents());
- const link=row.locator('a:has(#acRegList'+expected.aircraftId+')');
- if(await link.count()!==1||await row.locator('#acRegList'+expected.aircraftId).innerText()!==registered)
+ // The native registration element may be nested in the details link or
+ // rendered alongside it. The precise aircraft ID, route ID and handler must
+ // all match; the current registration must also match the approved plan.
+ const registrationNodes=row.locator('[id^="acRegList"]');
+ const registrations=await registrationNodes.count();
+ if(registrations!==1||
+    await registrationNodes.first().getAttribute('id')!=='acRegList'+expected.aircraftId||
+    (await registrationNodes.first().textContent({timeout}))?.trim()!==registered)
   throw Error('RENAME_AIRCRAFT_IDENTITY_CHANGED');
  const expectedCallback=`playSound('neutral_click');Ajax('fleet_details.php?id=${expected.aircraftId}','detailsAction');if(intro==0){$('#routeAction').hide();}`;
- if(compactCallback(await link.getAttribute('onclick')||'')!==compactCallback(expectedCallback))
-  throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
+ const links=row.locator('a[onclick]');
+ const matches=await links.evaluateAll((elements,callback)=>elements.flatMap((e,index)=>
+  (e.getAttribute('onclick')||'').replace(/\s/g,'')===callback?[index]:[]
+ ),compactCallback(expectedCallback));
+ if(matches.length!==1)throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
+ const link=links.nth(matches[0]);
+ if(!await link.isVisible())throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
  await link.click({timeout});
  const details=page.locator('#detailsAction');
  await details.waitFor({state:'visible',timeout});
