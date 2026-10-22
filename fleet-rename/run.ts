@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory,retryOneUnstableReadOnlyFleetSnapshot} from './inventory';
-import {preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener} from './native-pilot';
+import {preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener,type NativeInputDiagnostic} from './native-pilot';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
@@ -365,7 +365,8 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
  await mkdir(directory,{recursive:true});
  const report:{schemaVersion:1;operation:string;generatedAt:string;complete:boolean;halted:boolean;
   fleetCount:number;digest:string|null;results:RenameOutcome[];reason:string;
-  stage:string;failureCode:string|null;inspection?:NativeRenameEditorInspection}={
+  stage:string;failureCode:string|null;inspection?:NativeRenameEditorInspection;
+  inputDiagnostics?:NativeInputDiagnostic[]}={
   schemaVersion:1,operation,generatedAt:new Date().toISOString(),complete:false,halted:false,
   fleetCount:0,digest:null,results:[],reason:'INITIALIZING',
   stage:'INITIALIZING',failureCode:null};
@@ -439,7 +440,12 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    markStage('PILOT_PREFLIGHT_NATIVE_MODULE_READY');
    const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage);
    // Both editors must be verified before ANY name can be changed.
-   await preflightNativeTextEditors(detail,pilotTarget,markStage);
+   // Persist only bounded read-only counts and enum classifications.
+   report.inputDiagnostics=[];
+   const recordInputDiagnosis=(d:NativeInputDiagnostic)=>{
+    if(report.inputDiagnostics!.length<8)report.inputDiagnostics!.push(d);
+   };
+   await preflightNativeTextEditors(detail,pilotTarget,markStage,recordInputDiagnosis);
    if(operation==='pilot-check'){
     report.complete=true;
     report.reason='PILOT_PREFLIGHT_VERIFIED_READ_ONLY';
