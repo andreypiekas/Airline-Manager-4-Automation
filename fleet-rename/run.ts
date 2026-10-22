@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory,retryOneUnstableReadOnlyFleetSnapshot} from './inventory';
+import {preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener} from './native-pilot';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
@@ -61,16 +62,7 @@ export function verifiedPromptRenameCallback(callback:string,id:string,mode:'reg
 /** Never persist raw native callback strings or page text. Literals, identifiers
  * and numbers become coarse tokens, keeping the operator/prompt structure
  * needed to diagnose unsupported UI safely. */
-/** Only UI hide + UI show of the exact native hidden region (optional
- * neutral sound) is safe to click as a read-only probe. Strictly rejects
- * AJAX, forms, input writes, arbitrary JavaScript and unknown handlers. */
-export function verifiedReadOnlyNativeOpener(callback:string,hiddenRegionId:string):boolean{
- if(!/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(hiddenRegionId))return false;
- const normalized=callback.replace(/\s/g,'');
- if(normalized.length>300)return false;
- const match=/^\$\('(#[-A-Za-z0-9_]+)'\)\.hide\(\);\$\('(#[-A-Za-z0-9_]+)'\)\.show\(\);(?:playSound\('neutral_click'\);)?$/.exec(normalized);
- return !!match&&match[2]==='#'+hiddenRegionId&&match[1]!==match[2];
-}
+export {verifiedReadOnlyNativeOpener};
 export function sanitizedRenameCallbackShape(raw:string):string{
  if(raw.length>1200)return 'TOO_LONG';
  const replaced=raw.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,'Q');
@@ -442,7 +434,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
     :selectSingleAircraftPilotTarget(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
        env.RENAME_EXPECTED_DIGEST||'');
    markStage('PILOT_PREFLIGHT_OPEN_TARGET_DETAILS');
-   const {preflightNativeTextEditors}=await import('./native-pilot');
+   // Import at module initialization (covered by offline tests): no runtime dynamic
+   // module resolution after the expensive, verified live fleet snapshot.
+   markStage('PILOT_PREFLIGHT_NATIVE_MODULE_READY');
    const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage);
    // Both editors must be verified before ANY name can be changed.
    await preflightNativeTextEditors(detail,pilotTarget,markStage);
@@ -476,7 +470,6 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
        await save();continue;
      }
      if(operation==='pilot'){
-      const {preflightNativeTextEditors,saveNativeTextField}=await import('./native-pilot');
       const editors=await preflightNativeTextEditors(details,target,markStage);
       const editor=editors.find(e=>e.field===field);
       if(!editor)throw Error('RENAME_PILOT_EDITOR_MISSING');

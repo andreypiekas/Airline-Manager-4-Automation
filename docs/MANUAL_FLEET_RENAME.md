@@ -54,6 +54,12 @@ O relatório anterior não registrava qual verificação dos detalhes ocorreu. A
 
 A causa raiz da falha no detalhe **ainda não foi demonstrada**. Não repetir o modo `pilot` até que `pilot-check` valide os dois campos.
 
+### Carregamento do módulo de editores antes da navegação
+
+A inspeção [`pilot-check` #39844589439](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39844589439), já com rastreamento por etapa do PR #45, validou **114 aeronaves** e o SHA256 `9190c236e59343ce3d6f42ff02b1fc63972cd20db0ea00f99204b2475af4a992`. Ela falhou em `PILOT_PREFLIGHT_OPEN_TARGET_DETAILS` com `RENAME_PILOT_PREFLIGHT_UI_EXCEPTION`, **antes mesmo do marcador inicial `PILOT_TARGET_VERIFY_NO_CHALLENGE`** e sem tentativas de salvar (`results=[]`). Isso delimita a falha ao espaço entre a autorização e a entrada na rotina do alvo: havia ali uma importação dinâmica de `native-pilot`. O erro subjacente ainda não foi exposto pelo relatório, por isso se trata de **causa provável, não provada**.
+
+A rotina passou a usar importação estática de `preflightNativeTextEditors` e `saveNativeTextField` no início do módulo, validada pelos testes offline. O novo estágio `PILOT_PREFLIGHT_NATIVE_MODULE_READY` precede a abertura dos detalhes. Esse ajuste **não amplia permissões**, não clica em salvar e não altera os controles de identidade. Mesmo com um pré-check bem-sucedido, **nenhuma gravação foi comprovada**; não usar `pilot` ou `apply` sem avaliação separada.
+
 ## Etapa 2: pré-validação de piloto — sem salvar nada
 
 Quando um piloto falha antes do primeiro checkpoint, execute apenas **`operation=pilot-check`** no workflow manual da `main`: informe **`pilot_aircraft_id`** e os mesmos prefixos (ou CSV) + **`expected_preview_sha256`** da última prévia aprovada. Deixe `confirmation` vazio. A operação consulta as 104 aeronaves, confere o digest e a identidade do alvo e inspeciona os dois editores nativos, **sem preencher campo, abrir botão de edição ou enviar qualquer comando de renomeação**.
