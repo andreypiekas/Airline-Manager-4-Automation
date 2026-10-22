@@ -8,7 +8,16 @@ export function routePageLimit(totalRoutes:number,pageSize=20){
 }
 
 /** Explicitly opens a fresh list: it does not pretend to preserve a previous pagination cursor. */
-export async function openFleetList(page: Page, timeout: number) {
+/** Read-only UI progression codes; an optional observer lets callers locate
+ * a timeout without persisting page URLs, HTML, registrations or credentials.
+ * No behavior change for existing production callers. */
+export type FleetOpenStage =
+ 'INSPECT_CONTROL'|'CLICK_CONTROL'|'WAIT_OLD_CONTAINER_DETACH'|
+ 'WAIT_CONTAINER_VISIBLE'|'WAIT_ROUTE_CARDS_VISIBLE'|'VERIFY_QUOTE_CLOSED';
+export async function openFleetList(
+ page: Page, timeout: number, onStage: (stage:FleetOpenStage)=>void = () => {}
+) {
+  onStage('INSPECT_CONTROL');
   const menu = page.locator('#mapRoutes');
   const fleet = page.locator('#popBtn1');
   // The main Fleet menu TOGGLES the popup. Use its Fleet tab when already open.
@@ -19,14 +28,21 @@ export async function openFleetList(page: Page, timeout: number) {
     (await control.getAttribute('onclick') || '').replace(/\s/g,'') !== allowed) throw new Error('RESEARCH_LIST_CONTROL_UNVERIFIED');
   const previous = await page.locator('#routesContainer').count() === 1 ? await page.locator('#routesContainer').elementHandle() : null;
   try {
+    onStage('CLICK_CONTROL');
     await control.click({timeout});
     // Prevent an old hidden list from satisfying the loading checks.
-    if (previous) await expect.poll(() => previous.evaluate(e => e.isConnected),{timeout}).toBe(false);
+    if (previous) {
+      onStage('WAIT_OLD_CONTAINER_DETACH');
+      await expect.poll(() => previous.evaluate(e => e.isConnected),{timeout}).toBe(false);
+    }
   } finally { await previous?.dispose(); }
+  onStage('WAIT_CONTAINER_VISIBLE');
   await page.locator('#routesContainer').waitFor({state:'visible',timeout});
+  onStage('WAIT_ROUTE_CARDS_VISIBLE');
   await expect.poll(async()=>page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es =>
     es.filter(e=>!!e.getClientRects().length).length
   ),{timeout}).toBeGreaterThan(0);
+  onStage('VERIFY_QUOTE_CLOSED');
   if (await page.locator('#newRouteInfo').isVisible()) throw new Error('RESEARCH_QUOTE_NOT_CLOSED');
 }
 
