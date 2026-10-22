@@ -116,10 +116,10 @@ export async function inspectNativeRenameEditors(
   // obstruction while omitting raw CSS values, attributes, text and IDs.
   const layout=button?await button.evaluate(el=>{
    let depth=0;
-   for(let node:HTMLElement|null=el;node;node=node.parentElement,depth++){
+   for(let node:Element|null=el;node;node=node.parentElement,depth++){
     const css=getComputedStyle(node);
     // Display:none on any ancestor always hides the editor.
-    if(node.hidden||css.display==='none')
+    if((node instanceof HTMLElement&&node.hidden)||css.display==='none')
      return {layoutCause:depth===0?'SELF_DISPLAY_NONE':'ANCESTOR_DISPLAY_NONE',
       hiddenAncestorDepth:depth};
    }
@@ -128,7 +128,7 @@ export async function inspectNativeRenameEditors(
    // hidden ancestor in the inherited chain.
    const actualVisibility=getComputedStyle(el).visibility;
    if(actualVisibility==='hidden'||actualVisibility==='collapse'){
-    let origin:HTMLElement=el,originDepth=0;
+    let origin:Element=el,originDepth=0;
     while(origin.parentElement){
      const parentVisibility=getComputedStyle(origin.parentElement).visibility;
      if(parentVisibility!=='hidden'&&parentVisibility!=='collapse')break;
