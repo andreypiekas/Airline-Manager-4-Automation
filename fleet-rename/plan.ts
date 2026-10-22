@@ -28,6 +28,17 @@ export function assertRenameRouteLabelUnchanged(expected:string,labels:string[])
  if(!baseline||current.length===0||current.some(value=>value!==baseline))
   throw Error('RENAME_ROUTE_IDENTITY_CHANGED');
 }
+/** Native details use two individual airport labels rather than the card's
+ * AAA - BBB label. This proves both endpoints before accepting a missing card
+ * registration, never trusting a naked #ff-name value alone. */
+export function assertRenameDetailAirportsMatch(routeLabel:string,airports:string[]):void{
+ const route=/^([A-Z0-9]{3})\s*-\s*([A-Z0-9]{3})$/.exec(routeLabel.trim());
+ const observed=airports.map(x=>x.trim());
+ if(!route||observed.length!==2||
+    !observed.every(x=>/^[A-Z0-9]{3}$/.test(x))||
+    [route[1],route[2]].sort().join(':')!==observed.sort().join(':'))
+  throw Error('RENAME_DETAILS_ROUTE_ENDPOINTS_UNVERIFIED');
+}
 export function verifiedFleet(collection:CollectionResult):AircraftSnapshot[]{
  if(!collection?.complete||!Number.isSafeInteger(collection.expectedRoutes)||
  collection.expectedRoutes===null||collection.expectedRoutes<=0||collection.expectedRoutes!==collection.aircraft.length)
