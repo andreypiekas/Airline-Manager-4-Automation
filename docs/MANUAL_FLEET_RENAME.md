@@ -46,6 +46,14 @@ Nos modos **somente leitura** `preview` e `pilot-check`, o programa agora descar
 
 **No modo `pilot`, nenhuma tentativa extra de coleta ou gravação é realizada**. `apply` global permanece bloqueado. A correção não comprova a causa raiz da variação nem autoriza renomeação.
 
+### Rastreamento dos detalhes da aeronave — sem gravação
+
+A execução [`pilot-check` #39840074401](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39840074401) aprovou a coleta das **114 aeronaves** e o SHA256 `9190c236e59343ce3d6f42ff02b1fc63972cd20db0ea00f99204b2475af4a992`. Falhou ao tentar abrir os detalhes do alvo, com `stage=PILOT_PREFLIGHT_OPEN_TARGET_DETAILS`, `failureCode=RENAME_PILOT_PREFLIGHT_UI_EXCEPTION`, **sem gravar nomes**.
+
+O relatório anterior não registrava qual verificação dos detalhes ocorreu. Agora `pilot-check` registra apenas **nomes estáticos de estágios**, como `PILOT_TARGET_REOPEN_FLEET`, `PILOT_TARGET_FLEET_WAIT_OLD_CONTAINER_DETACH`, `PILOT_TARGET_FIND_ROUTE`, `PILOT_TARGET_VERIFY_REGISTRATION`, `PILOT_TARGET_CLICK_DETAILS_LINK` e `PILOT_TARGET_VERIFY_DETAILS_CONTENT`, sem conteúdo da página, URL, nomes, IDs ou comandos nativos. Assim, uma nova inspeção somente leitura poderá identificar a etapa específica sem flexibilizar os controles.
+
+A causa raiz da falha no detalhe **ainda não foi demonstrada**. Não repetir o modo `pilot` até que `pilot-check` valide os dois campos.
+
 ## Etapa 2: pré-validação de piloto — sem salvar nada
 
 Quando um piloto falha antes do primeiro checkpoint, execute apenas **`operation=pilot-check`** no workflow manual da `main`: informe **`pilot_aircraft_id`** e os mesmos prefixos (ou CSV) + **`expected_preview_sha256`** da última prévia aprovada. Deixe `confirmation` vazio. A operação consulta as 104 aeronaves, confere o digest e a identidade do alvo e inspeciona os dois editores nativos, **sem preencher campo, abrir botão de edição ou enviar qualquer comando de renomeação**.

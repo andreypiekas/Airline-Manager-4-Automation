@@ -128,3 +128,22 @@ test('pilot is manual; full-fleet apply remains disabled',async()=>{
  expect(script.indexOf("if(operation==='pilot-check'){"))
   .toBeLessThan(script.indexOf("const marker=await open(join(directory"));
 });
+
+test('native target-details errors retain stage markers and never trigger an implicit retry',async()=>{
+ const file=await readFile('fleet-rename/run.ts','utf8');
+ const detailStart=file.indexOf('async function inspectTarget(');
+ const detailEnd=file.indexOf('/** A supported game UI',detailStart);
+ const targetPath=file.slice(detailStart,detailEnd);
+ const stages=[
+  'PILOT_TARGET_VERIFY_NO_CHALLENGE','PILOT_TARGET_REOPEN_FLEET',
+  'PILOT_TARGET_FIND_ROUTE','PILOT_TARGET_VERIFY_ROW',
+  'PILOT_TARGET_VERIFY_REGISTRATION','PILOT_TARGET_VERIFY_DETAILS_LINK',
+  'PILOT_TARGET_CLICK_DETAILS_LINK','PILOT_TARGET_WAIT_DETAILS_VISIBLE',
+  'PILOT_TARGET_VERIFY_DETAILS_CONTENT'
+ ];
+ expect(stages.every(marker=>targetPath.includes("onStage('"+marker+"')"))).toBe(true);
+ expect(targetPath).not.toMatch(/\.fill\(|saveNativeTextField\(|renameNativePrompt\(/);
+ expect(file).toContain("await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage)");
+ expect(file).toContain("report.stage.startsWith('PILOT_TARGET_')");
+ expect(file).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
+});
