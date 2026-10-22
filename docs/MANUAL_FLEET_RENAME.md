@@ -2,6 +2,16 @@
 
 > Workflow: [Renomear frota manualmente](../.github/workflows/manual-fleet-rename.yml). Não possui cron, não é chamado pela produção e **não dispara nenhuma decolagem, compra, ajuste de tarifa, reroute ou campanha**.
 
+## Diagnóstico dos editores (somente leitura)
+
+Antes de autorizar `apply`, especialmente após o erro `RENAME_PROMPT_CONTROL_UNVERIFIED` no run [#39708000395](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39708000395), execute **Actions → Renomear frota manualmente → Run workflow → main → operation: inspect**. Deixe os demais campos vazios.
+
+A operação `inspect` abre o Fleet e os detalhes da **primeira aeronave** por seu controle nativo, verifica a rota e a identidade e **apenas lê** os controles de renomeação de aeronave e rota. Não clica nos botões editores, não aceita `prompt` e não faz AJAX de gravação.
+
+No artefato `manual-fleet-rename-report`, confira `inspection.allVerified`, `inspection.editors` e a tabela *Inspeção nativa (somente leitura)*. São mostrados somente contagens, visibilidade, habilitação, validação estrita e o formato sanitizado dos handlers (sem IDs, URLs reais, nomes ou código original).
+
+`allVerified=true` confirma **somente a forma estática dos dois comandos de uma aeronave**, não comprova sucesso de gravação, outros modelos de aeronave, duração, idempotência ou rollback. **Não executar `apply` em toda a frota baseado apenas nisso**; fazer primeiro um piloto manual aprovado e com relatório de confirmação de ambos os campos.
+
 ## Etapa 1: prévia (nenhuma alteração)
 
 No GitHub, acesse **Actions → Renomear frota manualmente → Run workflow**, selecionando **main** e operação **preview**.
