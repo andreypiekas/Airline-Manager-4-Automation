@@ -2,15 +2,16 @@ import {test,expect,type Page} from '@playwright/test';
 import {inspectNativeRenameEditors,sanitizedRenameCallbackShape} from '../../fleet-rename/run';
 import {readFile} from 'node:fs/promises';
 
-async function fixture(page:Page,unsafeAircraft=false,wrongRoute=false){
+async function fixture(page:Page,unsafeAircraft=false,wrongRoute=false,hiddenEditors=false){
  const first=unsafeAircraft
   ?"Ajax('fleet_details.php?id=1001&mode=reg&reg='+prompt('Sensitive Aircraft','old-name'),'detailsAction');"
   :"Ajax('fleet_details.php?id=1001&mode=reg&reg='+prompt('Sensitive Aircraft'),'detailsAction');";
  const second="Ajax('fleet_details.php?id=101&mode=routeReg&reg='+prompt('Sensitive Route'),'detailsAction');";
+ const nativeButtons='<button id="reg" onclick="'+first+'">Aircraft rename</button>'+
+  '<button id="routeReg" onclick="'+second+'">Route rename</button>';
  const detailHtml='<div id="ff-name">N-1</div>'+
   '<div class="col-5"><span class="l-text">'+(wrongRoute?'CCC':'AAA')+'</span><span class="l-text">GRU</span></div>'+
-  '<button id="reg" onclick="'+first+'">Aircraft rename</button>'+
-  '<button id="routeReg" onclick="'+second+'">Route rename</button>';
+  (hiddenEditors?'<div style="display:none">'+nativeButtons+'</div>':nativeButtons);
  await page.setContent(`<button>Routes (1)</button>
   <div id="routesContainer"><div id="routeMainList101">
    <span class="s-text">AAA - GRU</span>
@@ -48,6 +49,19 @@ test('read-only inspection identifies both native editors without changing any n
  expect(await page.evaluate(()=>(window as any).detailsClicks)).toBe(1);
  expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
 });
+test('read-only inspection explains hidden ancestors and never clicks either editor',async({page})=>{
+ await fixture(page,false,false,true);
+ const data=await inspectNativeRenameEditors(page,1500);
+ expect(data.allVerified).toBe(false);
+ expect(data.editors).toMatchObject([
+  {field:'aircraft',candidateCount:1,visible:false,enabled:true,
+   callbackVerified:false,layoutCause:'ANCESTOR_DISPLAY_NONE',hiddenAncestorDepth:1},
+  {field:'route',candidateCount:1,visible:false,enabled:true,
+   callbackVerified:false,layoutCause:'ANCESTOR_DISPLAY_NONE',hiddenAncestorDepth:1}
+ ]);
+ expect(JSON.stringify(data)).not.toContain('Sensitive');
+ expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
+});
 test('unverified two-argument prompt is detected and redacted; no editor is clicked',async({page})=>{
  await fixture(page,true);
  const result=await inspectNativeRenameEditors(page,1500);
@@ -70,6 +84,14 @@ test('sanitized callback structure never persists user names or endpoint IDs',()
  const safe=sanitizedRenameCallbackShape(raw);
  expect(safe).toContain('prompt');expect(safe).toContain('Ajax');
  for(const forbidden of ['123','Secret Name','Current Name','fleet_details.php'])
+  expect(safe).not.toContain(forbidden);
+});
+test('sanitized callback explains safe native helper functions, not their arguments',()=>{
+ const raw="playSound('neutral_click');Ajax('fleet_details.php?id=123&mode=reg&reg='+"+
+  "encodeURIComponent(prompt('Private name').trim()),'detailsAction',this);";
+ const safe=sanitizedRenameCallbackShape(raw);
+ expect(safe).toBe('playSound(Q);Ajax(Q+encodeURIComponent(prompt(Q).trim()),Q,this);');
+ for(const forbidden of ['123','Private name','fleet_details.php','detailsAction','neutral_click'])
   expect(safe).not.toContain(forbidden);
 });
 test('manual workflow contains inspect as explicit operation, never as scheduled job',async()=>{
