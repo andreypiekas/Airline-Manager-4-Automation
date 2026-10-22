@@ -124,8 +124,8 @@ test('read-only form discovery matches exact input references and visible local 
  const rtCb="playSound('neutral_click');Ajax('fleet_details.php?id=101&mode=routeReg&reg='+$('#rtInput').val(),'detailsAction',this);";
  const detailHtml='<div id="ff-name">N-1</div>'+
   '<div class="col-5"><span class="l-text">AAA</span><span class="l-text">GRU</span></div>'+
-  '<span onclick="$(\\\'#aircraftEdit\\\').show();">Open aircraft editor</span>'+
-  '<span onclick="$(\\\'#routeEdit\\\').show();">Open route editor</span>'+
+  '<span onclick="$(\'#aircraftEdit\').show();">Open aircraft editor</span>'+
+  '<span onclick="$(\'#routeEdit\').show();">Open route editor</span>'+
   '<div id="aircraftEdit" style="display:none"><div><span>'+
    '<input id="regInput" type="text" value="private-current-registration">'+
    '<button onclick="'+acCb+'">Save aircraft</button>'+
