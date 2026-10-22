@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-import {inspectNativeRenameEditors,sanitizedRenameCallbackShape} from '../../fleet-rename/run';
+import {inspectNativeRenameEditors,sanitizedRenameCallbackShape,verifiedReadOnlyNativeOpener} from '../../fleet-rename/run';
 import {readFile} from 'node:fs/promises';
 
 async function fixture(
@@ -173,9 +173,74 @@ test('read-only form discovery matches exact input references and visible local 
  expect(await page.evaluate(()=>(window as any).formOpens)).toBe(0);
  expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
 });
+test('native read-only opener requires exact hide-show chain with expected region',()=>{
+ const good="$('#planeBadge').hide();$('#planeForm').show();playSound('neutral_click');";
+ expect(verifiedReadOnlyNativeOpener(good,'planeForm')).toBe(true);
+ expect(verifiedReadOnlyNativeOpener("$('#routeBadge').hide();$('#routeForm').show();",'routeForm')).toBe(true);
+ for(const callback of [
+  "Ajax('fleet_details.php?id=99&mode=reg&reg=HACK','detailsAction');",
+  "eval('unsafe');$('#planeForm').show();",
+  "$('#planeBadge').hide();$('#planeForm').show();Ajax('edit.php');",
+  "$('#planeBadge').hide();$('#planeForm').show();$('#name').val('HACK');",
+  "$('#planeBadge').hide();$('#otherForm').show();",
+  "$('#planeForm').hide();$('#planeForm').show();",
+  "$('#planeBadge').hide();$('#planeForm').toggle();",
+  "$('#planeBadge').hide();$('#planeForm').show();playSound('other');"
+ ])expect(verifiedReadOnlyNativeOpener(callback,'planeForm')).toBe(false);
+});
+test('inspect-open uses only strictly verified native show/hide controls; never writes names',async({page})=>{
+ const acCb="playSound('neutral_click');Ajax('fleet_details.php?id=1001&mode=reg&reg='+$('#regInput').val(),'detailsAction',this);";
+ const rtCb="playSound('neutral_click');Ajax('fleet_details.php?id=101&mode=routeReg&reg='+$('#rtInput').val(),'detailsAction',this);";
+ const detailsHtml='<div id="ff-name">N-1</div>'+
+  '<div class="col-5"><span class="l-text">AAA</span><span class="l-text">GRU</span></div>'+
+  '<span id="aircraftBadge" onclick="$(\\\'#aircraftBadge\\\').hide();$(\\\'#planeForm\\\').show();playSound(\\\'neutral_click\\\');">Open aircraft editor</span>'+
+  '<span id="routeBadge" onclick="$(\\\'#routeBadge\\\').hide();$(\\\'#routeForm\\\').show();">Open route editor</span>'+
+  '<div id="planeForm" style="display:none"><div><span>'+
+   '<input id="regInput" type="text" value="PRIVATE-AIRCRAFT-REGISTRATION">'+
+   '<button id="savePlane" onclick="'+acCb+'">Save aircraft</button></span></div></div>'+
+  '<div id="routeForm" style="display:none"><div><span>'+
+   '<input id="rtInput" type="text" value="PRIVATE-ROUTE-NAME">'+
+   '<button id="saveRoute" onclick="'+rtCb+'">Save route</button></span></div></div>';
+ await page.setContent(`<button>Routes (1)</button><div id="routesContainer">
+  <div id="routeMainList101"><span class="s-text">AAA - GRU</span>
+   <a id="openPlane">N-1 - Aircraft</a></div></div>
+  <div id="detailsAction" style="display:none"></div>
+  <script>
+   window.detailsOpens=0;window.nativeToggles=0;window.renameRequests=0;
+   const intro=0;function playSound(){}
+   function $(s){return {
+    hide(){document.querySelector(s).style.display='none';window.nativeToggles++;},
+    show(){document.querySelector(s).style.display='block';window.nativeToggles++;},
+    val(){throw Error('INSPECT_CANNOT_READ_FORM_VALUE');}
+   }}
+   function Ajax(url){
+    if(url==='fleet_details.php?id=1001'){
+     window.detailsOpens++;
+     const d=document.getElementById('detailsAction');
+     d.innerHTML=${JSON.stringify(detailsHtml)};d.style.display='block';
+    }else window.renameRequests++;
+   }
+  </script>`);
+ await page.locator('#openPlane').evaluate(e=>e.setAttribute('onclick',
+  "playSound('neutral_click');Ajax('fleet_details.php?id=1001','detailsAction');if(intro==0){$('#routeAction').hide();}"));
+ const info=await inspectNativeRenameEditors(page,1800,true);
+ expect(info.readOnly).toBe(true);expect(info.allVerified).toBe(false);
+ expect(info.editors).toMatchObject([
+  {field:'aircraft',form:{openerStrictlyVerified:true,openerActivated:true,
+   buttonVisibleAfterOpener:true,inputVisibleAfterOpener:true}},
+  {field:'route',form:{openerStrictlyVerified:true,openerActivated:true,
+   buttonVisibleAfterOpener:true,inputVisibleAfterOpener:true}}
+ ]);
+ const report=JSON.stringify(info);
+ for(const secret of ['PRIVATE-AIRCRAFT-REGISTRATION','PRIVATE-ROUTE-NAME','regInput','rtInput','1001','101'])
+  expect(report).not.toContain(secret);
+ expect(await page.evaluate(()=>(window as any).nativeToggles)).toBe(4);
+ expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
+ expect(await page.evaluate(()=>(window as any).detailsOpens)).toBe(1);
+});
 test('manual workflow contains inspect as explicit operation, never as scheduled job',async()=>{
  const file=await readFile('.github/workflows/manual-fleet-rename.yml','utf8');
- expect(file).toContain('options: [preview, inspect, apply]');
+ expect(file).toContain('options: [preview, inspect, inspect-open, apply]');
  expect(file).toContain("github.event_name == 'workflow_dispatch'");
  expect(file).not.toMatch(/cron:|schedule:/);
 });
