@@ -5,7 +5,7 @@ import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory} from './inventory';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
-import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,type RenameTarget} from './plan';
+import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
 
 /** Only stable diagnostic codes; never persist or log raw Playwright exceptions,
@@ -50,9 +50,13 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  // all match; the current registration must also match the approved plan.
  const registrationNodes=row.locator('[id^="acRegList"]');
  const registrations=await registrationNodes.count();
- if(registrations!==1||
-    await registrationNodes.first().getAttribute('id')!=='acRegList'+expected.aircraftId||
-    (await registrationNodes.first().textContent({timeout}))?.trim()!==registered)
+ // Some native Fleet cards omit the registration span entirely. This is
+ // permitted only when the native details confirm the approved registration
+ // AND the complete airport pair after a verified read-only details click.
+ if(registrations>1||
+    (registrations===1&&(
+     await registrationNodes.first().getAttribute('id')!=='acRegList'+expected.aircraftId||
+     (await registrationNodes.first().textContent({timeout}))?.trim()!==registered)))
   throw Error('RENAME_AIRCRAFT_IDENTITY_CHANGED');
  const expectedCallback=`playSound('neutral_click');Ajax('fleet_details.php?id=${expected.aircraftId}','detailsAction');if(intro==0){$('#routeAction').hide();}`;
  const links=row.locator('a[onclick]');
@@ -65,8 +69,13 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  await link.click({timeout});
  const details=page.locator('#detailsAction');
  await details.waitFor({state:'visible',timeout});
- if((await details.locator('#ff-name').innerText({timeout})).trim()!==registered)
+ if(await details.locator('#ff-name').count()!==1||
+    (await details.locator('#ff-name').innerText({timeout})).trim()!==registered)
   throw Error('RENAME_DETAILS_IDENTITY_CHANGED');
+ // This always verifies the details endpoints, especially when the card had
+ // no registration span to corroborate the identity before opening details.
+ assertRenameDetailAirportsMatch(expected.oldRouteLabel,
+  await details.locator('.col-5 span.l-text').allTextContents());
  return details;
 }
 /** A supported game UI exposes a one-shot native prompt + AJAX save action.
