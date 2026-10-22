@@ -1,6 +1,17 @@
 import type {Page,Locator} from '@playwright/test';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
-import {verifiedReadOnlyNativeOpener,type RenamePhase} from './run';
+import type {RenamePhase} from './run';
+/** Only UI hide + UI show of the exact native hidden region (optional
+ * neutral sound) is safe to click as a read-only probe. Strictly rejects
+ * AJAX, forms, input writes, arbitrary JavaScript and unknown handlers. */
+export function verifiedReadOnlyNativeOpener(callback:string,hiddenRegionId:string):boolean{
+ if(!/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(hiddenRegionId))return false;
+ const normalized=callback.replace(/\s/g,'');
+ if(normalized.length>300)return false;
+ const match=/^\$\('(#[-A-Za-z0-9_]+)'\)\.hide\(\);\$\('(#[-A-Za-z0-9_]+)'\)\.show\(\);(?:playSound\('neutral_click'\);)?$/.exec(normalized);
+ return !!match&&match[2]==='#'+hiddenRegionId&&match[1]!==match[2];
+}
+
 import type {RenameTarget} from './plan';
 
 type NativeMode='reg'|'routeReg';
