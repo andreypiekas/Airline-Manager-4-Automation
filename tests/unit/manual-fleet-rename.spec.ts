@@ -33,6 +33,30 @@ test('manual apply refuses missing confirmation, changed plan or mismatched rout
  const csv=exportRenameCsv(plan).replace('2,98,','2,999,');
  expect(()=>generateRenames(fleet(),{csv})).toThrow('RENAME_CSV_IDENTITY_MISMATCH');
 });
+test('preview hash survives direction reversal but still binds IDs, endpoints, names and targets',()=>{
+ const initial=fleet();
+ const plan=generateRenames(initial,{aircraftPrefix:'XP',routePrefix:'XR'});
+ const reversed=fleet();
+ for(const entry of reversed.aircraft){
+  entry.routeLabel='GRU - AAA';entry.from='GRU';entry.to='AAA';
+ }
+ const after=generateRenames(reversed,{aircraftPrefix:'XP',routePrefix:'XR'});
+ expect(after.digest).toBe(plan.digest);
+ expect(after.targets[0].oldRouteLabel).not.toBe(plan.targets[0].oldRouteLabel);
+ // A pilot authorized against a stable hash may still reject a changed
+ // routeId, airport pair, current registration, or proposed target name.
+ const changedRoute=fleet();changedRoute.aircraft[0].routeId='909';
+ expect(generateRenames(changedRoute,{aircraftPrefix:'XP',routePrefix:'XR'}).digest).not.toBe(plan.digest);
+ const changedPair=fleet();changedPair.aircraft[0].routeLabel='AAA - LAX';
+ expect(generateRenames(changedPair,{aircraftPrefix:'XP',routePrefix:'XR'}).digest).not.toBe(plan.digest);
+ const changedReg=fleet();changedReg.aircraft[0].registration='CHANGED';
+ expect(generateRenames(changedReg,{aircraftPrefix:'XP',routePrefix:'XR'}).digest).not.toBe(plan.digest);
+ expect(generateRenames(fleet(),{aircraftPrefix:'XX',routePrefix:'XR'}).digest).not.toBe(plan.digest);
+ expect(generateRenames(fleet(),{aircraftPrefix:'XP',routePrefix:'XX'}).digest).not.toBe(plan.digest);
+ const malformed=fleet();malformed.aircraft[0].routeLabel='UNKNOWN';
+ expect(()=>generateRenames(malformed,{aircraftPrefix:'XP',routePrefix:'XR'}))
+  .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
+});
 test('all-aircraft mapping strictly rejects partial, duplicated and injected names',()=>{
  const plan=generateRenames(fleet(),{aircraftPrefix:'XP',routePrefix:'RT'});
  const csv=exportRenameCsv(plan);
@@ -61,8 +85,7 @@ test('pre-save route identity rejects changed endpoints even if route and aircra
  expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA-GRU','AAA - GRU'])).not.toThrow();
  expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - LAX']))
   .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
- expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - GRU','GRU - AAA']))
-  .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
+ expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['AAA - GRU','GRU - AAA'])).not.toThrow();
  expect(()=>assertRenameRouteLabelUnchanged('AAA - GRU',['unknown route label']))
   .toThrow('RENAME_ROUTE_IDENTITY_CHANGED');
 });

@@ -18,14 +18,23 @@ export function mappingTemplate(collection:CollectionResult):string{
  * IDs alone cannot prove a route is still the one from the approved preview.
  * This is read-only and refuses mismatches or ambiguous native labels.
  */
+/** Flight direction can reverse when an aircraft lands or departs.
+ * Route identity is the exact UNORDERED airport pair plus the existing
+ * routeId/aircraftId checked separately, never its current direction.
+ * Strictly reject unknown airport formats rather than silently normalizing.
+ */
+export function canonicalRenameAirportPair(label:string):string{
+ const match=/^([A-Z0-9]{3})\s*-\s*([A-Z0-9]{3})$/.exec(label.trim());
+ if(!match||match[1]===match[2])throw Error('RENAME_ROUTE_IDENTITY_CHANGED');
+ return [match[1],match[2]].sort().join('-');
+}
 export function assertRenameRouteLabelUnchanged(expected:string,labels:string[]):void{
- const normalize=(value:string)=>{
-  const match=/^([A-Z0-9]{3})\s*-\s*([A-Z0-9]{3})$/.exec(value.trim());
-  return match?match[1]+'-'+match[2]:null;
- };
- const baseline=normalize(expected);
- const current=labels.map(normalize).filter((value):value is string=>value!==null);
- if(!baseline||current.length===0||current.some(value=>value!==baseline))
+ const baseline=canonicalRenameAirportPair(expected);
+ const current=labels.flatMap(label=>{
+  try{return [canonicalRenameAirportPair(label)];}
+  catch{return [];}
+ });
+ if(current.length===0||current.some(value=>value!==baseline))
   throw Error('RENAME_ROUTE_IDENTITY_CHANGED');
 }
 /** Native details use two individual airport labels rather than the card's
@@ -101,7 +110,14 @@ export function generateRenames(
    oldRouteLabel:a.routeLabel,aircraftRegistration,routeRegistration
   };
  });
- const digest=createHash('sha256').update(JSON.stringify(targets)).digest('hex');
+ // The hash must stay invariant under ordinary flight direction reversals,
+ // but still bind every aircraftId, routeId, registration, exact airport pair,
+ // intended aircraftRegistration and intended routeRegistration. The visible
+ // targets retain their original labels for subsequent live UI verification.
+ const digestTargets=targets.map(t=>({
+  ...t,oldRouteLabel:canonicalRenameAirportPair(t.oldRouteLabel)
+ }));
+ const digest=createHash('sha256').update(JSON.stringify(digestTargets)).digest('hex');
  return {schemaVersion:1,count:targets.length,digest,targets};
 }
 export function exportRenameCsv(plan:RenamePlan){
