@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'preview: só CSV e hash; apply: requer aprovação e hash exato da prévia'
+        description: 'inspect: lê editores sem alterações; preview: CSV/hash; apply: altera com aprovação/hash'
         type: choice
         default: preview
         required: true
-        options: [preview, apply]
+        options: [preview, inspect, apply]
       aircraft_prefix:
         description: 'Padrão para todas as aeronaves, por ex. XP (deixe vazio para usar CSV)'
         required: false
