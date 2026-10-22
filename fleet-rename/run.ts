@@ -57,7 +57,7 @@ export function sanitizedRenameCallbackShape(raw:string):string{
  return replaced.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g,w=>
   ['Ajax','playSound','prompt','encodeURIComponent','encodeURI','escape',
    'trim','replace','toUpperCase','toLowerCase','val','return','if','this',
-   'true','false','null'].includes(w)?w:'ID'
+   'true','false','null','Q'].includes(w)?w:'ID'
  ).replace(/\d+/g,'N').replace(/\s+/g,'').slice(0,300);
 }
 /** Audit exactly one native aircraft's two rename editors via read-only
@@ -118,12 +118,24 @@ export async function inspectNativeRenameEditors(
    let depth=0;
    for(let node:HTMLElement|null=el;node;node=node.parentElement,depth++){
     const css=getComputedStyle(node);
+    // Display:none on any ancestor always hides the editor.
     if(node.hidden||css.display==='none')
      return {layoutCause:depth===0?'SELF_DISPLAY_NONE':'ANCESTOR_DISPLAY_NONE',
       hiddenAncestorDepth:depth};
-    if(css.visibility==='hidden'||css.visibility==='collapse')
-     return {layoutCause:depth===0?'SELF_VISIBILITY_HIDDEN':'ANCESTOR_VISIBILITY_HIDDEN',
-      hiddenAncestorDepth:depth};
+   }
+   // CSS visibility is inherited but may be explicitly overridden on the
+   // child. Only classify an actual hidden editor, then trace the outermost
+   // hidden ancestor in the inherited chain.
+   const actualVisibility=getComputedStyle(el).visibility;
+   if(actualVisibility==='hidden'||actualVisibility==='collapse'){
+    let origin:HTMLElement=el,originDepth=0;
+    while(origin.parentElement){
+     const parentVisibility=getComputedStyle(origin.parentElement).visibility;
+     if(parentVisibility!=='hidden'&&parentVisibility!=='collapse')break;
+     origin=origin.parentElement;originDepth++;
+    }
+    return {layoutCause:originDepth===0?'SELF_VISIBILITY_HIDDEN':
+     'ANCESTOR_VISIBILITY_HIDDEN',hiddenAncestorDepth:originDepth};
    }
    return {layoutCause:el.getClientRects().length?'LAYOUT_PRESENT':'ZERO_RECT',
     hiddenAncestorDepth:null};
