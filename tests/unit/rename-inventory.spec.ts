@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-import {collectRenameInventory} from '../../fleet-rename/inventory';
+import {collectRenameInventory,renameCardIdentityIssue} from '../../fleet-rename/inventory';
 
 async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean}={}){
  await page.setContent(`<button>Routes (21)</button>
@@ -34,11 +34,34 @@ test('fast identity-only inventory covers all native Fleet pages without opening
  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
 });
+test('Fleet rejection has safe distinct codes without including identifiers or private labels',()=>{
+ const good={routeId:'101',aircraftId:'1001',registration:'N-1',
+  routeLabel:'AAA - GRU',detailsControlCount:1};
+ const set=new Set<string>();
+ expect(renameCardIdentityIssue(good,set,set)).toBeNull();
+ const scenarios=[
+  [{...good,routeId:''},'RENAME_FLEET_ROUTE_ID_INVALID'],
+  [{...good,detailsControlCount:2},'RENAME_FLEET_DETAILS_CONTROL_AMBIGUOUS'],
+  [{...good,aircraftId:''},'RENAME_FLEET_AIRCRAFT_ID_INVALID'],
+  [{...good,registration:''},'RENAME_FLEET_REGISTRATION_MISSING'],
+  [{...good,routeLabel:'UNKNOWN'},'RENAME_FLEET_ROUTE_LABEL_MISSING_OR_INVALID'],
+ ] as const;
+ for(const [card,code] of scenarios){
+  const result=renameCardIdentityIssue(card,set,set);
+  expect(result).toBe(code);
+  expect(result).not.toContain(good.registration);
+  expect(result).not.toContain(good.routeId);
+ }
+ expect(renameCardIdentityIssue(good,new Set([good.routeId]),set))
+  .toBe('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+ expect(renameCardIdentityIssue(good,set,new Set([good.aircraftId])))
+  .toBe('RENAME_FLEET_AIRCRAFT_ID_DUPLICATE');
+});
 test('short or repeated native page identities prevent renaming any aircraft',async({page})=>{
  await fixture(page,{short:true});
  await expect(collectRenameInventory(page,500)).rejects.toThrow();
  // Reload a fresh JS realm before the second synthetic native page.
  await page.goto('about:blank');
  await fixture(page,{duplicate:true});
- await expect(collectRenameInventory(page,1500)).rejects.toThrow('RENAME_FLEET_DUPLICATE_OR_INVALID_IDENTITY');
+ await expect(collectRenameInventory(page,1500)).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
 });

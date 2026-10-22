@@ -4,6 +4,24 @@ import {AIRCRAFT_DETAILS_CONTROL} from '../demand/identity';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {routePageLimit} from '../demand/navigation';
 
+interface RenameCardIdentity {
+ routeId:string;aircraftId:string;registration:string;routeLabel:string;detailsControlCount:number;
+}
+/** Pure, privacy-safe diagnosis. Keep integrity checks strict; never expose actual IDs,
+ * registration, route label, URLs or callbacks in CI logs. */
+export function renameCardIdentityIssue(
+ card:RenameCardIdentity,seenRoutes:ReadonlySet<string>,seenAircraft:ReadonlySet<string>
+):string|null{
+ if(!/^[1-9]\d*$/.test(card.routeId))return 'RENAME_FLEET_ROUTE_ID_INVALID';
+ if(card.detailsControlCount!==1)return 'RENAME_FLEET_DETAILS_CONTROL_AMBIGUOUS';
+ if(!/^[1-9]\d*$/.test(card.aircraftId))return 'RENAME_FLEET_AIRCRAFT_ID_INVALID';
+ if(!card.registration.trim())return 'RENAME_FLEET_REGISTRATION_MISSING';
+ if(!/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(card.routeLabel))
+  return 'RENAME_FLEET_ROUTE_LABEL_MISSING_OR_INVALID';
+ if(seenRoutes.has(card.routeId))return 'RENAME_FLEET_ROUTE_ID_DUPLICATE';
+ if(seenAircraft.has(card.aircraftId))return 'RENAME_FLEET_AIRCRAFT_ID_DUPLICATE';
+ return null;
+}
 /**
  * Unlike demand analysis, administrative renaming needs ONLY the read-only
  * identities from native Fleet cards. No per-plane demand, history or price
@@ -39,14 +57,19 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
    const registration=links.length===1?links[0].a.querySelector('#acRegList'+aircraftId)?.textContent?.trim()||'':'';
    const routeLabel=Array.from(e.querySelectorAll('span.s-text')).map(x=>x.textContent?.trim()||'')
     .find(x=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(x))||'';
-   return {routeId:e.id.replace(/^routeMainList/,''),aircraftId,registration,routeLabel};
+   return {routeId:e.id.replace(/^routeMainList/,''),aircraftId,registration,routeLabel,
+    detailsControlCount:links.length};
   }),AIRCRAFT_DETAILS_CONTROL);
   if(cards.length!==expected)throw Error('RENAME_FLEET_PAGE_INCOMPLETE');
-  for(const card of cards){
+  for(const [slot,card] of cards.entries()){
+   const issue=renameCardIdentityIssue(card,routes,ids);
+   if(issue){
+    // Only classification and position are emitted; raw identities are never logged.
+    console.warn('[RenameInventory] '+JSON.stringify({status:'INVALID_CARD',
+     page:pageIndex,slot:slot+1,observed:result.aircraft.length,expected:total,code:issue}));
+    throw Error(issue);
+   }
    const segments=card.routeLabel.split(/\s*-\s*/);
-   if(!/^[1-9]\d*$/.test(card.routeId)||!/^[1-9]\d*$/.test(card.aircraftId)||
-      !card.registration||segments.length!==2||routes.has(card.routeId)||ids.has(card.aircraftId))
-    throw Error('RENAME_FLEET_DUPLICATE_OR_INVALID_IDENTITY');
    routes.add(card.routeId);ids.add(card.aircraftId);
    const item:AircraftSnapshot={
     aircraftId:card.aircraftId,routeId:card.routeId,registration:card.registration,
