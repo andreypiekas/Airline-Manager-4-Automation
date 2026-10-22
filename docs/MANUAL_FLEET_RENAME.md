@@ -12,6 +12,8 @@ No artefato `manual-fleet-rename-report`, confira `inspection.allVerified`, `ins
 
 Na inspeção aprimorada, cada editor também possui `form`: quantidade de campos de entrada presentes na área oculta, quantidade de campos cujo `.val()` é referenciado pelo botão, tipo genérico do campo e possíveis controles visíveis de abertura de formulário. Essas observações são somente leitura e **não incluem os IDs, nomes ou valores dos inputs**. Um controle candidato de abertura não é automaticamente considerado seguro para clicar. A inspeção não altera CSS nem abre o formulário.
 
+**Inspeção da abertura nativa (sem gravação):** existe uma opção manual distinta `operation=inspect-open`. Ela consulta os mesmos campos do modo `inspect` e, somente quando a callback da abertura é **exatamente** a sequência nativa `hide();show();` para a região oculta verificada (com som neutro opcional), clica exclusivamente no controle de abertura. A rotina não preenche campos, não lê seu conteúdo, não clica em Salvar e não envia Ajax de edição. Os campos adicionais `openerStrictlyVerified`, `openerActivated`, `buttonVisibleAfterOpener` e `inputVisibleAfterOpener` registram o que foi comprovado. Outros formatos não são executados; a operação não habilita `apply`.
+
 `allVerified=true` confirma **somente a forma estática dos dois comandos de uma aeronave**, não comprova sucesso de gravação, outros modelos de aeronave, duração, idempotência ou rollback. **Não executar `apply` em toda a frota baseado apenas nisso**; fazer primeiro um piloto manual aprovado e com relatório de confirmação de ambos os campos.
 
 ## Etapa 1: prévia (nenhuma alteração)
