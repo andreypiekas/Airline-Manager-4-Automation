@@ -151,8 +151,13 @@ test('native target-details errors retain stage markers and never trigger an imp
 
 test('manual pilot loads its native editors statically before touching the real game',async()=>{
  const source=await readFile('fleet-rename/run.ts','utf8');
- expect(source).toContain("import {preflightNativeTextEditors,saveNativeTextField} from './native-pilot';");
+ expect(source).toContain("import {preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener} from './native-pilot';");
  expect(source).not.toContain("await import('./native-pilot')");
+ const editorSource=await readFile('fleet-rename/native-pilot.ts','utf8');
+ expect(editorSource).toContain("import type {RenamePhase} from './run';");
+ expect(editorSource).not.toContain("import {verifiedReadOnlyNativeOpener,type RenamePhase} from './run';");
+ expect(editorSource).toContain('export function verifiedReadOnlyNativeOpener(');
+ expect(source).toContain('export {verifiedReadOnlyNativeOpener};');
  expect(source).toContain("markStage('PILOT_PREFLIGHT_NATIVE_MODULE_READY')");
  // This test imports the native editor and manual workflow entrypoint together.
  // It must resolve their circular references in Playwright's actual TS loader.
