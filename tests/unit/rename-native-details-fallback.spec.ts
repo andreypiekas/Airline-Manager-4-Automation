@@ -3,9 +3,9 @@ import {collectRenameInventory} from '../../fleet-rename/inventory';
 import {assertRenameDetailAirportsMatch} from '../../fleet-rename/plan';
 
 /** Synthetic native Fleet only: never a live account or mutation action. */
-async function fixture(page:Page,wrongAirports=false){
+async function fixture(page:Page,wrongAirports=false,headingText='Routes (3)'){
  await page.setContent(`<button id="mapRoutes" onclick="hideAllWhenClick();menuFleet('Routes');">Fleet</button>
-  <button>Routes (3)</button>
+  <button>${headingText}</button>
   <div id="routeAction"><div id="routesContainer"></div></div>
   <div id="detailsAction" style="display:none"></div>
   <script>
@@ -56,6 +56,16 @@ test('absent card registration can be verified by the exact native read-only det
  expect(result.aircraft.map(a=>a.registration)).toEqual(['N-1','N-2','N-3']);
  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(1);
  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+test('native Fleet headings with no space or non-breaking spaces keep the same verified numeric count',async({page})=>{
+ for(const heading of ['Routes(3)','Routes\u00a0(3)']){
+  await fixture(page,false,heading);
+  const result=await collectRenameInventory(page,1800);
+  expect(result.complete).toBe(true);
+  expect(result.aircraft).toHaveLength(3);
+  expect(result.aircraft[2].registration).toBe('N-3');
+  await page.goto('about:blank');
+ }
 });
 test('details endpoint mismatch cannot make a preview complete or enable edits',async({page})=>{
  await fixture(page,true);
