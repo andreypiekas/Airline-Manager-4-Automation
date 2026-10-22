@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory} from './inventory';
+import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
@@ -19,6 +20,14 @@ export function safeRenameFailureCode(error:unknown):string{
  return 'RENAME_UNCLASSIFIED_FAILURE';
 }
 export type RenamePhase='aircraft'|'route';
+export interface NativeRenameEditorObservation {
+ field:RenamePhase;candidateCount:number;visible:boolean;enabled:boolean;
+ callbackVerified:boolean;callbackShape:string;
+}
+export interface NativeRenameEditorInspection {
+ inspected:1;routeCount:number;readOnly:true;editors:NativeRenameEditorObservation[];
+ allVerified:boolean;
+}
 export interface RenameOutcome {
  aircraftId:string;routeId:string;field:RenamePhase;
  desired:string;status:'attempting'|'confirmed'|'held'|'outcome_unknown';
@@ -35,6 +44,76 @@ export function verifiedPromptRenameCallback(callback:string,id:string,mode:'reg
  // mentions 'prompt' and 'Ajax' is not sufficient to authorize mutation.
  const exact=new RegExp("^Ajax\\('" + escaped + "[A-Za-z0-9_]+='\\+prompt\\('[^']{1,160}'\\),'[A-Za-z0-9_-]+'\\);$");
  return exact.test(plain);
+}
+/** Never persist raw native callback strings or page text. Literals, identifiers
+ * and numbers become coarse tokens, keeping the operator/prompt structure
+ * needed to diagnose unsupported UI safely. */
+export function sanitizedRenameCallbackShape(raw:string):string{
+ if(raw.length>1200)return 'TOO_LONG';
+ const replaced=raw.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,'Q');
+ if(/['"`]/.test(replaced))return 'UNKNOWN_QUOTING';
+ return replaced.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g,w=>
+  ['Ajax','prompt','return','if','this','true','false'].includes(w)?w:'ID'
+ ).replace(/\d+/g,'N').replace(/\s+/g,'').slice(0,300);
+}
+/** Audit exactly one native aircraft's two rename editors via read-only
+ * navigation. NEVER click either editor, accept a prompt or send an edit AJAX. */
+export async function inspectNativeRenameEditors(
+ page:Page,timeout=14000
+):Promise<NativeRenameEditorInspection>{
+ await assertNoInteractiveChallenge(page,'rename:editor-inspection');
+ const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
+ if(await heading.count()!==1)throw Error('RENAME_INSPECT_FLEET_COUNT_UNVERIFIED');
+ const match=/^Routes\s*\((\d+)\)$/.exec((await heading.innerText({timeout})).trim());
+ const routeCount=match?Number(match[1]):0;
+ if(!Number.isSafeInteger(routeCount)||routeCount<1)
+  throw Error('RENAME_INSPECT_FLEET_COUNT_UNVERIFIED');
+ const rows=page.locator('#routesContainer [id^="routeMainList"]');
+ const row=rows.first();
+ if(!await row.isVisible())throw Error('RENAME_INSPECT_ROUTE_NOT_VISIBLE');
+ const routeId=(await row.getAttribute('id')||'').replace(/^routeMainList/,'');
+ if(!/^[1-9]\d*$/.test(routeId))throw Error('RENAME_INSPECT_ROUTE_ID_UNVERIFIED');
+ const labels=await row.locator('span.s-text').allTextContents();
+ const matchingLabels=labels.map(l=>l.trim()).filter(l=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(l));
+ if(matchingLabels.length!==1)throw Error('RENAME_INSPECT_ROUTE_LABEL_UNVERIFIED');
+ const links=row.locator('a[onclick]');
+ const callbacks=await links.evaluateAll(elements=>elements.map(e=>e.getAttribute('onclick')||''));
+ const matched=callbacks.flatMap((v,i)=>{
+  const id=aircraftIdFromDetailsControl(v);
+  return id?[{index:i,id}]:[];
+ });
+ if(matched.length!==1)throw Error('RENAME_INSPECT_AIRCRAFT_CONTROL_UNVERIFIED');
+ const aircraftId=matched[0].id;
+ const link=links.nth(matched[0].index);
+ if(!await link.isVisible())throw Error('RENAME_INSPECT_AIRCRAFT_CONTROL_UNVERIFIED');
+ await assertNoInteractiveChallenge(page,'rename:editor-inspection-before-details');
+ await link.click({timeout});
+ const details=page.locator('#detailsAction');
+ await details.waitFor({state:'visible',timeout});
+ await assertNoInteractiveChallenge(page,'rename:editor-inspection-details');
+ const observedName=details.locator('#ff-name');
+ if(await observedName.count()!==1||!(await observedName.innerText({timeout})).trim())
+  throw Error('RENAME_INSPECT_DETAILS_NAME_UNVERIFIED');
+ assertRenameDetailAirportsMatch(matchingLabels[0],
+  await details.locator('.col-5 span.l-text').allTextContents());
+ const buttons=details.locator('button[onclick]');
+ const editors:NativeRenameEditorObservation[]=[];
+ for(const [field,id,mode] of [
+  ['aircraft',aircraftId,'reg'],['route',routeId,'routeReg']
+ ] as const){
+  const callbacks=await buttons.evaluateAll(es=>es.map(e=>e.getAttribute('onclick')||''));
+  const indices=callbacks.flatMap((v,i)=>
+   v.includes('fleet_details.php?id='+id+'&mode='+mode+'&')?[i]:[]);
+  const button=indices.length===1?buttons.nth(indices[0]):null;
+  const cb=button?callbacks[indices[0]]:'';
+  const visible=button?await button.isVisible():false;
+  const enabled=button?await button.isEnabled():false;
+  editors.push({field,candidateCount:indices.length,visible,enabled,
+   callbackVerified:!!button&&visible&&enabled&&verifiedPromptRenameCallback(cb,id,mode),
+   callbackShape:button?sanitizedRenameCallbackShape(cb):'NO_EXACT_NATIVE_BUTTON'});
+ }
+ return {inspected:1,routeCount,readOnly:true,editors,
+  allVerified:editors.every(e=>e.callbackVerified)};
 }
 async function inspectTarget(page:Page,expected:RenameTarget,registered:string,timeout:number){
  await assertNoInteractiveChallenge(page,'rename:open-fleet');
@@ -124,7 +203,7 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
 function htmlSafe(s:string){return s.replace(/[|<>\r\n]/g,' ');}
 export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=process.env,directory='test-results/fleet-rename'){
  const timeout=14000,operation=(env.RENAME_OPERATION||'preview').trim();
- if(!['preview','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
+ if(!['inspect','preview','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
  // Applied runs require first-attempt manual dispatch; no workflow cron or reruns.
  if(operation==='apply'&&(env.GITHUB_ACTIONS!=='true'||env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
   env.GITHUB_RUN_ATTEMPT!=='1'||env.RENAME_CONFIRMATION!=='APLICAR_RENOMEACAO_TOTAL'))
@@ -132,7 +211,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
  await mkdir(directory,{recursive:true});
  const report:{schemaVersion:1;operation:string;generatedAt:string;complete:boolean;halted:boolean;
   fleetCount:number;digest:string|null;results:RenameOutcome[];reason:string;
-  stage:string;failureCode:string|null}={
+  stage:string;failureCode:string|null;inspection?:NativeRenameEditorInspection}={
   schemaVersion:1,operation,generatedAt:new Date().toISOString(),complete:false,halted:false,
   fleetCount:0,digest:null,results:[],reason:'INITIALIZING',
   stage:'INITIALIZING',failureCode:null};
@@ -154,6 +233,15 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   });
   markStage('OPEN_FLEET');
   await openFleetList(page,timeout,phase=>markStage('OPEN_FLEET_'+phase));
+  if(operation==='inspect'){
+   markStage('INSPECT_NATIVE_EDITORS');
+   const inspection=await inspectNativeRenameEditors(page,timeout);
+   report.inspection=inspection;report.fleetCount=inspection.routeCount;
+   report.complete=true;
+   report.reason=inspection.allVerified?
+    'NATIVE_EDITORS_VERIFIED_READ_ONLY':'NATIVE_EDITORS_UNVERIFIED_READ_ONLY';
+   await save();return report;
+  }
   markStage('COLLECT_FLEET');
   const fleet:CollectionResult=await collectRenameInventory(page,timeout);
   markStage('BUILD_PLAN');
@@ -235,7 +323,11 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    '| Aircraft ID | Route ID | Campo | Destino | Estado | Motivo |',
    '| --- | --- | --- | --- | --- | --- |',
    ...report.results.map(e=>`| ${e.aircraftId} | ${e.routeId} | ${e.field} | ${htmlSafe(e.desired)} | ${e.status} | ${htmlSafe(e.reason)} |`),'',
-   'Não repetir automaticamente controles com resultado incerto. A prévia não altera o jogo.'
+   ...(report.inspection?['','## Inspeção nativa (somente leitura)',
+     '| Campo | Botões candidatos | Visível | Habilitado | Verificado | Formato sem dados |',
+     '| --- | ---: | --- | --- | --- | --- |',
+     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${htmlSafe(e.callbackShape)} |`)]:[]),
+   'Não repetir automaticamente controles com resultado incerto. Os modos inspect e preview não alteram o jogo.'
   ].join('\n')+'\n');
  }
 }
