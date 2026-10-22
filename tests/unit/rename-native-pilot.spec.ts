@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,type RenamePlan,type RenameTarget} from '../../fleet-rename/plan';
-import {nativeTextSaveQueryKey,preflightNativeTextEditors,saveNativeTextField} from '../../fleet-rename/native-pilot';
+import {nativeTextSaveQueryKey,preflightNativeTextEditors,saveNativeTextField,diagnoseNativeTextInputs,type NativeInputDiagnostic} from '../../fleet-rename/native-pilot';
 import {readFile} from 'node:fs/promises';
 import {runManualFleetRename,verifiedReadOnlyNativeOpener} from '../../fleet-rename/run';
 
@@ -169,4 +169,41 @@ test('manual pilot loads its native editors statically before touching the real 
  // A read-only probe never enables full-fleet apply.
  expect(source).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
  expect(source).toContain("if(operation==='pilot-check'){");
+});
+
+test('read-only input diagnosis distinguishes unsupported Save grammar from missing input',()=>{
+ const exact="playSound('neutral_click');Ajax('fleet_details.php?id=1001&mode=reg&reg='+$('#regInput').val(),'detailsAction',this);";
+ const normal=diagnoseNativeTextInputs(exact,'1001','reg',['regInput'],'aircraft');
+ expect(normal.matching).toEqual([0]);
+ expect(normal.diagnostic).toMatchObject({
+  inputCount:1,textInputCount:1,valueReferencedInputCount:1,
+  strictNativeMatchCount:1,classification:'MATCHED'
+ });
+ // A structurally different callback never authorizes a Save click even
+ // when the native jQuery input reference is present.
+ const unsupported=exact.replace("playSound('neutral_click');",'');
+ const result=diagnoseNativeTextInputs(unsupported,'1001','reg',['regInput'],'aircraft');
+ expect(result.matching).toEqual([]);
+ expect(result.diagnostic).toMatchObject({
+  textInputCount:1,valueReferencedInputCount:1,
+  strictNativeMatchCount:0,classification:'SAVE_HANDLER_SYNTAX_UNSUPPORTED'
+ });
+ expect(nativeTextSaveQueryKey(unsupported,'1001','reg','regInput')).toBeNull();
+ expect(diagnoseNativeTextInputs(exact,'1001','reg',['other'],'aircraft')
+  .diagnostic.classification).toBe('NO_VALUE_REFERENCE');
+ expect(diagnoseNativeTextInputs(exact,'1001','reg',[''],'aircraft')
+  .diagnostic.classification).toBe('NO_TEXT_INPUT');
+ expect(diagnoseNativeTextInputs(exact,'1001','reg',['regInput','regInput'],'aircraft')
+  .diagnostic.classification).toBe('AMBIGUOUS');
+});
+test('preflight records safe input evidence without saving or logging raw ids',async({page})=>{
+ await fixture(page);
+ const notes:NativeInputDiagnostic[]=[];
+ await preflightNativeTextEditors(page.locator('#detailsAction'),target,()=>{},d=>notes.push(d));
+ expect(notes).toHaveLength(2);
+ expect(notes.map(d=>d.classification)).toEqual(['MATCHED','MATCHED']);
+ expect(JSON.stringify(notes)).not.toContain('regInput');
+ expect(JSON.stringify(notes)).not.toContain('rtInput');
+ expect(JSON.stringify(notes)).not.toContain('1001');
+ expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
 });
