@@ -119,6 +119,60 @@ test('sanitized callback explains safe native helper functions, not their argume
  for(const forbidden of ['123','Private name','fleet_details.php','detailsAction','neutral_click'])
   expect(safe).not.toContain(forbidden);
 });
+test('read-only form discovery matches exact input references and visible local opener without clicking',async({page})=>{
+ const acCb="playSound('neutral_click');Ajax('fleet_details.php?id=1001&mode=reg&reg='+$('#regInput').val(),'detailsAction',this);";
+ const rtCb="playSound('neutral_click');Ajax('fleet_details.php?id=101&mode=routeReg&reg='+$('#rtInput').val(),'detailsAction',this);";
+ const detailHtml='<div id="ff-name">N-1</div>'+
+  '<div class="col-5"><span class="l-text">AAA</span><span class="l-text">GRU</span></div>'+
+  '<span onclick="$(\'#aircraftEdit\').show();">Open aircraft editor</span>'+
+  '<span onclick="$(\'#routeEdit\').show();">Open route editor</span>'+
+  '<div id="aircraftEdit" style="display:none"><div><span>'+
+   '<input id="regInput" type="text" value="private-current-registration">'+
+   '<button onclick="'+acCb+'">Save aircraft</button>'+
+  '</span></div></div>'+
+  '<div id="routeEdit" style="display:none"><div><span>'+
+   '<input id="rtInput" type="text" value="private-route-name">'+
+   '<button onclick="'+rtCb+'">Save route</button>'+
+  '</span></div></div>';
+ await page.setContent(`<button>Routes (1)</button><div id="routesContainer">
+  <div id="routeMainList101"><span class="s-text">AAA - GRU</span>
+   <a id="openPlane">N-1 - Aircraft</a></div></div>
+  <div id="detailsAction" style="display:none"></div>
+  <script>
+   window.detailsOpens=0;window.formOpens=0;window.renameRequests=0;
+   const intro=0;function playSound(){}
+   function $(s){return {hide(){},show(){window.formOpens++;}}}
+   function Ajax(url){
+    if(url==='fleet_details.php?id=1001'){
+     window.detailsOpens++;
+     const d=document.getElementById('detailsAction');
+     d.innerHTML=${JSON.stringify(detailHtml)};d.style.display='block';
+    }else window.renameRequests++;
+   }
+  </script>`);
+ await page.locator('#openPlane').evaluate(e=>e.setAttribute('onclick',
+  "playSound('neutral_click');Ajax('fleet_details.php?id=1001','detailsAction');if(intro==0){$('#routeAction').hide();}"));
+ const data=await inspectNativeRenameEditors(page,1800);
+ expect(data.readOnly).toBe(true);
+ expect(data.allVerified).toBe(false);
+ expect(data.editors).toMatchObject([
+  {field:'aircraft',visible:false,layoutCause:'ANCESTOR_DISPLAY_NONE',
+   hiddenAncestorDepth:3,form:{hiddenRegionFound:true,hiddenRegionHasId:true,
+    inputCount:1,matchingInputCount:1,matchingInputKind:'TEXT',matchingInputVisible:false,
+    openerCount:1,openerShapes:['ID(Q).show();']}},
+  {field:'route',visible:false,layoutCause:'ANCESTOR_DISPLAY_NONE',
+   hiddenAncestorDepth:3,form:{hiddenRegionFound:true,hiddenRegionHasId:true,
+    inputCount:1,matchingInputCount:1,matchingInputKind:'TEXT',matchingInputVisible:false,
+    openerCount:1,openerShapes:['ID(Q).show();']}}
+ ]);
+ const serialized=JSON.stringify(data);
+ for(const secret of ['regInput','rtInput','aircraftEdit','routeEdit',
+  'private-current-registration','private-route-name','1001','101'])
+  expect(serialized).not.toContain(secret);
+ expect(await page.evaluate(()=>(window as any).detailsOpens)).toBe(1);
+ expect(await page.evaluate(()=>(window as any).formOpens)).toBe(0);
+ expect(await page.evaluate(()=>(window as any).renameRequests)).toBe(0);
+});
 test('manual workflow contains inspect as explicit operation, never as scheduled job',async()=>{
  const file=await readFile('.github/workflows/manual-fleet-rename.yml','utf8');
  expect(file).toContain('options: [preview, inspect, apply]');

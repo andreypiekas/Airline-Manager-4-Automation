@@ -20,11 +20,20 @@ export function safeRenameFailureCode(error:unknown):string{
  return 'RENAME_UNCLASSIFIED_FAILURE';
 }
 export type RenamePhase='aircraft'|'route';
+export interface RenameEditorFormInspection {
+ // Read-only shape of the native inline form, NEVER its input value/label/id.
+ hiddenRegionFound:boolean;hiddenRegionHasId:boolean;
+ inputCount:number;matchingInputCount:number;
+ matchingInputKind:'TEXT'|'TEXTAREA'|'OTHER'|'NONE'|'AMBIGUOUS';
+ matchingInputVisible:boolean;
+ openerCount:number;openerShapes:string[];
+}
 export interface NativeRenameEditorObservation {
  field:RenamePhase;candidateCount:number;visible:boolean;enabled:boolean;
  callbackVerified:boolean;callbackShape:string;
  // Only bounded enumerated UI classifications. No DOM attributes, identifiers or source.
  layoutCause:string;hiddenAncestorDepth:number|null;
+ form:RenameEditorFormInspection;
 }
 export interface NativeRenameEditorInspection {
  inspected:1;routeCount:number;readOnly:true;editors:NativeRenameEditorObservation[];
@@ -57,7 +66,7 @@ export function sanitizedRenameCallbackShape(raw:string):string{
  return replaced.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g,w=>
   ['Ajax','playSound','prompt','encodeURIComponent','encodeURI','escape',
    'trim','replace','toUpperCase','toLowerCase','val','return','if','this',
-   'true','false','null','Q'].includes(w)?w:'ID'
+   'true','false','null','Q','show','toggle','fadeIn','slideDown'].includes(w)?w:'ID'
  ).replace(/\d+/g,'N').replace(/\s+/g,'').slice(0,300);
 }
 /** Audit exactly one native aircraft's two rename editors via read-only
@@ -140,10 +149,71 @@ export async function inspectNativeRenameEditors(
    return {layoutCause:el.getClientRects().length?'LAYOUT_PRESENT':'ZERO_RECT',
     hiddenAncestorDepth:null};
   }):{layoutCause:'NOT_FOUND',hiddenAncestorDepth:null};
+  // Find native text inputs whose EXACT jQuery .val() expression is used by
+  // this button. Read structure only; never read or write any input.value.
+  // Also discover visible local controls which MAY open the hidden panel,
+  // without clicking them or interpreting untrusted event handlers as safe.
+  const rawForm=button?await button.evaluate((el,handler)=>{
+   let hidden:Element|null=null;
+   for(let node:Element|null=el;node;node=node.parentElement){
+    if(getComputedStyle(node).display==='none'||(node instanceof HTMLElement&&node.hidden)){
+     hidden=node;break;
+    }
+   }
+   const result={hiddenRegionFound:!!hidden,hiddenRegionHasId:!!hidden?.id,
+    inputCount:0,matchingInputCount:0,
+    matchingInputKind:'NONE' as 'TEXT'|'TEXTAREA'|'OTHER'|'NONE'|'AMBIGUOUS',
+    matchingInputVisible:false,openerCodes:[] as string[],openerCount:0};
+   if(!hidden)return result;
+   const inputs=Array.from(hidden.querySelectorAll('input,textarea')).slice(0,60);
+   result.inputCount=inputs.length;
+   const matches=inputs.filter(input=>{
+    if(!input.id)return false;
+    const selector='#'+input.id;
+    return handler.includes("$('"+selector+"').val()")||
+     handler.includes('$("'+selector+'").val()');
+   });
+   result.matchingInputCount=matches.length;
+   if(matches.length===1){
+    const input=matches[0];
+    result.matchingInputKind=input.tagName==='TEXTAREA'?'TEXTAREA':
+     input instanceof HTMLInputElement&&
+     (input.type==='text'||input.type==='search')?'TEXT':'OTHER';
+    result.matchingInputVisible=!!input.getClientRects().length;
+   }else if(matches.length>1)result.matchingInputKind='AMBIGUOUS';
+   if(hidden.id&&hidden.id.length<=100){
+    const selector='#'+hidden.id;
+    const nodes=Array.from(document.querySelectorAll('#detailsAction [onclick]')).slice(0,300);
+    const candidates=nodes.filter(node=>{
+     if(hidden!.contains(node)||!node.getClientRects().length)return false;
+     const event=node.getAttribute('onclick')||'';
+     return event.length<=800&&
+      (event.includes("'"+selector+"'")||event.includes('"'+selector+'"'))&&
+      /\.(?:show|toggle|fadeIn|slideDown)\(\)/.test(event)&&
+      !/Ajax\s*\(|prompt\s*\(|fetch\s*\(|XMLHttpRequest|submit\s*\(/.test(event);
+    });
+    result.openerCount=candidates.length;
+    result.openerCodes=candidates.slice(0,3).map(n=>n.getAttribute('onclick')||'');
+   }
+   return result;
+  },cb):null;
+  const form:RenameEditorFormInspection=rawForm?{
+   hiddenRegionFound:rawForm.hiddenRegionFound,
+   hiddenRegionHasId:rawForm.hiddenRegionHasId,
+   inputCount:rawForm.inputCount,matchingInputCount:rawForm.matchingInputCount,
+   matchingInputKind:rawForm.matchingInputKind,
+   matchingInputVisible:rawForm.matchingInputVisible,
+   openerCount:rawForm.openerCount,
+   openerShapes:rawForm.openerCodes.map(sanitizedRenameCallbackShape)
+  }:{
+   hiddenRegionFound:false,hiddenRegionHasId:false,
+   inputCount:0,matchingInputCount:0,matchingInputKind:'NONE',
+   matchingInputVisible:false,openerCount:0,openerShapes:[]
+  };
   editors.push({field,candidateCount:indices.length,visible,enabled,
    callbackVerified:!!button&&visible&&enabled&&verifiedPromptRenameCallback(cb,id,mode),
    callbackShape:button?sanitizedRenameCallbackShape(cb):'NO_EXACT_NATIVE_BUTTON',
-   ...layout});
+   ...layout,form});
  }
  return {inspected:1,routeCount,readOnly:true,editors,
   allVerified:editors.every(e=>e.callbackVerified)};
@@ -359,7 +429,11 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    ...(report.inspection?['','## Inspeção nativa (somente leitura)',
      '| Campo | Candidatos | Visível | Habilitado | Verificado | Ocultação | Nível | Callback anonimizado |',
      '| --- | ---: | --- | --- | --- | --- | ---: | --- |',
-     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${e.layoutCause} | ${e.hiddenAncestorDepth??'-'} | ${htmlSafe(e.callbackShape)} |`)]:[]),
+     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${e.layoutCause} | ${e.hiddenAncestorDepth??'-'} | ${htmlSafe(e.callbackShape)} |`),
+     '','## Formulários de edição (estrutura somente leitura)',
+     '| Campo | Região oculta | Possui ID | Inputs | Input usado pelo botão | Tipo | Aberturas candidatas | Estrutura dos controles (anônima) |',
+     '| --- | --- | --- | ---: | ---: | --- | ---: | --- |',
+     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.form.hiddenRegionFound} | ${e.form.hiddenRegionHasId} | ${e.form.inputCount} | ${e.form.matchingInputCount} | ${e.form.matchingInputKind} | ${e.form.openerCount} | ${e.form.openerShapes.map(htmlSafe).join(' ; ')} |`)]:[]),
    'Não repetir automaticamente controles com resultado incerto. Os modos inspect e preview não alteram o jogo.'
   ].join('\n')+'\n');
  }
