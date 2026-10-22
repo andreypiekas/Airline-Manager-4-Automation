@@ -193,8 +193,8 @@ test('inspect-open uses only strictly verified native show/hide controls; never 
  const rtCb="playSound('neutral_click');Ajax('fleet_details.php?id=101&mode=routeReg&reg='+$('#rtInput').val(),'detailsAction',this);";
  const detailsHtml='<div id="ff-name">N-1</div>'+
   '<div class="col-5"><span class="l-text">AAA</span><span class="l-text">GRU</span></div>'+
-  '<span id="aircraftBadge" onclick="$(\\\'#aircraftBadge\\\').hide();$(\\\'#planeForm\\\').show();playSound(\\\'neutral_click\\\');">Open aircraft editor</span>'+
-  '<span id="routeBadge" onclick="$(\\\'#routeBadge\\\').hide();$(\\\'#routeForm\\\').show();">Open route editor</span>'+
+  '<span id="aircraftBadge" onclick="$(\'#aircraftBadge\').hide();$(\'#planeForm\').show();playSound(\'neutral_click\');">Open aircraft editor</span>'+
+  '<span id="routeBadge" onclick="$(\'#routeBadge\').hide();$(\'#routeForm\').show();">Open route editor</span>'+
   '<div id="planeForm" style="display:none"><div><span>'+
    '<input id="regInput" type="text" value="PRIVATE-AIRCRAFT-REGISTRATION">'+
    '<button id="savePlane" onclick="'+acCb+'">Save aircraft</button></span></div></div>'+
