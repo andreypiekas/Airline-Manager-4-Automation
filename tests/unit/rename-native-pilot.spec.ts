@@ -2,6 +2,7 @@ import {test,expect,type Page} from '@playwright/test';
 import {authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,type RenamePlan,type RenameTarget} from '../../fleet-rename/plan';
 import {nativeTextSaveQueryKey,preflightNativeTextEditors,saveNativeTextField} from '../../fleet-rename/native-pilot';
 import {readFile} from 'node:fs/promises';
+import {runManualFleetRename,verifiedReadOnlyNativeOpener} from '../../fleet-rename/run';
 
 const target:RenameTarget={
  aircraftId:'1001',routeId:'101',oldAircraftRegistration:'OLD-PLANE',
@@ -146,4 +147,21 @@ test('native target-details errors retain stage markers and never trigger an imp
  expect(file).toContain("await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage)");
  expect(file).toContain("report.stage.startsWith('PILOT_TARGET_')");
  expect(file).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
+});
+
+test('manual pilot loads its native editors statically before touching the real game',async()=>{
+ const source=await readFile('fleet-rename/run.ts','utf8');
+ expect(source).toContain("import {preflightNativeTextEditors,saveNativeTextField} from './native-pilot';");
+ expect(source).not.toContain("await import('./native-pilot')");
+ expect(source).toContain("markStage('PILOT_PREFLIGHT_NATIVE_MODULE_READY')");
+ // This test imports the native editor and manual workflow entrypoint together.
+ // It must resolve their circular references in Playwright's actual TS loader.
+ expect(typeof runManualFleetRename).toBe('function');
+ expect(typeof preflightNativeTextEditors).toBe('function');
+ expect(typeof saveNativeTextField).toBe('function');
+ expect(verifiedReadOnlyNativeOpener(
+  "$('#open').hide();$('#panelA').show();",'panelA')).toBe(true);
+ // A read-only probe never enables full-fleet apply.
+ expect(source).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
+ expect(source).toContain("if(operation==='pilot-check'){");
 });
