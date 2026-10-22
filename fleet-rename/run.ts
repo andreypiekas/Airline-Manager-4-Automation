@@ -66,7 +66,7 @@ export function sanitizedRenameCallbackShape(raw:string):string{
  return replaced.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g,w=>
   ['Ajax','playSound','prompt','encodeURIComponent','encodeURI','escape',
    'trim','replace','toUpperCase','toLowerCase','val','return','if','this',
-   'true','false','null','Q'].includes(w)?w:'ID'
+   'true','false','null','Q','show','toggle','fadeIn','slideDown'].includes(w)?w:'ID'
  ).replace(/\d+/g,'N').replace(/\s+/g,'').slice(0,300);
 }
 /** Audit exactly one native aircraft's two rename editors via read-only
