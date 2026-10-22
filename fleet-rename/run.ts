@@ -133,7 +133,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    if(knownLoginStages.has(code))markStage(code);
   });
   markStage('OPEN_FLEET');
-  await openFleetList(page,timeout);
+  await openFleetList(page,timeout,phase=>markStage('OPEN_FLEET_'+phase));
   markStage('COLLECT_FLEET');
   const fleet:CollectionResult=await collectRenameInventory(page,timeout);
   markStage('BUILD_PLAN');
