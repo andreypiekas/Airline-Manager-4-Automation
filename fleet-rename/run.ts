@@ -23,6 +23,8 @@ export type RenamePhase='aircraft'|'route';
 export interface NativeRenameEditorObservation {
  field:RenamePhase;candidateCount:number;visible:boolean;enabled:boolean;
  callbackVerified:boolean;callbackShape:string;
+ // Only bounded enumerated UI classifications. No DOM attributes, identifiers or source.
+ layoutCause:string;hiddenAncestorDepth:number|null;
 }
 export interface NativeRenameEditorInspection {
  inspected:1;routeCount:number;readOnly:true;editors:NativeRenameEditorObservation[];
@@ -53,7 +55,9 @@ export function sanitizedRenameCallbackShape(raw:string):string{
  const replaced=raw.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g,'Q');
  if(/['"`]/.test(replaced))return 'UNKNOWN_QUOTING';
  return replaced.replace(/[A-Za-z_$][A-Za-z0-9_$]*/g,w=>
-  ['Ajax','prompt','return','if','this','true','false'].includes(w)?w:'ID'
+  ['Ajax','playSound','prompt','encodeURIComponent','encodeURI','escape',
+   'trim','replace','toUpperCase','toLowerCase','val','return','if','this',
+   'true','false','null'].includes(w)?w:'ID'
  ).replace(/\d+/g,'N').replace(/\s+/g,'').slice(0,300);
 }
 /** Audit exactly one native aircraft's two rename editors via read-only
@@ -108,9 +112,26 @@ export async function inspectNativeRenameEditors(
   const cb=button?callbacks[indices[0]]:'';
   const visible=button?await button.isVisible():false;
   const enabled=button?await button.isEnabled():false;
+  // Never change the DOM or click hidden elements. Classify the exact visual
+  // obstruction while omitting raw CSS values, attributes, text and IDs.
+  const layout=button?await button.evaluate(el=>{
+   let depth=0;
+   for(let node:HTMLElement|null=el;node;node=node.parentElement,depth++){
+    const css=getComputedStyle(node);
+    if(node.hidden||css.display==='none')
+     return {layoutCause:depth===0?'SELF_DISPLAY_NONE':'ANCESTOR_DISPLAY_NONE',
+      hiddenAncestorDepth:depth};
+    if(css.visibility==='hidden'||css.visibility==='collapse')
+     return {layoutCause:depth===0?'SELF_VISIBILITY_HIDDEN':'ANCESTOR_VISIBILITY_HIDDEN',
+      hiddenAncestorDepth:depth};
+   }
+   return {layoutCause:el.getClientRects().length?'LAYOUT_PRESENT':'ZERO_RECT',
+    hiddenAncestorDepth:null};
+  }):{layoutCause:'NOT_FOUND',hiddenAncestorDepth:null};
   editors.push({field,candidateCount:indices.length,visible,enabled,
    callbackVerified:!!button&&visible&&enabled&&verifiedPromptRenameCallback(cb,id,mode),
-   callbackShape:button?sanitizedRenameCallbackShape(cb):'NO_EXACT_NATIVE_BUTTON'});
+   callbackShape:button?sanitizedRenameCallbackShape(cb):'NO_EXACT_NATIVE_BUTTON',
+   ...layout});
  }
  return {inspected:1,routeCount,readOnly:true,editors,
   allVerified:editors.every(e=>e.callbackVerified)};
@@ -324,9 +345,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    '| --- | --- | --- | --- | --- | --- |',
    ...report.results.map(e=>`| ${e.aircraftId} | ${e.routeId} | ${e.field} | ${htmlSafe(e.desired)} | ${e.status} | ${htmlSafe(e.reason)} |`),'',
    ...(report.inspection?['','## Inspeção nativa (somente leitura)',
-     '| Campo | Botões candidatos | Visível | Habilitado | Verificado | Formato sem dados |',
-     '| --- | ---: | --- | --- | --- | --- |',
-     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${htmlSafe(e.callbackShape)} |`)]:[]),
+     '| Campo | Candidatos | Visível | Habilitado | Verificado | Ocultação | Nível | Callback anonimizado |',
+     '| --- | ---: | --- | --- | --- | --- | ---: | --- |',
+     ...report.inspection.editors.map(e=>`| ${e.field} | ${e.candidateCount} | ${e.visible} | ${e.enabled} | ${e.callbackVerified} | ${e.layoutCause} | ${e.hiddenAncestorDepth??'-'} | ${htmlSafe(e.callbackShape)} |`)]:[]),
    'Não repetir automaticamente controles com resultado incerto. Os modos inspect e preview não alteram o jogo.'
   ].join('\n')+'\n');
  }
