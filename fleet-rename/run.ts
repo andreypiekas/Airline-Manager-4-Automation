@@ -57,7 +57,7 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  const expectedCallback=`playSound('neutral_click');Ajax('fleet_details.php?id=${expected.aircraftId}','detailsAction');if(intro==0){$('#routeAction').hide();}`;
  const links=row.locator('a[onclick]');
  const matches=await links.evaluateAll((elements,callback)=>elements.flatMap((e,index)=>
-  (e.getAttribute('onclick')||'').replace(/\\s/g,'')===callback?[index]:[]
+  (e.getAttribute('onclick')||'').replace(/\s/g,'')===callback?[index]:[]
  ),compactCallback(expectedCallback));
  if(matches.length!==1)throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
  const link=links.nth(matches[0]);
