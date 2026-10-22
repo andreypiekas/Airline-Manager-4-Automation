@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'inspect/inspect-open: leitura; preview: proposta/hash; pilot: 1 aeronave aprovada; apply: bloqueado'
+        description: 'pilot-check: preflight sem escrita; pilot: grava 1 aeronave; apply global: bloqueado'
         type: choice
         default: preview
         required: true
-        options: [preview, inspect, inspect-open, pilot, apply]
+        options: [preview, inspect, inspect-open, pilot-check, pilot, apply]
       aircraft_prefix:
         description: 'Padrão para todas as aeronaves, por ex. XP (deixe vazio para usar CSV)'
         required: false
@@ -21,7 +21,7 @@ on:
         required: false
         type: string
       pilot_aircraft_id:
-        description: 'Somente pilot: aircraftId exato do CSV da prévia; nunca seleciona automaticamente'
+        description: 'pilot-check/pilot: aircraftId exato do CSV; nunca seleciona automaticamente'
         required: false
         type: string
       expected_preview_sha256:
