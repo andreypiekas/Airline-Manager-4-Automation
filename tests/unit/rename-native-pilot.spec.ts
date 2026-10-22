@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-import {authorizeSingleAircraftPilot,type RenamePlan,type RenameTarget} from '../../fleet-rename/plan';
+import {authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,type RenamePlan,type RenameTarget} from '../../fleet-rename/plan';
 import {nativeTextSaveQueryKey,preflightNativeTextEditors,saveNativeTextField} from '../../fleet-rename/native-pilot';
 import {readFile} from 'node:fs/promises';
 
@@ -12,6 +12,8 @@ const plan:RenamePlan={schemaVersion:1,count:2,digest:'a'.repeat(64),
   aircraftRegistration:'XP-002',routeRegistration:'XR-002'}]};
 test('pilot requires explicit aircraftId, full preview hash and different confirmation',()=>{
  expect(authorizeSingleAircraftPilot(plan,'1001',plan.digest,'APLICAR_PILOTO_UMA_AERONAVE')).toEqual(target);
+ expect(selectSingleAircraftPilotTarget(plan,'1001',plan.digest)).toEqual(target);
+ expect(()=>selectSingleAircraftPilotTarget(plan,'1001','b'.repeat(64))).toThrow();
  for(const args of [
   ['','a'.repeat(64),'APLICAR_PILOTO_UMA_AERONAVE'],
   ['1003',plan.digest,'APLICAR_PILOTO_UMA_AERONAVE'],
@@ -33,7 +35,7 @@ test('only exact native Ajax text handlers are accepted for selected field',()=>
   native.replace("&reg=","&id=")
  ])expect(nativeTextSaveQueryKey(changed,'1001','reg','regInput')).toBeNull();
 });
-async function fixture(page:Page,brokenRoute=false){
+async function fixture(page:Page,brokenRoute=false,implicitText=false){
  await page.route('https://www.airlinemanager.com/test-pilot',route=>
   route.fulfill({status:200,contentType:'text/html',body:'<html><body></body></html>'}));
  await page.goto('https://www.airlinemanager.com/test-pilot');
@@ -41,10 +43,10 @@ async function fixture(page:Page,brokenRoute=false){
   '<div id="detailsAction">'+
   '<span id="badgeA">open aircraft</span><span id="badgeR">open route</span>'+
   '<div id="panelA" style="display:none"><div><span>'+
-   '<input type="text" id="regInput" value="OLD-PLANE"><button id="saveA">Save aircraft</button>'+
+   '<input '+(implicitText?'':'type="text" ')+'id="regInput" maxlength="12" value="OLD-PLANE"><button id="saveA">Save aircraft</button>'+
   '</span></div></div>'+
   '<div id="panelR" style="display:none"><div><span>'+
-   '<input type="text" id="rtInput" value="OLD-ROUTE"><button id="saveR">Save route</button>'+
+   '<input '+(implicitText?'':'type="text" ')+'id="rtInput" maxlength="12" value="OLD-ROUTE"><button id="saveR">Save route</button>'+
   '</span></div></div></div>');
  await page.addScriptTag({content:[
   'window.gameSaves=[];',
@@ -70,6 +72,21 @@ test('preflight checks both editors without opening inputs or mutating',async({p
  expect(editors.map(e=>e.queryKey)).toEqual(['reg','reg']);
  expect(await page.locator('#saveA').isVisible()).toBe(false);
  expect(await page.locator('#saveR').isVisible()).toBe(false);
+ expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
+});
+test('implicit text inputs and short maxlength are accepted without mutation',async({page})=>{
+ await fixture(page,false,true);
+ const phases:string[]=[];
+ const editors=await preflightNativeTextEditors(page.locator('#detailsAction'),target,
+  phase=>phases.push(phase));
+ expect(editors).toHaveLength(2);
+ expect(phases).toEqual([
+  'PILOT_PREFLIGHT_AIRCRAFT_FIND_CONTROL','PILOT_PREFLIGHT_AIRCRAFT_FIND_PANEL',
+  'PILOT_PREFLIGHT_AIRCRAFT_FIND_INPUT','PILOT_PREFLIGHT_AIRCRAFT_FIND_OPENER',
+  'PILOT_PREFLIGHT_ROUTE_FIND_CONTROL','PILOT_PREFLIGHT_ROUTE_FIND_PANEL',
+  'PILOT_PREFLIGHT_ROUTE_FIND_INPUT','PILOT_PREFLIGHT_ROUTE_FIND_OPENER'
+ ]);
+ expect(await page.locator('#panelA').isVisible()).toBe(false);
  expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
 });
 test('preflight rejects mismatched second editor before first edit',async({page})=>{
@@ -102,9 +119,12 @@ test('one native click saves exactly one field only after checkpoint',async({pag
 test('pilot is manual; full-fleet apply remains disabled',async()=>{
  const flow=await readFile('.github/workflows/manual-fleet-rename.yml','utf8');
  const script=await readFile('fleet-rename/run.ts','utf8');
- expect(flow).toContain('options: [preview, inspect, inspect-open, pilot, apply]');
+ expect(flow).toContain('options: [preview, inspect, inspect-open, pilot-check, pilot, apply]');
  expect(flow).toContain('RENAME_PILOT_AIRCRAFT_ID:');
  expect(flow).not.toMatch(/cron:|schedule:/);
  expect(script).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
- expect(script).toContain("if(operation==='pilot')");
+ expect(script).toContain("if(operation==='pilot'||operation==='pilot-check')");
+ expect(script).toContain("if(operation==='pilot-check'){");
+ expect(script.indexOf("if(operation==='pilot-check'){"))
+  .toBeLessThan(script.indexOf("const marker=await open(join(directory"));
 });

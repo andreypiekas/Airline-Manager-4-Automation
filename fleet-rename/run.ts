@@ -6,7 +6,7 @@ import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory} from './inventory';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
-import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
+import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
 
 /** Only stable diagnostic codes; never persist or log raw Playwright exceptions,
@@ -350,7 +350,7 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
 function htmlSafe(s:string){return s.replace(/[|<>\r\n]/g,' ');}
 export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=process.env,directory='test-results/fleet-rename'){
  const timeout=14000,operation=(env.RENAME_OPERATION||'preview').trim();
- if(!['inspect','inspect-open','preview','pilot','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
+ if(!['inspect','inspect-open','preview','pilot-check','pilot','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
  // Until one real double-field pilot is verified, bulk apply must not run.
  if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT');
  // Applied runs require first-attempt manual dispatch; no workflow cron or reruns.
@@ -412,14 +412,22 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   await writeFile(join(directory,'rename-proposal.csv'),exportRenameCsv(plan));
   await writeFile(join(directory,'rename-proposal.json'),JSON.stringify(plan,null,2)+'\n');
   let pilotTarget:typeof plan.targets[number]|null=null;
-  if(operation==='pilot'){
-   pilotTarget=authorizeSingleAircraftPilot(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
-    env.RENAME_EXPECTED_DIGEST||'',env.RENAME_CONFIRMATION||'');
-   markStage('PILOT_PREFLIGHT_TWO_NATIVE_EDITORS');
+  if(operation==='pilot'||operation==='pilot-check'){
+   pilotTarget=operation==='pilot'
+    ?authorizeSingleAircraftPilot(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
+       env.RENAME_EXPECTED_DIGEST||'',env.RENAME_CONFIRMATION||'')
+    :selectSingleAircraftPilotTarget(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
+       env.RENAME_EXPECTED_DIGEST||'');
+   markStage('PILOT_PREFLIGHT_OPEN_TARGET_DETAILS');
    const {preflightNativeTextEditors}=await import('./native-pilot');
    const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout);
    // Both editors must be verified before ANY name can be changed.
-   await preflightNativeTextEditors(detail,pilotTarget);
+   await preflightNativeTextEditors(detail,pilotTarget,markStage);
+   if(operation==='pilot-check'){
+    report.complete=true;
+    report.reason='PILOT_PREFLIGHT_VERIFIED_READ_ONLY';
+    await save();return report;
+   }
   }else if(!authorizeRenameOperation(operation,env.RENAME_CONFIRMATION||'',env.RENAME_EXPECTED_DIGEST||'',plan)){
    report.complete=true;report.reason='PREVIEW_ONLY_NO_MUTATION';await save();return report;
   }
@@ -446,7 +454,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
      }
      if(operation==='pilot'){
       const {preflightNativeTextEditors,saveNativeTextField}=await import('./native-pilot');
-      const editors=await preflightNativeTextEditors(details,target);
+      const editors=await preflightNativeTextEditors(details,target,markStage);
       const editor=editors.find(e=>e.field===field);
       if(!editor)throw Error('RENAME_PILOT_EDITOR_MISSING');
       await saveNativeTextField(page,editor,desired,async()=>{
@@ -484,7 +492,14 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
  }catch(e){
   report.halted=true;
   report.failureCode=safeRenameFailureCode(e);
-  if(report.reason==='INITIALIZING')report.reason='RENAME_PREVIEW_OR_LOGIN_FAILED';
+  // Preserve only a stable, non-sensitive stage for unexpected native UI
+  // exceptions. Never record raw exception/HTML/callbacks or input values.
+  if(report.failureCode==='RENAME_UNCLASSIFIED_FAILURE'&&
+     report.stage.startsWith('PILOT_PREFLIGHT_'))
+   report.failureCode='RENAME_PILOT_PREFLIGHT_UI_EXCEPTION';
+  if(report.reason==='INITIALIZING')
+   report.reason=operation==='pilot-check'?'RENAME_PILOT_CHECK_FAILED_READ_ONLY':
+    'RENAME_PREVIEW_OR_LOGIN_FAILED';
   console.log('[RenamePreview] failed stage='+report.stage+' code='+report.failureCode);
   await save();
   throw Error(report.reason);

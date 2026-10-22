@@ -27,10 +27,23 @@ export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode
  return key&&key!=='id'&&key!=='mode'?key:null;
 }
 
+/** Static stages only: never include callback source, field IDs, route names,
+ * error messages, page HTML or input values in a persisted diagnostic.
+ */
+export type PilotPreflightPhase=
+ 'PILOT_PREFLIGHT_AIRCRAFT_FIND_CONTROL'|'PILOT_PREFLIGHT_AIRCRAFT_FIND_PANEL'|
+ 'PILOT_PREFLIGHT_AIRCRAFT_FIND_INPUT'|'PILOT_PREFLIGHT_AIRCRAFT_FIND_OPENER'|
+ 'PILOT_PREFLIGHT_ROUTE_FIND_CONTROL'|'PILOT_PREFLIGHT_ROUTE_FIND_PANEL'|
+ 'PILOT_PREFLIGHT_ROUTE_FIND_INPUT'|'PILOT_PREFLIGHT_ROUTE_FIND_OPENER';
 /** Preflight both editors before ANY renaming. No input values are read here. */
-export async function preflightNativeTextEditors(details:Locator,target:RenameTarget):Promise<VerifiedNativeTextEditor[]>{
+export async function preflightNativeTextEditors(
+ details:Locator,target:RenameTarget,onPhase:(phase:PilotPreflightPhase)=>void=()=>{}
+):Promise<VerifiedNativeTextEditor[]>{
  const results:VerifiedNativeTextEditor[]=[];
  for(const field of ['aircraft','route'] as const){
+  const phase=(step:'FIND_CONTROL'|'FIND_PANEL'|'FIND_INPUT'|'FIND_OPENER')=>
+   onPhase(('PILOT_PREFLIGHT_'+field.toUpperCase()+'_'+step) as PilotPreflightPhase);
+  phase('FIND_CONTROL');
   const id=field==='aircraft'?target.aircraftId:target.routeId;
   const mode:NativeMode=field==='aircraft'?'reg':'routeReg';
   const buttons=details.locator('button[onclick]');
@@ -41,6 +54,7 @@ export async function preflightNativeTextEditors(details:Locator,target:RenameTa
   const button=buttons.nth(candidates[0]);
   if(!await button.isEnabled())throw Error('RENAME_PILOT_EDITOR_DISABLED');
   const callback=await button.getAttribute('onclick')||'';
+  phase('FIND_PANEL');
   const hiddenId=await button.evaluate(node=>{
    for(let current:Element|null=node;current;current=current.parentElement){
     if(getComputedStyle(current).display==='none'||
@@ -53,8 +67,14 @@ export async function preflightNativeTextEditors(details:Locator,target:RenameTa
    throw Error('RENAME_PILOT_HIDDEN_REGION_UNVERIFIED');
   const hidden=details.locator('[id="'+hiddenId+'"]');
   if(await hidden.count()!==1)throw Error('RENAME_PILOT_HIDDEN_REGION_AMBIGUOUS');
-  const inputs=hidden.locator('input[type="text"],input[type="search"]');
-  const inputIds=await inputs.evaluateAll(els=>els.map(el=>el.id||''));
+  phase('FIND_INPUT');
+  // HTML inputs with an omitted type attribute default to type=text.
+  // Match their actual browser type; never accept password, hidden or submit.
+  const inputs=hidden.locator('input');
+  const inputIds=await inputs.evaluateAll(els=>els.map(el=>
+   el instanceof HTMLInputElement&&(el.type==='text'||el.type==='search')?
+    el.id||'':''
+  ));
   const matching=inputIds.flatMap((inputId,i)=>
    nativeTextSaveQueryKey(callback,id,mode,inputId)?[i]:[]);
   if(matching.length!==1)throw Error('RENAME_PILOT_INPUT_AMBIGUOUS');
@@ -68,8 +88,10 @@ export async function preflightNativeTextEditors(details:Locator,target:RenameTa
      await input.getAttribute('onkeyup')||await input.getAttribute('onblur'))
    throw Error('RENAME_PILOT_INPUT_SIDE_EFFECT_UNVERIFIED');
   const limit=await input.getAttribute('maxlength');
-  if(limit!==null&&(!/^\d{1,4}$/.test(limit)||Number(limit)<32))
+  const desired=field==='aircraft'?target.aircraftRegistration:target.routeRegistration;
+  if(limit!==null&&(!/^\d{1,4}$/.test(limit)||Number(limit)<desired.length))
    throw Error('RENAME_PILOT_INPUT_LENGTH_UNVERIFIED');
+  phase('FIND_OPENER');
   const controls=details.locator('[onclick]');
   const verified=await controls.evaluateAll((els,{hiddenId})=>els.flatMap((el,i)=>{
    const cb=el.getAttribute('onclick')||'';
