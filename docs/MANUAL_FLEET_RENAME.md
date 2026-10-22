@@ -38,6 +38,14 @@ O SHA256 considera os IDs de aeronave e rota, o registro atual, os nomes desejad
 
 **Correção de 22/10/2026:** como o cálculo de SHA256 foi corrigido, **nenhum hash de prévia anterior é reutilizável** (inclusive `4f054eb6…`). Execute nova `preview` com a `main` atual e os prefixos originais, revise o CSV e use apenas o novo SHA256 no piloto.
 
+## Etapa 2: pré-validação de piloto — sem salvar nada
+
+Quando um piloto falha antes do primeiro checkpoint, execute apenas **`operation=pilot-check`** no workflow manual da `main`: informe **`pilot_aircraft_id`** e os mesmos prefixos (ou CSV) + **`expected_preview_sha256`** da última prévia aprovada. Deixe `confirmation` vazio. A operação consulta as 104 aeronaves, confere o digest e a identidade do alvo e inspeciona os dois editores nativos, **sem preencher campo, abrir botão de edição ou enviar qualquer comando de renomeação**.
+
+O relatório identifica a última fase estática de validação: `PILOT_PREFLIGHT_OPEN_TARGET_DETAILS` e `PILOT_PREFLIGHT_{AIRCRAFT|ROUTE}_{FIND_CONTROL|FIND_PANEL|FIND_INPUT|FIND_OPENER}`. Mensagens brutas da página, CSS, IDs de inputs, callbacks e nomes não são persistidos. `PILOT_PREFLIGHT_VERIFIED_READ_ONLY` confirma apenas os controles, **não equivale a piloto executado**.
+
+Foi observado no run [#39795677436](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39795677436) que o hash canônico foi aprovado e a primeira inspeção falhou em `PILOT_PREFLIGHT_TWO_NATIVE_EDITORS` com erro não classificado, **sem resultados/alterações**. A nova etapa `pilot-check` foi feita para esclarecer esse bloqueio com segurança. Não repita o piloto real antes de avaliar esse relatório.
+
 ## Etapa 2: piloto de uma aeronave (operações reais e isoladas)
 
 Após a inspeção `inspect-open` comprovada no jogo, uma **operação manual distinta `pilot`** pode testar a gravação dos dois registros **de uma única aeronave**, escolhida expressamente pelo operador. **Não é executada automaticamente nem pelo assistente.**
