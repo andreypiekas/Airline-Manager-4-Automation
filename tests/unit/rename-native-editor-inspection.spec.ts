@@ -240,7 +240,7 @@ test('inspect-open uses only strictly verified native show/hide controls; never 
 });
 test('manual workflow contains inspect as explicit operation, never as scheduled job',async()=>{
  const file=await readFile('.github/workflows/manual-fleet-rename.yml','utf8');
- expect(file).toContain('options: [preview, inspect, inspect-open, pilot, apply]');
+ expect(file).toContain('options: [preview, inspect, inspect-open, pilot-check, pilot, apply]');
  expect(file).toContain("github.event_name == 'workflow_dispatch'");
  expect(file).not.toMatch(/cron:|schedule:/);
 });
