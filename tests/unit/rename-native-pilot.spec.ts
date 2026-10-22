@@ -177,7 +177,12 @@ test('read-only input diagnosis distinguishes unsupported Save grammar from miss
  expect(normal.matching).toEqual([0]);
  expect(normal.diagnostic).toMatchObject({
   inputCount:1,textInputCount:1,valueReferencedInputCount:1,
-  strictNativeMatchCount:1,classification:'MATCHED'
+  strictNativeMatchCount:1,classification:'MATCHED',
+  syntaxEvidence:{
+   neutralClickSound:true,expectedAjaxTarget:true,
+   expectedAjaxResponseContainer:true,exactlyOneAjaxCall:true,
+   callbackWithinLimit:true
+  }
  });
  // A structurally different callback never authorizes a Save click even
  // when the native jQuery input reference is present.
@@ -189,6 +194,25 @@ test('read-only input diagnosis distinguishes unsupported Save grammar from miss
   strictNativeMatchCount:0,classification:'SAVE_HANDLER_SYNTAX_UNSUPPORTED'
  });
  expect(nativeTextSaveQueryKey(unsupported,'1001','reg','regInput')).toBeNull();
+ expect(result.diagnostic.syntaxEvidence).toMatchObject({
+  neutralClickSound:false,expectedAjaxTarget:true,
+  expectedAjaxResponseContainer:true,exactlyOneAjaxCall:true
+ });
+ // Read-only signals identify distinct grammar mismatches but never
+ // authorize mutations, even when one native .val() reference exists.
+ const wrongId=diagnoseNativeTextInputs(
+  exact.replace('id=1001','id=1002'),'1001','reg',['regInput'],'aircraft');
+ expect(wrongId.matching).toEqual([]);
+ expect(wrongId.diagnostic.syntaxEvidence.expectedAjaxTarget).toBe(false);
+ const wrongResponse=diagnoseNativeTextInputs(
+  exact.replace("'detailsAction',this","'unknownTarget',this"),
+  '1001','reg',['regInput'],'aircraft');
+ expect(wrongResponse.matching).toEqual([]);
+ expect(wrongResponse.diagnostic.syntaxEvidence.expectedAjaxResponseContainer).toBe(false);
+ const twoAjax=diagnoseNativeTextInputs(
+  exact+"Ajax('unexpected');",'1001','reg',['regInput'],'aircraft');
+ expect(twoAjax.matching).toEqual([]);
+ expect(twoAjax.diagnostic.syntaxEvidence.exactlyOneAjaxCall).toBe(false);
  expect(diagnoseNativeTextInputs(exact,'1001','reg',['other'],'aircraft')
   .diagnostic.classification).toBe('NO_VALUE_REFERENCE');
  expect(diagnoseNativeTextInputs(exact,'1001','reg',[''],'aircraft')
