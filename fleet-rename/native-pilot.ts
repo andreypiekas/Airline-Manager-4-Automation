@@ -70,7 +70,7 @@ export async function preflightNativeTextEditors(
   phase('FIND_INPUT');
   // HTML inputs with an omitted type attribute default to type=text.
   // Match their actual browser type; never accept password, hidden or submit.
-  const inputs=hidden.locator('input').filter({visible:false});
+  const inputs=hidden.locator('input');
   const inputIds=await inputs.evaluateAll(els=>els.map(el=>
    el instanceof HTMLInputElement&&(el.type==='text'||el.type==='search')?
     el.id||'':''
