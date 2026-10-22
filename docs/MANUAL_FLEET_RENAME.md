@@ -38,6 +38,14 @@ O SHA256 considera os IDs de aeronave e rota, o registro atual, os nomes desejad
 
 **Correção de 22/10/2026:** como o cálculo de SHA256 foi corrigido, **nenhum hash de prévia anterior é reutilizável** (inclusive `4f054eb6…`). Execute nova `preview` com a `main` atual e os prefixos originais, revise o CSV e use apenas o novo SHA256 no piloto.
 
+### Contagem da frota muda durante uma prévia ou pilot-check
+
+A [execução read-only #39809109069](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39809109069) parou em `COLLECT_FLEET` com `RENAME_FLEET_COUNT_CHANGED`, antes de verificar os editores e **sem renomeação**. Isso significa que a contagem exibida variou **durante o inventário**; o log não demonstra se houve alteração real da frota ou atualização temporária da UI.
+
+Nos modos **somente leitura** `preview` e `pilot-check`, o programa agora descarta o inventário incompleto, reabre a lista nativa e refaz a coleta inteira **uma única vez**. Persistindo a mudança ou ocorrendo divergência de identificação (ID de aeronave, rota, registro ou par de aeroportos), a operação interrompe sem gravar. Uma nova frota legítima produz um SHA256 diferente e exige nova prévia; **não existe atualização automática de autorização**.
+
+**No modo `pilot`, nenhuma tentativa extra de coleta ou gravação é realizada**. `apply` global permanece bloqueado. A correção não comprova a causa raiz da variação nem autoriza renomeação.
+
 ## Etapa 2: pré-validação de piloto — sem salvar nada
 
 Quando um piloto falha antes do primeiro checkpoint, execute apenas **`operation=pilot-check`** no workflow manual da `main`: informe **`pilot_aircraft_id`** e os mesmos prefixos (ou CSV) + **`expected_preview_sha256`** da última prévia aprovada. Deixe `confirmation` vazio. A operação consulta as 104 aeronaves, confere o digest e a identidade do alvo e inspeciona os dois editores nativos, **sem preencher campo, abrir botão de edição ou enviar qualquer comando de renomeação**.
