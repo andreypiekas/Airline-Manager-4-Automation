@@ -34,6 +34,10 @@ Opção B — preencher **aircraft_prefix** e **route_prefix** (por exemplo `XP`
 
 Em ambos os casos, o artefato `manual-fleet-rename-report` contém a proposta `rename-proposal.csv`, o inventário ou o template, o JSON, um resumo e o **SHA256 da prévia**.
 
+O SHA256 considera os IDs de aeronave e rota, o registro atual, os nomes desejados e o **par exato de aeroportos em ordem canônica**. Assim, a inversão normal de sentido de um voo (por exemplo, `GRU - JAU` e `JAU - GRU`) não invalida a prévia; uma mudança real de aeroportos, IDs, nomes pretendidos ou registro **continua invalidando**. A verificação ao vivo também compara o par de aeroportos independentemente da ordem.
+
+**Correção de 22/10/2026:** como o cálculo de SHA256 foi corrigido, **nenhum hash de prévia anterior é reutilizável** (inclusive `4f054eb6…`). Execute nova `preview` com a `main` atual e os prefixos originais, revise o CSV e use apenas o novo SHA256 no piloto.
+
 ## Etapa 2: piloto de uma aeronave (operações reais e isoladas)
 
 Após a inspeção `inspect-open` comprovada no jogo, uma **operação manual distinta `pilot`** pode testar a gravação dos dois registros **de uma única aeronave**, escolhida expressamente pelo operador. **Não é executada automaticamente nem pelo assistente.**
