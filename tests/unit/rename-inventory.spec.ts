@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test';
-import {collectRenameInventory,renameCardIdentityIssue} from '../../fleet-rename/inventory';
+import {collectRenameInventory,renameCardIdentityIssue,retryOneUnstableReadOnlyFleetSnapshot} from '../../fleet-rename/inventory';
 
 async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean;siblingRegistration?:boolean;duplicateRegistration?:boolean}={}){
  await page.setContent(`<button>Routes (21)</button>
@@ -79,4 +79,38 @@ test('short or repeated native page identities prevent renaming any aircraft',as
  await page.goto('about:blank');
  await fixture(page,{duplicate:true});
  await expect(collectRenameInventory(page,1500)).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+});
+
+test('a read-only count drift discards the first snapshot and retries exactly once',async()=>{
+ const phases:string[]=[];let attempts=0,reopens=0;
+ const result=await retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+  attempts++;
+  if(attempts===1)throw Error('RENAME_FLEET_COUNT_CHANGED');
+  return {count:104,source:'fresh-second-snapshot'};
+ },async()=>{reopens++;phases.push('fresh-fleet-open');},()=>phases.push('discard-partial'));
+ expect(result).toEqual({count:104,source:'fresh-second-snapshot'});
+ expect(attempts).toBe(2);
+ expect(reopens).toBe(1);
+ expect(phases).toEqual(['discard-partial','fresh-fleet-open']);
+});
+test('a second count change fails closed: no third collection and no mutation',async()=>{
+ let attempts=0,reopens=0;
+ await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+  attempts++;throw Error('RENAME_FLEET_COUNT_CHANGED');
+ },async()=>{reopens++;})).rejects.toThrow('RENAME_FLEET_COUNT_CHANGED');
+ expect(attempts).toBe(2);expect(reopens).toBe(1);
+});
+test('identity failures are never retried or silently accepted',async()=>{
+ let attempts=0,reopens=0;
+ await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+  attempts++;throw Error('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+ },async()=>{reopens++;})).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+ expect(attempts).toBe(1);expect(reopens).toBe(0);
+});
+test('only the read-only modes invoke count-drift recovery; a real pilot never retries',async()=>{
+ const runner=await (await import('node:fs/promises')).readFile('fleet-rename/run.ts','utf8');
+ expect(runner).toContain("operation==='preview'||operation==='pilot-check'");
+ expect(runner).toContain('retryOneUnstableReadOnlyFleetSnapshot');
+ expect(runner).toContain(':await collect();');
+ expect(runner).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
 });
