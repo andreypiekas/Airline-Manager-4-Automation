@@ -34,7 +34,19 @@ Opção B — preencher **aircraft_prefix** e **route_prefix** (por exemplo `XP`
 
 Em ambos os casos, o artefato `manual-fleet-rename-report` contém a proposta `rename-proposal.csv`, o inventário ou o template, o JSON, um resumo e o **SHA256 da prévia**.
 
-## Etapa 2: aplicar (operação real, somente com consentimento)
+## Etapa 2: piloto de uma aeronave (operações reais e isoladas)
+
+Após a inspeção `inspect-open` comprovada no jogo, uma **operação manual distinta `pilot`** pode testar a gravação dos dois registros **de uma única aeronave**, escolhida expressamente pelo operador. **Não é executada automaticamente nem pelo assistente.**
+
+1. Rode uma prévia `preview` na `main`, com `aircraft_prefix=XP` e `route_prefix=XR` (ou o CSV completo); revise `rename-proposal.csv`, anote o `aircraftId` da aeronave desejada e o SHA256 da **nova** prévia.
+2. Rode manualmente o mesmo workflow em `operation=pilot`, fornecendo exatamente os mesmos prefixos/CSV, `pilot_aircraft_id=<ID EXATO>`, `expected_preview_sha256=<HASH NOVO>` e `confirmation=APLICAR_PILOTO_UMA_AERONAVE`.
+3. O programa verifica a **frota inteira** e seu hash, confere a rota/registro atuais, valida ambos os campos de texto e controles nativos **antes de mudar qualquer nome**, mas então trabalha **somente** na aeronave indicada.
+4. Antes de cada clique de salvamento, registra intenção no `rename-report.json`; abre o formulário via `hide()/show()` nativo verificado, preenche somente o campo exato, executa uma única ação de gravação nativa e confere resposta AJAX + novo nome exibido no jogo.
+5. Qualquer falha ou retorno incerto interrompe imediatamente a execução. Se o campo da aeronave tiver sido confirmado, mas o da rota falhar, haverá **alteração parcial**. Não existe rollback automático e **não se deve executar novamente** o piloto sem examinar o resultado e gerar uma nova prévia.
+
+**A opção `apply` de toda a frota fica expressamente bloqueada** no código até o piloto real estar concluído, documentado e a retomada em lotes ter sido desenhada. Os testes offline não substituem um piloto real.
+
+## Operação global — indisponível até validação do piloto
 
 Revise integralmente o CSV. Depois execute o **mesmo workflow manual** em modo **apply**, com os mesmos prefixos ou o CSV final **exatamente igual ao da prévia**, e informe:
 
