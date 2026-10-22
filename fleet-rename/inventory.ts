@@ -63,6 +63,23 @@ export async function readMissingRegistrationFromNativeDetails(
   await details.locator('.col-5 span.l-text').allTextContents());
  return registration;
 }
+/** Retry exactly one whole read-only snapshot if the native heading changed
+ * mid-collection. The first partial snapshot is discarded, never combined.
+ * Identity/control failures and all failures of the second read stop outright.
+ * Mutation-mode callers MUST NOT use this helper.
+ */
+export async function retryOneUnstableReadOnlyFleetSnapshot<T>(
+ collect:()=>Promise<T>,reopen:()=>Promise<void>,onRetry:()=>void=()=>{}
+):Promise<T>{
+ try{return await collect();}
+ catch(error){
+  if(!(error instanceof Error)||error.message!=='RENAME_FLEET_COUNT_CHANGED')
+   throw error;
+  onRetry();
+  await reopen();
+  return await collect();
+ }
+}
 /**
  * Unlike demand analysis, administrative renaming needs ONLY the read-only
  * identities from native Fleet cards. No per-plane demand, history or price
