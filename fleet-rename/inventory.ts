@@ -33,7 +33,8 @@ export async function readMissingRegistrationFromNativeDetails(
  await openFleetList(page,timeout);
  const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
  const actual=(await heading.innerText({timeout})).trim();
- if(actual!=='Routes ('+expectedRoutes+')')throw Error('RENAME_FLEET_COUNT_CHANGED');
+ const parsed=/^Routes\s*\((\d+)\)$/.exec(actual);
+ if(!parsed||Number(parsed[1])!==expectedRoutes)throw Error('RENAME_FLEET_COUNT_CHANGED');
  await findFleetRoute(page,item,timeout);
  const row=page.locator('#routesContainer #routeMainList'+item.routeId);
  if(await row.count()!==1||!await row.isVisible())
