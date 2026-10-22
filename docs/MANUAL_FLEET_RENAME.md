@@ -60,6 +60,12 @@ A inspeção [`pilot-check` #39844589439](https://github.com/andreypiekas/Airlin
 
 A rotina passou a usar importação estática de `preflightNativeTextEditors` e `saveNativeTextField` no início do módulo, validada pelos testes offline. O novo estágio `PILOT_PREFLIGHT_NATIVE_MODULE_READY` precede a abertura dos detalhes. Esse ajuste **não amplia permissões**, não clica em salvar e não altera os controles de identidade. Mesmo com um pré-check bem-sucedido, **nenhuma gravação foi comprovada**; não usar `pilot` ou `apply` sem avaliação separada.
 
+### Falha ao identificar o campo de nome — diagnóstico sem gravação
+
+Após a correção do PR #46, o [`pilot-check` #39865361855](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39865361855) comprovou a leitura das **114 aeronaves**, digest `9190c236e59343ce3d6f42ff02b1fc63972cd20db0ea00f99204b2475af4a992`, navegação ao alvo e abertura dos detalhes. O processo foi interrompido em `PILOT_PREFLIGHT_AIRCRAFT_FIND_INPUT` com `RENAME_PILOT_INPUT_AMBIGUOUS`, **sem registrar nenhum salvamento**. A mesma aeronave já havia sido inspecionada no modo `inspect-open` [#39778025141](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39778025141) com um campo de texto associado ao `.val()` nativo; isso **não comprova que a sintaxe do botão permanece idêntica**.
+
+O preflight agora diferencia uma região sem campo de texto, um campo sem referência `.val()` no botão, um `.val()` inequívoco **mas com callback de Save não suportado pelo parser estrito**, e dois ou mais candidatos conflitantes. No relatório ficam somente contagens e classificações: `inputCount`, `textInputCount`, `valueReferencedInputCount`, `strictNativeMatchCount` e `classification`. Nunca armazena valores, IDs, HTML ou código do botão. **O classificador não autoriza nenhum salvamento**: até que `nativeTextSaveQueryKey` reconheça um único handler nativo exato, as operações `pilot` e `apply` continuam barradas.
+
 ## Etapa 2: pré-validação de piloto — sem salvar nada
 
 Quando um piloto falha antes do primeiro checkpoint, execute apenas **`operation=pilot-check`** no workflow manual da `main`: informe **`pilot_aircraft_id`** e os mesmos prefixos (ou CSV) + **`expected_preview_sha256`** da última prévia aprovada. Deixe `confirmation` vazio. A operação consulta as 104 aeronaves, confere o digest e a identidade do alvo e inspeciona os dois editores nativos, **sem preencher campo, abrir botão de edição ou enviar qualquer comando de renomeação**.
