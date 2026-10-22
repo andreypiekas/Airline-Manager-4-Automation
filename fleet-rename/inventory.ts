@@ -54,11 +54,22 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
     return id?[{a,id}]:[];
    });
    const aircraftId=links.length===1?links[0].id:'';
-   const registration=links.length===1?links[0].a.querySelector('#acRegList'+aircraftId)?.textContent?.trim()||'':'';
+   // Fleet registration may be rendered as a sibling of the native details
+   // link. Resolve it only within THIS verified route card and require exactly
+   // one registration node with the exact aircraft ID; never borrow a name
+   // from another card or infer it from generic visible text.
+   const registrationNodes=Array.from(e.querySelectorAll('[id^="acRegList"]'));
+   const matchingRegistration=registrationNodes.length===1&&
+    registrationNodes[0].id==='acRegList'+aircraftId ? registrationNodes[0] : null;
+   const registration=matchingRegistration?.textContent?.trim()||'';
+   const registrationShape=registrationNodes.length===0?'ABSENT':
+    registrationNodes.length!==1?'AMBIGUOUS':
+    !matchingRegistration?'ID_MISMATCH':!registration?'EMPTY':
+    links.length===1&&links[0].a.contains(matchingRegistration)?'NESTED':'CARD_SIBLING';
    const routeLabel=Array.from(e.querySelectorAll('span.s-text')).map(x=>x.textContent?.trim()||'')
     .find(x=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(x))||'';
    return {routeId:e.id.replace(/^routeMainList/,''),aircraftId,registration,routeLabel,
-    detailsControlCount:links.length};
+    detailsControlCount:links.length,registrationShape};
   }),AIRCRAFT_DETAILS_CONTROL);
   if(cards.length!==expected)throw Error('RENAME_FLEET_PAGE_INCOMPLETE');
   for(const [slot,card] of cards.entries()){
@@ -66,7 +77,10 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
    if(issue){
     // Only classification and position are emitted; raw identities are never logged.
     console.warn('[RenameInventory] '+JSON.stringify({status:'INVALID_CARD',
-     page:pageIndex,slot:slot+1,observed:result.aircraft.length,expected:total,code:issue}));
+     source:process.env.RENAME_OPERATION==='preview'||process.env.RENAME_OPERATION==='apply'
+      ?'MANUAL_GAME':'OFFLINE_TEST',
+     page:pageIndex,slot:slot+1,observed:result.aircraft.length,expected:total,
+     code:issue,registrationShape:card.registrationShape}));
     throw Error(issue);
    }
    const segments=card.routeLabel.split(/\s*-\s*/);
