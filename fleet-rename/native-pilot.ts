@@ -38,6 +38,36 @@ export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode
  return key&&key!=='id'&&key!=='mode'?key:null;
 }
 
+/** Bounded, read-only evidence. No IDs, callback source, labels or input values. */
+export type NativeInputDiagnostic={
+ field:RenamePhase;inputCount:number;textInputCount:number;
+ valueReferencedInputCount:number;strictNativeMatchCount:number;
+ classification:'MATCHED'|'NO_TEXT_INPUT'|'NO_VALUE_REFERENCE'|
+  'SAVE_HANDLER_SYNTAX_UNSUPPORTED'|'AMBIGUOUS';
+};
+/** Classification is intentionally separate from authorization: a .val()
+ * reference alone NEVER approves a native Save click.
+ */
+export function diagnoseNativeTextInputs(
+ callback:string,id:string,mode:NativeMode,inputIds:string[],field:RenamePhase
+):{matching:number[];diagnostic:NativeInputDiagnostic}{
+ const eligible=inputIds.flatMap((inputId,index)=>inputId?[{inputId,index}]:[]);
+ const compact=callback.replace(/\s/g,'');
+ const valueReferenced=eligible.filter(({inputId})=>
+  compact.includes("$('#"+inputId+"').val()")||
+  compact.includes('$("#'+inputId+'").val()'));
+ const matching=eligible.flatMap(({inputId,index})=>
+  nativeTextSaveQueryKey(callback,id,mode,inputId)?[index]:[]);
+ const classification:NativeInputDiagnostic['classification']=
+  matching.length===1?'MATCHED':
+  eligible.length===0?'NO_TEXT_INPUT':
+  valueReferenced.length===0?'NO_VALUE_REFERENCE':
+  valueReferenced.length===1&&matching.length===0?
+   'SAVE_HANDLER_SYNTAX_UNSUPPORTED':'AMBIGUOUS';
+ return {matching,diagnostic:{field,inputCount:inputIds.length,
+  textInputCount:eligible.length,valueReferencedInputCount:valueReferenced.length,
+  strictNativeMatchCount:matching.length,classification}};
+}
 /** Static stages only: never include callback source, field IDs, route names,
  * error messages, page HTML or input values in a persisted diagnostic.
  */
@@ -48,7 +78,8 @@ export type PilotPreflightPhase=
  'PILOT_PREFLIGHT_ROUTE_FIND_INPUT'|'PILOT_PREFLIGHT_ROUTE_FIND_OPENER';
 /** Preflight both editors before ANY renaming. No input values are read here. */
 export async function preflightNativeTextEditors(
- details:Locator,target:RenameTarget,onPhase:(phase:PilotPreflightPhase)=>void=()=>{}
+ details:Locator,target:RenameTarget,onPhase:(phase:PilotPreflightPhase)=>void=()=>{},
+ onDiagnostic:(summary:NativeInputDiagnostic)=>void=()=>{}
 ):Promise<VerifiedNativeTextEditor[]>{
  const results:VerifiedNativeTextEditor[]=[];
  for(const field of ['aircraft','route'] as const){
@@ -86,9 +117,19 @@ export async function preflightNativeTextEditors(
    el instanceof HTMLInputElement&&(el.type==='text'||el.type==='search')?
     el.id||'':''
   ));
-  const matching=inputIds.flatMap((inputId,i)=>
-   nativeTextSaveQueryKey(callback,id,mode,inputId)?[i]:[]);
-  if(matching.length!==1)throw Error('RENAME_PILOT_INPUT_AMBIGUOUS');
+  const {matching,diagnostic}=diagnoseNativeTextInputs(callback,id,mode,inputIds,field);
+  onDiagnostic(diagnostic);
+  if(matching.length!==1){
+   // Zero native matches might mean no suitable input, no .val() reference,
+   // or a genuinely different Ajax grammar. Never guess or click on Save.
+   if(diagnostic.classification==='NO_TEXT_INPUT')
+    throw Error('RENAME_PILOT_NO_TEXT_INPUT');
+   if(diagnostic.classification==='NO_VALUE_REFERENCE')
+    throw Error('RENAME_PILOT_INPUT_VALUE_REFERENCE_UNVERIFIED');
+   if(diagnostic.classification==='SAVE_HANDLER_SYNTAX_UNSUPPORTED')
+    throw Error('RENAME_PILOT_NATIVE_SAVE_SYNTAX_UNSUPPORTED');
+   throw Error('RENAME_PILOT_INPUT_AMBIGUOUS');
+  }
   const input=inputs.nth(matching[0]);
   const inputId=inputIds[matching[0]];
   const queryKey=nativeTextSaveQueryKey(callback,id,mode,inputId);
