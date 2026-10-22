@@ -38,8 +38,7 @@ export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode
  return key&&key!=='id'&&key!=='mode'?key:null;
 }
 
-/** Bounded, read-only evidence. No IDs, callback source, labels or input values. */
-/** Only boolean grammar evidence is persisted. Never persist native JavaScript,
+/** Bounded, read-only evidence: only boolean grammar indicators are persisted. Never persist native JavaScript,
  * DOM selectors, query values, IDs, callback source or page text. */
 export type NativeSaveSyntaxEvidence={
  neutralClickSound:boolean;
