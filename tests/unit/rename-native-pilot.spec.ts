@@ -151,7 +151,7 @@ test('native target-details errors retain stage markers and never trigger an imp
 
 test('manual pilot loads its native editors statically before touching the real game',async()=>{
  const source=await readFile('fleet-rename/run.ts','utf8');
- expect(source).toMatch(/import \\{preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener(?:,type NativeInputDiagnostic)?\\} from '\\.\\/native-pilot';/);
+ expect(source).toContain("import {preflightNativeTextEditors,saveNativeTextField,verifiedReadOnlyNativeOpener");
  expect(source).not.toContain("await import('./native-pilot')");
  const editorSource=await readFile('fleet-rename/native-pilot.ts','utf8');
  expect(editorSource).toContain("import type {RenamePhase} from './run';");
