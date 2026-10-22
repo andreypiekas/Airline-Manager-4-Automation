@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory,retryOneUnstableReadOnlyFleetSnapshot} from './inventory';
+import {preflightNativeTextEditors,saveNativeTextField} from './native-pilot';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
@@ -442,7 +443,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
     :selectSingleAircraftPilotTarget(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
        env.RENAME_EXPECTED_DIGEST||'');
    markStage('PILOT_PREFLIGHT_OPEN_TARGET_DETAILS');
-   const {preflightNativeTextEditors}=await import('./native-pilot');
+   // Import at module initialization (covered by offline tests): no runtime dynamic
+   // module resolution after the expensive, verified live fleet snapshot.
+   markStage('PILOT_PREFLIGHT_NATIVE_MODULE_READY');
    const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage);
    // Both editors must be verified before ANY name can be changed.
    await preflightNativeTextEditors(detail,pilotTarget,markStage);
@@ -476,7 +479,6 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
        await save();continue;
      }
      if(operation==='pilot'){
-      const {preflightNativeTextEditors,saveNativeTextField}=await import('./native-pilot');
       const editors=await preflightNativeTextEditors(details,target,markStage);
       const editor=editors.find(e=>e.field===field);
       if(!editor)throw Error('RENAME_PILOT_EDITOR_MISSING');
