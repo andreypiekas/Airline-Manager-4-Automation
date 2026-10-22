@@ -6,7 +6,7 @@ import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
 import {collectRenameInventory} from './inventory';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
-import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
+import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
 import type {CollectionResult} from '../demand/types';
 
 /** Only stable diagnostic codes; never persist or log raw Playwright exceptions,
@@ -350,10 +350,12 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
 function htmlSafe(s:string){return s.replace(/[|<>\r\n]/g,' ');}
 export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=process.env,directory='test-results/fleet-rename'){
  const timeout=14000,operation=(env.RENAME_OPERATION||'preview').trim();
- if(!['inspect','inspect-open','preview','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
+ if(!['inspect','inspect-open','preview','pilot','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
+ // Until one real double-field pilot is verified, bulk apply must not run.
+ if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT');
  // Applied runs require first-attempt manual dispatch; no workflow cron or reruns.
- if(operation==='apply'&&(env.GITHUB_ACTIONS!=='true'||env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
-  env.GITHUB_RUN_ATTEMPT!=='1'||env.RENAME_CONFIRMATION!=='APLICAR_RENOMEACAO_TOTAL'))
+ if(operation==='pilot'&&(env.GITHUB_ACTIONS!=='true'||env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
+  env.GITHUB_RUN_ATTEMPT!=='1'||env.RENAME_CONFIRMATION!=='APLICAR_PILOTO_UMA_AERONAVE'))
   throw Error('RENAME_REAL_CONTEXT_UNAUTHORIZED');
  await mkdir(directory,{recursive:true});
  const report:{schemaVersion:1;operation:string;generatedAt:string;complete:boolean;halted:boolean;
@@ -409,11 +411,21 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   report.fleetCount=plan.count;report.digest=plan.digest;
   await writeFile(join(directory,'rename-proposal.csv'),exportRenameCsv(plan));
   await writeFile(join(directory,'rename-proposal.json'),JSON.stringify(plan,null,2)+'\n');
-  if(!authorizeRenameOperation(operation,env.RENAME_CONFIRMATION||'',env.RENAME_EXPECTED_DIGEST||'',plan)){
+  let pilotTarget:typeof plan.targets[number]|null=null;
+  if(operation==='pilot'){
+   pilotTarget=authorizeSingleAircraftPilot(plan,env.RENAME_PILOT_AIRCRAFT_ID||'',
+    env.RENAME_EXPECTED_DIGEST||'',env.RENAME_CONFIRMATION||'');
+   markStage('PILOT_PREFLIGHT_TWO_NATIVE_EDITORS');
+   const {preflightNativeTextEditors}=await import('./native-pilot');
+   const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout);
+   // Both editors must be verified before ANY name can be changed.
+   await preflightNativeTextEditors(detail,pilotTarget);
+  }else if(!authorizeRenameOperation(operation,env.RENAME_CONFIRMATION||'',env.RENAME_EXPECTED_DIGEST||'',plan)){
    report.complete=true;report.reason='PREVIEW_ONLY_NO_MUTATION';await save();return report;
   }
-  const marker=await open(join(directory,'rename-apply.started'),'wx');await marker.close();
-  for(const target of plan.targets){
+  const marker=await open(join(directory,operation==='pilot'?'rename-pilot.started':'rename-apply.started'),'wx');
+  await marker.close();
+  for(const target of (pilotTarget?[pilotTarget]:plan.targets)){
    let currentRegistration=target.oldAircraftRegistration;
    for(const field of ['aircraft','route'] as const){
     const desired=field==='aircraft'?target.aircraftRegistration:target.routeRegistration;
@@ -432,10 +444,22 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
        entry.status='confirmed';entry.reason='ALREADY_MATCHES_LIVE_REGISTRATION';
        await save();continue;
      }
-     entry.status='attempting';entry.reason='INTENT_CHECKPOINTED';
-     await renameNativePrompt(page,details,target,field,desired,async()=>{
-      mutationStarted=true;await save();
-     },timeout);
+     if(operation==='pilot'){
+      const {preflightNativeTextEditors,saveNativeTextField}=await import('./native-pilot');
+      const editors=await preflightNativeTextEditors(details,target);
+      const editor=editors.find(e=>e.field===field);
+      if(!editor)throw Error('RENAME_PILOT_EDITOR_MISSING');
+      await saveNativeTextField(page,editor,desired,async()=>{
+       mutationStarted=true;
+       entry.status='attempting';entry.reason='INTENT_CHECKPOINTED';
+       await save();
+      },timeout);
+     }else{
+      entry.status='attempting';entry.reason='INTENT_CHECKPOINTED';
+      await renameNativePrompt(page,details,target,field,desired,async()=>{
+       mutationStarted=true;await save();
+      },timeout);
+     }
      const verify=await inspectTarget(page,target,field==='aircraft'?desired:currentRegistration,timeout);
      if(field==='route'){
       // Route registration must be shown in the route-specific header after
@@ -454,7 +478,9 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
     }
    }
   }
-  report.complete=true;report.reason='ALL_FIELDS_NATIVE_VERIFIED';await save();return report;
+  report.complete=true;
+  report.reason=operation==='pilot'?'PILOT_TWO_FIELDS_NATIVE_VERIFIED':'ALL_FIELDS_NATIVE_VERIFIED';
+  await save();return report;
  }catch(e){
   report.halted=true;
   report.failureCode=safeRenameFailureCode(e);

@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'inspect: somente leitura; inspect-open: abre apenas UI verificada; preview: CSV/hash; apply: exige aprovação/hash'
+        description: 'inspect/inspect-open: leitura; preview: proposta/hash; pilot: 1 aeronave aprovada; apply: bloqueado'
         type: choice
         default: preview
         required: true
-        options: [preview, inspect, inspect-open, apply]
+        options: [preview, inspect, inspect-open, pilot, apply]
       aircraft_prefix:
         description: 'Padrão para todas as aeronaves, por ex. XP (deixe vazio para usar CSV)'
         required: false
@@ -20,12 +20,16 @@ on:
         description: 'Opcional: CSV completo com aircraftId,routeId,aircraftRegistration,routeRegistration; substitui ambos prefixos'
         required: false
         type: string
+      pilot_aircraft_id:
+        description: 'Somente pilot: aircraftId exato do CSV da prévia; nunca seleciona automaticamente'
+        required: false
+        type: string
       expected_preview_sha256:
-        description: 'Somente apply: hash SHA256 da prévia anterior, para bloquear mudanças na frota'
+        description: 'pilot/apply: hash SHA256 completo da prévia atual, obrigatório no piloto'
         required: false
         type: string
       confirmation:
-        description: 'Somente apply: escreva APLICAR_RENOMEACAO_TOTAL'
+        description: 'pilot: APLICAR_PILOTO_UMA_AERONAVE; apply global indisponível por segurança'
         required: false
         type: string
 
@@ -73,6 +77,7 @@ jobs:
           RENAME_MAPPING_CSV: ${{ inputs.mapping_csv }}
           RENAME_EXPECTED_DIGEST: ${{ inputs.expected_preview_sha256 }}
           RENAME_CONFIRMATION: ${{ inputs.confirmation }}
+          RENAME_PILOT_AIRCRAFT_ID: ${{ inputs.pilot_aircraft_id }}
         run: |
           if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; then
             echo "::error::EMAIL e PASSWORD são exigidos para a consulta da frota."

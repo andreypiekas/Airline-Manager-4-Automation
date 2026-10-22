@@ -34,22 +34,23 @@ Opção B — preencher **aircraft_prefix** e **route_prefix** (por exemplo `XP`
 
 Em ambos os casos, o artefato `manual-fleet-rename-report` contém a proposta `rename-proposal.csv`, o inventário ou o template, o JSON, um resumo e o **SHA256 da prévia**.
 
-## Etapa 2: aplicar (operação real, somente com consentimento)
+## Etapa 2: piloto de uma aeronave (operações reais e isoladas)
 
-Revise integralmente o CSV. Depois execute o **mesmo workflow manual** em modo **apply**, com os mesmos prefixos ou o CSV final **exatamente igual ao da prévia**, e informe:
+Após a inspeção `inspect-open` comprovada no jogo, uma **operação manual distinta `pilot`** pode testar a gravação dos dois registros **de uma única aeronave**, escolhida expressamente pelo operador. **Não é executada automaticamente nem pelo assistente.**
 
-- **expected_preview_sha256**: digest do relatório anterior.
-- **confirmation**: `APLICAR_RENOMEACAO_TOTAL`.
+1. Rode uma prévia `preview` na `main`, com `aircraft_prefix=XP` e `route_prefix=XR` (ou o CSV completo); revise `rename-proposal.csv`, anote o `aircraftId` da aeronave desejada e o SHA256 da **nova** prévia.
+2. Rode manualmente o mesmo workflow em `operation=pilot`, fornecendo exatamente os mesmos prefixos/CSV, `pilot_aircraft_id=<ID EXATO>`, `expected_preview_sha256=<HASH NOVO>` e `confirmation=APLICAR_PILOTO_UMA_AERONAVE`.
+3. O programa verifica a **frota inteira** e seu hash, confere a rota/registro atuais, valida ambos os campos de texto e controles nativos **antes de mudar qualquer nome**, mas então trabalha **somente** na aeronave indicada.
+4. Antes de cada clique de salvamento, registra intenção no `rename-report.json`; abre o formulário via `hide()/show()` nativo verificado, preenche somente o campo exato, executa uma única ação de gravação nativa e confere resposta AJAX + novo nome exibido no jogo.
+5. Qualquer falha ou retorno incerto interrompe imediatamente a execução. Se o campo da aeronave tiver sido confirmado, mas o da rota falhar, haverá **alteração parcial**. Não existe rollback automático e **não se deve executar novamente** o piloto sem examinar o resultado e gerar uma nova prévia.
 
-A aplicação recusa resultado parcial ou ambíguo de Fleet, nomes inválidos ou repetidos, IDs divergentes, hash diferente, reexecução do mesmo GitHub run, controle de UI desconhecido ou challenge/CAPTCHA.
+**A opção `apply` de toda a frota fica expressamente bloqueada** no código até o piloto real estar concluído, documentado e a retomada em lotes ter sido desenhada. Os testes offline não substituem um piloto real.
 
-Para cada aeronave, a ordem é: validar `aircraftId` e `routeId`; abrir os detalhes nativos; usar o editor nativo do **registro da aeronave** (`mode=reg`); confirmar resposta AJAX e registro exibido; reabrir os detalhes; usar o editor nativo do **registro da rota** (`mode=routeReg`); confirmar a resposta e valor exibido no cabeçalho da rota. Os dois campos são tratados como operações distintas.
+## Operação global — bloqueada até a validação do piloto
 
-**Limitação importante:** o jogo pode mudar seus editores. A rotina de aplicação suporta apenas botões cujo callback já exibe uma operação nativa AJAX com `prompt()` para o ID e campo exatos. Se o controle real for diferente, a execução fará **HOLD**, sem tentar enviar uma requisição inventada. Se o servidor responder sem confirmação visual do novo valor, será marcado como **resultado incerto**, sem retry. O workflow pode parar após modificar apenas parte da frota; **não deve ser repetido automaticamente**. Examine o artefato antes de iniciar nova operação.
+Embora a opção `apply` ainda esteja visível por compatibilidade no menu, ela **recusa a execução antes do login** com `RENAME_BULK_REQUIRES_VALIDATED_PILOT`. Não use `apply`: o modo `pilot` é o único caminho de gravação disponível e atua em somente uma aeronave, com dois campos e autorização específica.
 
-O inventário é **leve e somente leitura**: percorre as páginas nativas de Fleet/Routes e confere 1:1 com `Routes(N)`, sem abrir todos os detalhes ou reler demanda de cada aeronave. Uma página incompleta, repetida ou com callback desconhecido bloqueia a operação. O escopo são todas as aeronaves **visíveis em Fleet/Routes**, não aeronaves eventualmente sem rota que não apareçam nessa tela.
-
-O hash inclui os IDs, o registro atual de cada aeronave e a descrição original de sua rota; mudanças relevantes entre prévia e aplicação exigem nova prévia. Não use nomes para identificar aeronaves nos demais módulos: os identificadores técnicos permanecem `aircraftId` e `routeId`.
+Para liberar no futuro a renomeação completa, precisamos validar um piloto real aprovado, confirmar os dois nomes na interface e implementar lotes com checkpoint e retomada segura. O bot não repete automaticamente gravações com resultado incerto. As operações `preview`, `inspect` e `inspect-open` permanecem sem gravação de nomes.
 
 ## Segurança e histórico
 

@@ -115,3 +115,20 @@ export function authorizeRenameOperation(
   expectedDigest!==plan.digest)throw Error('RENAME_CONFIRMATION_INVALID_OR_FLEET_CHANGED');
  return true;
 }
+
+
+/** Explicitly authorize ONE aircraft from the entire validated preview.
+ * The full-fleet digest binds identity, current registration and route endpoints.
+ * Never fall back to the first aircraft or an implicit selection.
+ */
+export function authorizeSingleAircraftPilot(
+ plan:RenamePlan,aircraftId:string,expectedDigest:string,confirmation:string
+):RenameTarget{
+ if(confirmation!=='APLICAR_PILOTO_UMA_AERONAVE'||
+    !/^[1-9]\d*$/.test(aircraftId)||
+    !/^[a-f0-9]{64}$/.test(expectedDigest)||expectedDigest!==plan.digest)
+  throw Error('RENAME_PILOT_AUTHORIZATION_OR_FLEET_CHANGED');
+ const selected=plan.targets.filter(t=>t.aircraftId===aircraftId);
+ if(selected.length!==1)throw Error('RENAME_PILOT_TARGET_NOT_FOUND');
+ return selected[0];
+}
