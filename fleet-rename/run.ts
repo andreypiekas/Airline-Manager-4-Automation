@@ -3,7 +3,7 @@ import {mkdir,open,writeFile,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {loginForReadOnlyCollection} from '../utils/read-only-login';
 import {assertNoInteractiveChallenge} from '../utils/challenge-guard';
-import {collectRenameInventory} from './inventory';
+import {collectRenameInventory,retryOneUnstableReadOnlyFleetSnapshot} from './inventory';
 import {aircraftIdFromDetailsControl} from '../demand/identity';
 import {openFleetList,findFleetRoute} from '../demand/navigation';
 import {generateRenames,mappingTemplate,exportRenameCsv,authorizeRenameOperation,authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,assertRenameRouteLabelUnchanged,assertRenameDetailAirportsMatch,type RenameTarget} from './plan';
@@ -392,7 +392,17 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    await save();return report;
   }
   markStage('COLLECT_FLEET');
-  const fleet:CollectionResult=await collectRenameInventory(page,timeout);
+  // Preview/pilot-check are read-only: a changed route heading invalidates
+  // the partial first snapshot. Reopen and read a fresh complete snapshot
+  // exactly once. Never repeat in pilot (real mutation mode).
+  const collect=()=>collectRenameInventory(page,timeout);
+  const fleet:CollectionResult=(operation==='preview'||operation==='pilot-check')
+   ?await retryOneUnstableReadOnlyFleetSnapshot(collect,async()=>{
+      markStage('COLLECT_FLEET_REOPEN_AFTER_COUNT_CHANGE_READ_ONLY');
+      await openFleetList(page,timeout);
+      markStage('COLLECT_FLEET_SECOND_FULL_SNAPSHOT');
+    },()=>markStage('COLLECT_FLEET_DISCARD_UNSTABLE_SNAPSHOT'))
+   :await collect();
   markStage('BUILD_PLAN');
   // The snapshot is identity-checked even before a name is planned.
   let plan;
