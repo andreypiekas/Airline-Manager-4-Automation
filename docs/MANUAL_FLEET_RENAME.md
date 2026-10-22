@@ -10,6 +10,8 @@ A operação `inspect` abre o Fleet e os detalhes da **primeira aeronave** por s
 
 No artefato `manual-fleet-rename-report`, confira `inspection.allVerified`, `inspection.editors` e a tabela *Inspeção nativa (somente leitura)*. São mostrados somente contagens, visibilidade, habilitação, validação estrita e o formato sanitizado dos handlers (sem IDs, URLs reais, nomes ou código original).
 
+Na inspeção aprimorada, cada editor também possui `form`: quantidade de campos de entrada presentes na área oculta, quantidade de campos cujo `.val()` é referenciado pelo botão, tipo genérico do campo e possíveis controles visíveis de abertura de formulário. Essas observações são somente leitura e **não incluem os IDs, nomes ou valores dos inputs**. Um controle candidato de abertura não é automaticamente considerado seguro para clicar. A inspeção não altera CSS nem abre o formulário.
+
 `allVerified=true` confirma **somente a forma estática dos dois comandos de uma aeronave**, não comprova sucesso de gravação, outros modelos de aeronave, duração, idempotência ou rollback. **Não executar `apply` em toda a frota baseado apenas nisso**; fazer primeiro um piloto manual aprovado e com relatório de confirmação de ambos os campos.
 
 ## Etapa 1: prévia (nenhuma alteração)
