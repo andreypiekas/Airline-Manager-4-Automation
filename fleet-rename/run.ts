@@ -262,15 +262,24 @@ export async function inspectNativeRenameEditors(
  return {inspected:1,routeCount,readOnly:true,editors,
   allVerified:editors.every(e=>e.callbackVerified)};
 }
-async function inspectTarget(page:Page,expected:RenameTarget,registered:string,timeout:number){
+/** Read-only details inspection. Keep static phase names in reports, not raw DOM. */
+async function inspectTarget(
+ page:Page,expected:RenameTarget,registered:string,timeout:number,
+ onStage:(stage:string)=>void=()=>{}
+){
+ onStage('PILOT_TARGET_VERIFY_NO_CHALLENGE');
  await assertNoInteractiveChallenge(page,'rename:open-fleet');
- await openFleetList(page,timeout);
+ onStage('PILOT_TARGET_REOPEN_FLEET');
+ await openFleetList(page,timeout,phase=>onStage('PILOT_TARGET_FLEET_'+phase));
+ onStage('PILOT_TARGET_FIND_ROUTE');
  await findFleetRoute(page,{aircraftId:expected.aircraftId,routeId:expected.routeId} as any,timeout);
+ onStage('PILOT_TARGET_VERIFY_ROW');
  const row=page.locator('#routesContainer #routeMainList'+expected.routeId);
  if(await row.count()!==1||!await row.isVisible())throw Error('RENAME_TARGET_MISSING');
  // Re-check native route endpoints on each field, not only aircraft/route IDs.
  // A route can change after the global preview but before an individual save.
  assertRenameRouteLabelUnchanged(expected.oldRouteLabel,await row.locator('span.s-text').allTextContents());
+ onStage('PILOT_TARGET_VERIFY_REGISTRATION');
  // The native registration element may be nested in the details link or
  // rendered alongside it. The precise aircraft ID, route ID and handler must
  // all match; the current registration must also match the approved plan.
@@ -284,6 +293,7 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
      await registrationNodes.first().getAttribute('id')!=='acRegList'+expected.aircraftId||
      (await registrationNodes.first().textContent({timeout}))?.trim()!==registered)))
   throw Error('RENAME_AIRCRAFT_IDENTITY_CHANGED');
+ onStage('PILOT_TARGET_VERIFY_DETAILS_LINK');
  const expectedCallback=`playSound('neutral_click');Ajax('fleet_details.php?id=${expected.aircraftId}','detailsAction');if(intro==0){$('#routeAction').hide();}`;
  const links=row.locator('a[onclick]');
  const matches=await links.evaluateAll((elements,callback)=>elements.flatMap((e,index)=>
@@ -292,9 +302,12 @@ async function inspectTarget(page:Page,expected:RenameTarget,registered:string,t
  if(matches.length!==1)throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
  const link=links.nth(matches[0]);
  if(!await link.isVisible())throw Error('RENAME_DETAILS_CONTROL_UNVERIFIED');
+ onStage('PILOT_TARGET_CLICK_DETAILS_LINK');
  await link.click({timeout});
+ onStage('PILOT_TARGET_WAIT_DETAILS_VISIBLE');
  const details=page.locator('#detailsAction');
  await details.waitFor({state:'visible',timeout});
+ onStage('PILOT_TARGET_VERIFY_DETAILS_CONTENT');
  if(await details.locator('#ff-name').count()!==1||
     (await details.locator('#ff-name').innerText({timeout})).trim()!==registered)
   throw Error('RENAME_DETAILS_IDENTITY_CHANGED');
@@ -430,7 +443,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
        env.RENAME_EXPECTED_DIGEST||'');
    markStage('PILOT_PREFLIGHT_OPEN_TARGET_DETAILS');
    const {preflightNativeTextEditors}=await import('./native-pilot');
-   const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout);
+   const detail=await inspectTarget(page,pilotTarget,pilotTarget.oldAircraftRegistration,timeout,markStage);
    // Both editors must be verified before ANY name can be changed.
    await preflightNativeTextEditors(detail,pilotTarget,markStage);
    if(operation==='pilot-check'){
@@ -452,7 +465,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
     report.results.push(entry);await save();
     let mutationStarted=false;
     try{
-     const details=await inspectTarget(page,target,currentRegistration,timeout);
+     const details=await inspectTarget(page,target,currentRegistration,timeout,markStage);
      // A new explicitly approved preview may follow a previous partially
      // completed attempt. Never click if live UI already confirms the target.
      const alreadyCorrect=field==='aircraft'
@@ -478,7 +491,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
        mutationStarted=true;await save();
       },timeout);
      }
-     const verify=await inspectTarget(page,target,field==='aircraft'?desired:currentRegistration,timeout);
+     const verify=await inspectTarget(page,target,field==='aircraft'?desired:currentRegistration,timeout,markStage);
      if(field==='route'){
       // Route registration must be shown in the route-specific header after
       // save. An AJAX 200 alone is NOT confirmation.
@@ -505,7 +518,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   // Preserve only a stable, non-sensitive stage for unexpected native UI
   // exceptions. Never record raw exception/HTML/callbacks or input values.
   if(report.failureCode==='RENAME_UNCLASSIFIED_FAILURE'&&
-     report.stage.startsWith('PILOT_PREFLIGHT_'))
+     (report.stage.startsWith('PILOT_PREFLIGHT_')||report.stage.startsWith('PILOT_TARGET_')))
    report.failureCode='RENAME_PILOT_PREFLIGHT_UI_EXCEPTION';
   if(report.reason==='INITIALIZING')
    report.reason=operation==='pilot-check'?'RENAME_PILOT_CHECK_FAILED_READ_ONLY':
