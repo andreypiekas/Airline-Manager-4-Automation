@@ -74,6 +74,35 @@ com desempate por cobertura de assentos estática. Isso **não é lucro líquido
 nem demanda restante e nem previsão de ocupação real. Não descarta a possibilidade
 de rotas repetidas: apenas informa se o par é o da rota atual.
 
+### Consulta real de destinos curados (leitura, antes da decisão)
+
+Além das sugestões nativas, `optimization/catalog-live-reader.ts` agora seleciona
+no máximo **duas** rotas extras por aeronave pesquisada (`ROUTE_RESEARCH_CATALOG_QUERIES`,
+valores 0 a 5). Só consulta destinos com **um** airportId de referência,
+identidade de aeronave atual confirmada, pista/alcance aceitos na pré-triagem
+e não encontrados entre as sugestões já examinadas.
+
+Usa o próprio endpoint nativo **somente leitura** `new_route_info.php`
+sem `mode=do`, verifica resposta HTTP, aeronave, registration, airportId,
+origem e destino em duas fontes do painel, fecha pelo controle Back
+verificado e encerra diante de qualquer divergência. **Nunca** usa
+`Create route` nessa fase.
+
+As cotações confirmadas entram na mesma análise já existente de demanda
+restante, ida e volta, passageiros reservados por outras aeronaves, Auto Price,
+Fuel, CO2, A-check, reparos, taxa de troca e vantagem conservadora por hora.
+Somente a decisão `would_reroute` que passe TODOS os gates de comparação
+e controle nativo pode seguir para o `RouteMutationExecutor`, que
+reabre a tela, reconfirma o contexto, executa **no máximo uma tentativa
+por aeronave** e verifica a nova rota. Resultado incerto entra em quarentena
+persistente para impedir repetição cega.
+
+A presença de uma cotação live por si só **não** comprova demanda
+restante ou lucro. Rotas sem observação confiável do saldo de demanda
+continuam `hold`, não são trocadas. O limite por execução não significa
+que todas as possibilidades foram examinadas. O bot não usa telas de
+teste como prova de uma troca realizada em produção.
+
 ### Cobertura incompleta
 
 A versão atual do arquivo foi extraída de `All_routes.xlsx`, filtrado na
