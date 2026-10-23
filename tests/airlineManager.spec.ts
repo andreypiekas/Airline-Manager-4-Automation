@@ -265,7 +265,7 @@ test('All Operations', async ({ page }) => {
           try {
             await closeOpenPanel('recuperacao de campanhas somente leitura');
             const activeLabel = page.locator('td:visible')
-              .filter({ hasText: /^[^A-Za-z0-9]*Eco[\\s-]+friendly\\s*$/i });
+              .filter({ hasText: /^[^A-Za-z0-9]*Eco[\s-]+friendly\s*$/i });
             const newCampaign = page.getByRole('button', { name: /New campaign/i }).first();
             const panelOpen = await activeLabel.count() > 0 ||
               await newCampaign.isVisible({ timeout: 500 }).catch(() => false);
