@@ -24,6 +24,30 @@ test('same-run snapshot only reuses complete, unique identities with unchanged l
  expect(validatedDispatchSnapshot({...full(),aircraft:[{...seed(),issue:'invalid state'}]},1)).toBeNull();
 });
 
+test('inflight detail timeout does not trigger a second whole-fleet scan',()=>{
+ const unresolvedInflight={...seed(),aircraftId:'2',routeId:'11',registration:'',
+  from:'LHR',to:'TJM',routeLabel:'LHR - TJM',state:'inflight' as const,
+  capacity:null,remaining:null,dailyTotal:null,
+  issue:'Falha de carregamento, identidade ou leitura dos detalhes.'};
+ const snapshot:CollectionResult={aircraft:[seed(),unresolvedInflight],complete:true,expectedRoutes:2,warnings:[
+  'DETAILS_REASON:11:DETAILS_UI_TIMEOUT'
+ ]};
+ const reused=validatedDispatchSnapshot(snapshot,2);
+ expect(reused?.aircraft).toHaveLength(2);
+ expect(reused?.aircraft.filter(a=>a.state==='ready')).toHaveLength(1);
+ // Never permit the same missing-registration exception for a ready aircraft.
+ expect(validatedDispatchSnapshot({...snapshot,aircraft:[seed(),{
+  ...unresolvedInflight,state:'ready'
+ }]},2)).toBeNull();
+ // Native identity and airport-pair integrity remain mandatory even for inflight.
+ expect(validatedDispatchSnapshot({...snapshot,aircraft:[seed(),{
+  ...unresolvedInflight,aircraftId:'1'
+ }]},2)).toBeNull();
+ expect(validatedDispatchSnapshot({...snapshot,aircraft:[seed(),{
+  ...unresolvedInflight,from:''
+ }]},2)).toBeNull();
+});
+
 test('departure seeds global fleet once without opening every aircraft detail again',async({page})=>{
  // Native-looking local fixture; all network/game access is absent.
  await page.setContent(`<button id="popBtn1" onclick="$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);">Fleet</button>
