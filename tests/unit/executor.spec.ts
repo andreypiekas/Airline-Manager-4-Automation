@@ -8,10 +8,10 @@ import { hasIncompleteInitialDepartureCollection,hasUnverifiedFuelDeparture } fr
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
-function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number|'all';prepareFail?:boolean;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>}={}) {
+function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number|'all';prepareFail?:boolean|string;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>}={}) {
   let reads=0,clicks=0;const saved:ExecutionReport[]=[];
   const port:DeparturePort={collect:async()=>{reads++;if(options.collectFail)throw Error('loading');return options.initial??collection([snapshot()]);},
-    prepare:async a=>{if(options.prepareFail)throw Error('unverified');return options.prepared??snapshot(a);},
+    prepare:async a=>{if(options.prepareFail)throw Error(typeof options.prepareFail==='string'?options.prepareFail:'unverified');return options.prepared??snapshot(a);},
     depart:async()=>{clicks++;if(options.clickFail)throw Error('timeout');},
     confirm:async a=>options.confirmed===null?null:options.confirmed??snapshot({...a,state:'inflight',onboard:{Y:88,J:0,F:0},timing:flightCountdownObservation(a.aircraftId,a.routeId,'01:00:00',new Date().toISOString())})};
   const executor=new IndividualDepartureExecutor(port,readDemandConfig({}),{dryRun:options.dryRun??false,maxDepartures:options.limit??1,mutationDeadlineEpochMs:options.mutationDeadlineEpochMs,blockedDepartureKeys:options.blockedDepartureKeys,fuelHoldingLbsAtRunStart:options.fuelHoldingLbsAtRunStart,campaignVerified:options.campaignVerified,postReroutePricingBlockedAircraftIds:options.postReroutePricingBlockedAircraftIds,currentRouteFuelEvidence:options.currentRouteFuelEvidence},async r=>{if(options.saveFail&&r.entries.some(e=>e.status==='attempting'))throw Error('disk');saved.push(JSON.parse(JSON.stringify(r)));});
@@ -73,6 +73,26 @@ for(const [name,options] of Object.entries({
  'duplicate route':{initial:collection([snapshot(),snapshot({aircraftId:'2'})]),fresh:collection([snapshot(),snapshot({aircraftId:'2'})])},
  'control not verified':{prepareFail:true},
 })) test(`holds without clicks: ${name}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.summary.departed).toBe(0);expect(r.summary.held).toBeGreaterThan(0);expect(s.clicks()).toBe(0);});
+test('read-only preparation errors retain only fixed non-sensitive diagnostics and never authorize departure',async()=>{
+ for(const [raw,expectedCode] of [
+  ['RESEARCH_PAGINATION_INVALID','RESEARCH_PAGINATION_INVALID'],
+  ['DEPARTURE_HANDLER_UNVERIFIED','DEPARTURE_HANDLER_UNVERIFIED'],
+  ['locator.click: Timeout 15000ms exceeded; URL https://private.example/?secret=DO_NOT_LOG','PLAYWRIGHT_TIMEOUT'],
+  ['Session token DO_NOT_LOG, private DOM data','UNCLASSIFIED']
+ ] as const){
+  const s=setup({prepareFail:raw});
+  const report=await s.executor.run();
+  expect(report.entries[0]).toMatchObject({
+   status:'held',reason:'DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED',
+   prepareFailureCode:expectedCode
+  });
+  expect(report.halted).toBe(false);
+  expect(s.clicks()).toBe(0);
+  expect(JSON.stringify(report)).not.toContain('DO_NOT_LOG');
+  expect(s.saved[s.saved.length-1]?.entries[0].prepareFailureCode).toBe(expectedCode);
+ }
+});
+
 test('incomplete second fleet collection must fail the operational run rather than appear green',async()=>{
   const blocked=setup({initial:collection([snapshot()],false)});
   const report=await blocked.executor.run();
