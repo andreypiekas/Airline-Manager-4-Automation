@@ -66,11 +66,13 @@ function verifiedHistoricalFuelRequirement(a:AircraftSnapshot):{fuelLbs:number;s
   if(!history||history.status!=='observed'||!Array.isArray(history.entries))return null;
   const pair=routePairKey(a.from,a.to);
   const matching=history.entries.filter(e=>routePairKey(e.from,e.to)===pair&&Number.isSafeInteger(e.fuelLbs)&&e.fuelLbs>0);
-  // Two independent observations of the same airport pair with the exact same
-  // fuel value are sufficient to establish a conservative route requirement.
+  // Fuel varies slightly between departures on the SAME aircraft/airport pair.
+  // Requiring identical history values held every ready aircraft in run #862.
+  // Reserve the highest actually observed consumption (never the average/minimum),
+  // while retaining the two-observation gate and all fresh UI/departure checks.
+  // This is a conservative historical stock budget, NOT a fabricated game quote.
   if(matching.length<2)return null;
-  const values=[...new Set(matching.map(e=>e.fuelLbs))];
-  return values.length===1?{fuelLbs:values[0],samples:matching.length}:null;
+  return {fuelLbs:Math.max(...matching.map(e=>e.fuelLbs)),samples:matching.length};
 }
 function verifiedCurrentRouteFuelRequirement(
   a:AircraftSnapshot,
