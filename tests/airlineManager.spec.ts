@@ -258,6 +258,54 @@ test('All Operations', async ({ page }) => {
       } catch (error) {
         const reason=(error as Error)?.message || 'UNCLASSIFIED';
         if(reason==='INTERACTIVE_CHALLENGE_DETECTED_STOP') throw error;
+        // An obscured Marketing control may be caused by a transient popup.
+        // Recover at most once, and ONLY by reading uniquely active campaigns.
+        // Never retry createCampaign(): a purchase may already have occurred.
+        if (reason === 'UI_CONTROL_OBSCURED') {
+          try {
+            await closeOpenPanel('recuperacao de campanhas somente leitura');
+            const activeLabel = page.locator('td:visible')
+              .filter({ hasText: /^[^A-Za-z0-9]*Eco[\\s-]+friendly\\s*$/i });
+            const newCampaign = page.getByRole('button', { name: /New campaign/i }).first();
+            const panelOpen = await activeLabel.count() > 0 ||
+              await newCampaign.isVisible({ timeout: 500 }).catch(() => false);
+            if (!panelOpen) {
+              if (!await marketingButton.isVisible({ timeout: 500 }).catch(() => false)) {
+                const count = await campaignMenuCandidates.count();
+                let menuFound = false;
+                for (let i = 0; i < count; i++) {
+                  const candidate = campaignMenuCandidates.nth(i);
+                  if (!await candidate.isVisible({ timeout: 300 }).catch(() => false)) continue;
+                  try {
+                    await GeneralUtils.moveAndClick(page, candidate, 5000);
+                    await marketingButton.waitFor({ state: 'visible', timeout: 4000 });
+                    menuFound = true;
+                    break;
+                  } catch (menuError) {
+                    if ((menuError as Error)?.message === 'INTERACTIVE_CHALLENGE_DETECTED_STOP')
+                      throw menuError;
+                  }
+                }
+                if (!menuFound) throw new Error('READONLY_MARKETING_MENU_NOT_VERIFIED');
+              }
+              await GeneralUtils.moveAndClick(page, marketingButton, 5000);
+            }
+            const recovered = await campaignUtils.verifyRequiredCampaignsReadOnly();
+            if (recovered.allRequiredVerified) {
+              campaignVerifiedForDeparture = true;
+              recordOperationalModule('campaign', 'verified_active',
+                { ...recovered, recovery: 'OBSCURED_UI_READONLY_ACTIVE_VERIFIED' });
+              console.log('[Campaign] Recuperacao somente leitura confirmou campanhas ativas.');
+              return true;
+            }
+            console.warn('[Campaign] Recuperacao somente leitura nao comprovou campanhas ativas.');
+          } catch (recoveryError) {
+            if ((recoveryError as Error)?.message === 'INTERACTIVE_CHALLENGE_DETECTED_STOP')
+              throw recoveryError;
+            console.warn('[Campaign] Recuperacao somente leitura falhou: ' +
+              ((recoveryError as Error)?.message || 'UNCLASSIFIED'));
+          }
+        }
         campaignVerifiedForDeparture=false;
         console.warn('[Campaign] Validacao incompleta; decolagens ficarao em HOLD: '+reason);
         recordOperationalModule('campaign','unverified',{
