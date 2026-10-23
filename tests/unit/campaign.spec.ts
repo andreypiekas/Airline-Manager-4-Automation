@@ -241,3 +241,51 @@ test('unconfirmed campaign never authorizes departure',async({page})=>{
   expect(evidence.departureAuthorized).toBe(false);
  });
 });
+
+test('read-only recovery verifies unique active campaigns without purchases or menu clicks',async({page})=>{
+ await withReputation('true',async()=>{
+  await page.setContent(`
+   <button id="marketing">Marketing</button>
+   <button id="buy">$ 1000</button>
+   <table><tr><td>Eco-friendly</td></tr><tr><td>Airline reputation</td></tr></table>
+   <script>
+    window.clicks=0;
+    document.querySelector('#buy').onclick=()=>window.clicks++;
+    document.querySelector('#marketing').onclick=()=>window.clicks++;
+   </script>
+  `);
+  const evidence=await new CampaignUtils(page).verifyRequiredCampaignsReadOnly();
+  expect(evidence).toMatchObject({
+   allRequiredVerified:true,departureAuthorized:true,
+   ecoFriendly:{status:'already_active',purchaseAttempted:false,verifiedActive:true},
+   airlineReputation:{status:'already_active',purchaseAttempted:false,verifiedActive:true}
+  });
+  expect(await page.evaluate(()=>(window as any).clicks)).toBe(0);
+ });
+});
+
+test('read-only recovery fails closed if required reputation is missing',async({page})=>{
+ await withReputation('true',async()=>{
+  await page.setContent('<table><tr><td>Eco-friendly</td></tr></table><button>$ 1000</button>');
+  const evidence=await new CampaignUtils(page).verifyRequiredCampaignsReadOnly();
+  expect(evidence.departureAuthorized).toBe(false);
+  expect(evidence.airlineReputation).toMatchObject({
+   status:'unverified',purchaseAttempted:false,verifiedActive:false
+  });
+ });
+});
+
+test('read-only recovery rejects duplicate or hidden stale active labels',async({page})=>{
+ await withReputation('false',async()=>{
+  await page.setContent(`
+   <table style="display:none"><tr><td>Eco-friendly</td></tr></table>
+   <table><tr><td>Eco-friendly</td></tr><tr><td>Eco-friendly</td></tr></table>
+  `);
+  const evidence=await new CampaignUtils(page).verifyRequiredCampaignsReadOnly();
+  expect(evidence.departureAuthorized).toBe(false);
+  expect(evidence.ecoFriendly).toMatchObject({
+   status:'unverified',purchaseAttempted:false,verifiedActive:false,
+   reason:'READONLY_ACTIVE_NOT_UNIQUE_OR_MISSING'
+  });
+ });
+});
