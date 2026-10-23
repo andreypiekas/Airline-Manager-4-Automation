@@ -284,6 +284,28 @@ test('variable historical fuel values reserve the maximum rather than blocking q
  }});
 });
 
+test('larger fresh current-route quote overrides historical maximum when budgeting stock',async()=>{
+ const history={status:'observed' as const,observedAt:new Date().toISOString(),
+  source:'inspected-aircraft-flight-history' as const,complete:false as const,
+  comparisonReady:false as const,mutationAuthorized:false as const,entries:[
+   {relativeTime:'1 hour ago',from:'AAA',to:'GRU',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:150000,revenue:1000},
+   {relativeTime:'2 hours ago',from:'GRU',to:'AAA',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:160000,revenue:1000}
+  ]};
+ const aircraft=snapshot({flightHistory:history});
+ const quotes=new Map([[aircraft.aircraftId,{
+  aircraftId:aircraft.aircraftId,routeId:aircraft.routeId,from:aircraft.from,to:aircraft.to,
+  fuelLbs:190000,observedAt:new Date().toISOString()
+ }]]);
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,
+  fuelHoldingLbsAtRunStart:180000,currentRouteFuelEvidence:quotes});
+ const report=await s.executor.run();
+ expect(s.clicks()).toBe(0);
+ expect(report.entries[0]).toMatchObject({status:'held',
+  reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY',
+  resourceEvidence:{verifiedRouteFuelLbs:190000,fuelEvidenceSource:'current-route-quote',matchingHistorySamples:2}
+ });
+});
+
 test('variable fuel history blocks safely when stock covers only the lower sample',async()=>{
  const history={status:'observed' as const,observedAt:new Date().toISOString(),
   source:'inspected-aircraft-flight-history' as const,complete:false as const,
