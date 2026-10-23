@@ -2,6 +2,15 @@ export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):
   return report.entries.some(e=>e.reason==='INITIAL_COLLECTION_INCOMPLETE');
 }
 
+/** A green workflow must not mask ready, demand-qualified flights blocked
+ * solely because the fuel requirement could not be independently established.
+ * Retain the safe HOLD and all persisted checkpoints; report an operational failure.
+ */
+export function hasUnverifiedFuelDeparture(report:ExecutionReport):boolean {
+  return report.entries.some(e=>e.status==='held'&&e.reason==='FUEL_REQUIREMENT_UNVERIFIED'&&
+    e.demand?.decision==='would_depart');
+}
+
 import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -165,6 +174,16 @@ export async function runDemandExecution(
       message:'Relatorio persistido; acoes confirmadas nao serao repetidas nesta run.'
     }));
     throw Error('DEMAND_EXECUTION_INCOMPLETE_TIME_BUDGET');
+  }
+  if(!settings.dryRun&&hasUnverifiedFuelDeparture(report)){
+    const heldByFuel=report.entries.filter(e=>e.status==='held'&&
+      e.reason==='FUEL_REQUIREMENT_UNVERIFIED').length;
+    console.error('[DepartureFuel] '+JSON.stringify({
+      status:'INCOMPLETE_DUE_TO_UNVERIFIED_FUEL_REQUIREMENT',
+      departed:report.summary.departed,heldByFuel,
+      message:'Sem consumo verificado: sem clique; relatorio preservado para diagnostico.'
+    }));
+    throw Error('DEMAND_EXECUTION_INCOMPLETE_FUEL_EVIDENCE');
   }
   return report;
 }
