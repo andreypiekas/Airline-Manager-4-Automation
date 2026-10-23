@@ -156,7 +156,7 @@ export async function researchFleetCandidates(page: Page, collection: Collection
           entry.result.quotes.push(...entry.catalogLive.quotes);
           entry.result.screenedOut.push(...entry.catalogLive.screenedOut);
           entry.result.warnings.push(...entry.catalogLive.warnings);
-          entry.result.scanned+=entry.catalogLive.observed;
+          entry.result.scanned+=entry.catalogLive.attempted;
           if(entry.catalogLive.stoppedEarly)entry.status='partial';
         }
       }
