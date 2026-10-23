@@ -123,7 +123,7 @@ async function setNativeResponseTarget(page:Page,responseId:string){
  await page.locator('#detailsAction button[onclick]').evaluateAll((elements,id)=>{
   for(const el of elements){
    const old=el.getAttribute('onclick')||'';
-   el.setAttribute('onclick',old.replace(",'detailsAction',this);",",'"+id+"',this);"));
+   el.setAttribute('onclick',old.replace(/,'[A-Za-z][A-Za-z0-9_-]{0,90}',this\);$/,",'"+id+"',this);"));
   }
  },responseId);
 }
