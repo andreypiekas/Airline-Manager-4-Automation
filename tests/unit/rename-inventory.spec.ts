@@ -29,7 +29,13 @@ async function fixture(page:Page,options:{short?:boolean;duplicate?:boolean;sibl
 }
 test('fast identity-only inventory covers all native Fleet pages without opening details',async({page})=>{
  await fixture(page);
- const result=await collectRenameInventory(page,1600);
+ const stages:string[]=[];
+ const result=await collectRenameInventory(page,1600,stage=>stages.push(stage));
+ expect(stages).toEqual([
+  'COLLECT_FLEET_PAGE_1_WAIT_ROWS','COLLECT_FLEET_PAGE_1_READ_CARDS',
+  'COLLECT_FLEET_PAGE_1_NEXT','COLLECT_FLEET_PAGE_2_WAIT_ROWS',
+  'COLLECT_FLEET_PAGE_2_READ_CARDS'
+ ]);
  expect(result.complete).toBe(true);
  expect(result.expectedRoutes).toBe(21);
  expect(result.aircraft).toHaveLength(21);
@@ -38,6 +44,22 @@ test('fast identity-only inventory covers all native Fleet pages without opening
  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(1);
  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
 });
+test('partial page timeout records safe page stage without inventing a fleet',async({page})=>{
+ await fixture(page,{short:true});
+ const stages:string[]=[];
+ await expect(collectRenameInventory(page,250,stage=>stages.push(stage))).rejects.toThrow();
+ expect(stages).toEqual(['COLLECT_FLEET_PAGE_1_WAIT_ROWS']);
+ expect(stages.join(' ')).not.toContain('1001');
+ expect(stages.join(' ')).not.toContain('AAA');
+ expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+});
+test('only read-only manual runs receive a longer page timeout',async()=>{
+ const source=await (await import('node:fs/promises')).readFile('fleet-rename/run.ts','utf8');
+ expect(source).toContain("const timeout=operation==='preview'||operation==='pilot-check'?25000:14000;");
+ expect(source).toContain('collectRenameInventory(page,timeout,markStage)');
+ expect(source).toContain("if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT')");
+});
+
 test('Fleet inventory accepts a unique ID-matched registration sibling, not a foreign or ambiguous name',async({page})=>{
  await fixture(page,{siblingRegistration:true});
  const result=await collectRenameInventory(page,1400);
