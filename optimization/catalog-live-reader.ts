@@ -63,7 +63,7 @@ const closeVerifiedQuote=async(page:Page,timeout:number)=>{
   if(await panel.count()!==1||!await panel.isVisible()||await back.count()!==1||
     !await back.isVisible()||!await back.isEnabled())throw new Error('CATALOG_QUOTE_BACK_CONTROL_UNVERIFIED');
   const onclick=await back.getAttribute('onclick')||'';
-  if(!/^\\$\\('#newRouteInfo'\\)\\.hide\\('fast'\\);playSound\\('neutral_click'\\);(?:\\/\\*(?:(?!\\*\\/)[\\s\\S])*\\*\\/)?$/.test(onclick))
+  if(!/^\$\('#newRouteInfo'\)\.hide\('fast'\);playSound\('neutral_click'\);(?:\/\*(?:(?!\*\/)[\s\S])*\*\/)?$/.test(onclick))
     throw new Error('CATALOG_QUOTE_BACK_CONTROL_UNVERIFIED');
   await back.click({timeout});
   await panel.waitFor({state:'hidden',timeout});
@@ -87,7 +87,7 @@ export async function collectLiveCatalogQuotes(
   };
   const age=Date.now()-Date.parse(aircraft.observedAt);
   if(!Number.isFinite(age)||age<0||age>300000||aircraft.issue||aircraft.state!=='ready'||
-    aircraft.from!==origin||!exact(origin)||!/^[1-9]\\d*$/.test(aircraft.aircraftId)||
+    aircraft.from!==origin||!exact(origin)||!/^[1-9]\d*$/.test(aircraft.aircraftId)||
     !aircraft.registration){
     output.warnings.push('CATALOG_LIVE_AIRCRAFT_CONTEXT_UNVERIFIED');
     return output;
@@ -95,7 +95,7 @@ export async function collectLiveCatalogQuotes(
   const ids=new Set<string>();
   for(const target of targets){
     if(!exact(target.from)||target.from!==origin||!exact(target.to)||target.to===origin||
-      !/^[1-9]\\d*$/.test(target.airportId)||ids.has(target.airportId)){
+      !/^[1-9]\d*$/.test(target.airportId)||ids.has(target.airportId)){
       output.stoppedEarly=true;
       output.warnings.push('CATALOG_LIVE_TARGET_AMBIGUOUS');
       break;
@@ -107,9 +107,9 @@ export async function collectLiveCatalogQuotes(
       const trigger=page.locator('#flightInfoContainer #introSuggest');
       if(await trigger.count()!==1||!await trigger.isVisible()||
         !await trigger.isEnabled())throw new Error('CATALOG_PLANNER_CONTROL_UNVERIFIED');
-      const onclick=(await trigger.getAttribute('onclick')||'').replace(/\\s/g,'');
+      const onclick=(await trigger.getAttribute('onclick')||'').replace(/\s/g,'');
       const expected=`playSound('neutral_click');Ajax('add_airports.php?mode=suggest&id=${aircraft.aircraftId}','runme',this,false,true);`;
-      if(!onclick.startsWith(expected.replace(/\\s/g,'')))
+      if(!onclick.startsWith(expected.replace(/\s/g,'')))
         throw new Error('CATALOG_PLANNER_CONTEXT_UNVERIFIED');
       const panel=page.locator('#newRouteInfo');
       if(await panel.count()!==1||await panel.isVisible())throw new Error('CATALOG_PREVIOUS_PANEL_NOT_CLOSED');
