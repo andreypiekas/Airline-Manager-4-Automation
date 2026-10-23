@@ -1,6 +1,6 @@
 import {test,expect,type Page} from '@playwright/test';
 import {authorizeSingleAircraftPilot,selectSingleAircraftPilotTarget,type RenamePlan,type RenameTarget} from '../../fleet-rename/plan';
-import {nativeTextSaveQueryKey,preflightNativeTextEditors,saveNativeTextField,diagnoseNativeTextInputs,type NativeInputDiagnostic} from '../../fleet-rename/native-pilot';
+import {nativeTextSaveQueryKey,parseNativeTextSaveHandler,verifiedNativeResponseTarget,preflightNativeTextEditors,saveNativeTextField,diagnoseNativeTextInputs,type NativeInputDiagnostic} from '../../fleet-rename/native-pilot';
 import {readFile} from 'node:fs/promises';
 import {runManualFleetRename,verifiedReadOnlyNativeOpener} from '../../fleet-rename/run';
 
@@ -117,6 +117,104 @@ test('one native click saves exactly one field only after checkpoint',async({pag
  expect(new URL(saves[0]).searchParams.get('reg')).toBe('XP-001');
  expect(await page.locator('#saveR').isVisible()).toBe(false);
 });
+/** Synthetic AJAX destination aliases must be verified against the exact
+ * live details root. The real game is not contacted in these tests. */
+async function setNativeResponseTarget(page:Page,responseId:string){
+ await page.locator('#detailsAction button[onclick]').evaluateAll((elements,id)=>{
+  for(const el of elements){
+   const old=el.getAttribute('onclick')||'';
+   el.setAttribute('onclick',old.replace(",'detailsAction',this);",",'"+id+"',this);"));
+  }
+ },responseId);
+}
+test('alternate native response destination is accepted only as a unique details ancestor',async({page})=>{
+ await fixture(page);
+ await page.locator('#detailsAction').evaluate(root=>{
+  const parent=document.createElement('div');parent.id='fleetActionPane';
+  root.parentElement!.insertBefore(parent,root);parent.appendChild(root);
+ });
+ await setNativeResponseTarget(page,'fleetActionPane');
+ const notes:NativeInputDiagnostic[]=[];
+ const editors=await preflightNativeTextEditors(page.locator('#detailsAction'),target,()=>{},d=>notes.push(d));
+ expect(editors).toHaveLength(2);
+ expect(editors.map(e=>e.responseTargetId)).toEqual(['fleetActionPane','fleetActionPane']);
+ expect(notes.map(d=>d.classification)).toEqual(['MATCHED','MATCHED']);
+ expect(notes.every(d=>d.syntaxEvidence.expectedAjaxResponseContainer===false)).toBe(true);
+ expect(notes.every(d=>d.syntaxEvidence.verifiedResponseContainerInDOM===true)).toBe(true);
+ expect(JSON.stringify(notes)).not.toContain('fleetActionPane');
+ expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
+ const result=await page.locator('#saveA').getAttribute('onclick')||'';
+ expect(nativeTextSaveQueryKey(result,'1001','reg','regInput')).toBeNull();
+ expect(parseNativeTextSaveHandler(result,'1001','reg','regInput')).toEqual({
+  queryKey:'reg',responseTargetId:'fleetActionPane'
+ });
+ const saves:string[]=[];
+ await page.route('https://www.airlinemanager.com/fleet_details.php?*',route=>{
+  saves.push(route.request().url());
+  return route.fulfill({status:200,contentType:'text/plain',body:'OK'});
+ });
+ let checked=false;
+ await saveNativeTextField(page,editors[0],'XP-001',async()=>{
+  checked=true;expect(saves).toHaveLength(0);
+ },2500);
+ expect(checked).toBe(true);
+ expect(saves).toHaveLength(1);
+ expect(new URL(saves[0]).searchParams.get('reg')).toBe('XP-001');
+});
+test('missing, unrelated and duplicate response targets fail closed before Save',async({page})=>{
+ await fixture(page);
+ for(const id of ['missingPane','unrelatedPane','duplicatePane']){
+  if(id==='unrelatedPane')await page.evaluate(()=>{
+   const other=document.createElement('div');other.id='unrelatedPane';document.body.appendChild(other);
+  });
+  if(id==='duplicatePane')await page.evaluate(()=>{
+   for(let i=0;i<2;i++){const other=document.createElement('div');other.id='duplicatePane';document.body.appendChild(other);}
+  });
+  await setNativeResponseTarget(page,id);
+  expect(await verifiedNativeResponseTarget(page.locator('#detailsAction'),id)).toBe(false);
+  const notes:NativeInputDiagnostic[]=[];
+  await expect(preflightNativeTextEditors(page.locator('#detailsAction'),target,()=>{},d=>notes.push(d)))
+   .rejects.toThrow('RENAME_PILOT_NATIVE_SAVE_SYNTAX_UNSUPPORTED');
+  expect(notes).toHaveLength(1);
+  expect(notes[0].syntaxEvidence.verifiedResponseContainerInDOM).toBe(false);
+  expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
+ }
+});
+test('changed native response destination after preflight is rejected before input or Save',async({page})=>{
+ await fixture(page);
+ await page.locator('#detailsAction').evaluate(root=>{
+  const parent=document.createElement('div');parent.id='fleetActionPane';
+  root.parentElement!.insertBefore(parent,root);parent.appendChild(root);
+ });
+ await setNativeResponseTarget(page,'fleetActionPane');
+ const editors=await preflightNativeTextEditors(page.locator('#detailsAction'),target);
+ await setNativeResponseTarget(page,'missingPane');
+ let checkpointed=false;
+ await expect(saveNativeTextField(page,editors[0],'XP-001',async()=>{checkpointed=true;},2500))
+  .rejects.toThrow('RENAME_PILOT_EDITOR_CHANGED');
+ expect(checkpointed).toBe(false);
+ expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
+});
+test('injected native callback suffix and extra AJAX remain blocked',async({page})=>{
+ await fixture(page);
+ await page.locator('#detailsAction').evaluate(root=>{
+  const parent=document.createElement('div');parent.id='fleetActionPane';
+  root.parentElement!.insertBefore(parent,root);parent.appendChild(root);
+ });
+ await setNativeResponseTarget(page,'fleetActionPane');
+ for(const malicious of [
+  "playSound('neutral_click');Ajax('fleet_details.php?id=1001&mode=reg&reg='+$('#regInput').val(),'fleetActionPane',this);alert(1);",
+  "playSound('neutral_click');Ajax('fleet_details.php?id=1002&mode=reg&reg='+$('#regInput').val(),'fleetActionPane',this);",
+  "playSound('neutral_click');Ajax('fleet_details.php?id=1001&mode=reg&reg='+$('#regInput').val(),'fleetActionPane',this);Ajax('extra');"
+ ]){
+  await page.locator('#saveA').evaluate((el,s)=>el.setAttribute('onclick',s),malicious);
+  expect(parseNativeTextSaveHandler(malicious,'1001','reg','regInput')).toBeNull();
+  await expect(preflightNativeTextEditors(page.locator('#detailsAction'),target))
+   .rejects.toThrow(/RENAME_PILOT_(NATIVE_SAVE_SYNTAX_UNSUPPORTED|EDITOR_AMBIGUOUS)/);
+  expect(await page.evaluate(()=>(window as any).gameSaves)).toEqual([]);
+ }
+});
+
 test('pilot is manual; full-fleet apply remains disabled',async()=>{
  const flow=await readFile('.github/workflows/manual-fleet-rename.yml','utf8');
  const script=await readFile('fleet-rename/run.ts','utf8');
