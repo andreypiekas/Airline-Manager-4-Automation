@@ -37,6 +37,26 @@ export function validatedDispatchSnapshot(
   return {...snapshot,aircraft:snapshot.aircraft.map(a=>({...a})),warnings:[...snapshot.warnings]};
 }
 
+/** Log only allowlisted categories for failed post-click, read-only confirmation attempts.
+ * Never persist raw Playwright errors: they may contain DOM, URLs or private data.
+ * This does not authorize departure or retry a native click.
+ */
+const SAFE_CONFIRM_READ_FAILURE_CODES=new Set([
+  'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
+  'RESEARCH_ROUTE_COUNT_UNAVAILABLE','RESEARCH_PAGINATION_INVALID',
+  'RESEARCH_ROUTE_NOT_FOUND','RESEARCH_PAGINATION_CONTROL_UNVERIFIED',
+  'RESEARCH_PAGINATION_LIMIT','RESEARCH_ROUTE_NOT_AVAILABLE',
+  'RESEARCH_IDENTITY_INVALID','RESEARCH_STATE_UNAVAILABLE',
+  'RESEARCH_CONTEXT_CHANGED','RESEARCH_NOT_READY','DETAILS_CARD_NOT_VISIBLE',
+  'INTERACTIVE_CHALLENGE_DETECTED_STOP','UI_CONTROL_OBSCURED'
+]);
+export function safeDepartureConfirmReadCode(error:unknown):string {
+  const message=error instanceof Error?error.message:'';
+  if(SAFE_CONFIRM_READ_FAILURE_CODES.has(message))return message;
+  if(/timeout/i.test(message))return 'PLAYWRIGHT_TIMEOUT';
+  return 'UNCLASSIFIED';
+}
+
 export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
   private verifiedRouteCount:number|null=null;
@@ -140,8 +160,11 @@ export class PlaywrightDeparturePort implements DeparturePort {
         await findFleetRoute(this.page,expected,this.timeout);
         last=await new DemandReader(this.page,this.timeout,true).readAircraftDetails(expected);
         if(last.state==='inflight')return last;
-      }catch{
-        // Safe read retry only; no mutation is repeated.
+      }catch(error){
+        // Read-only retry only. Persist a fixed category, never a raw browser error.
+        console.warn('[DepartureConfirmRead] '+JSON.stringify({
+          attempt:attempt+1,code:safeDepartureConfirmReadCode(error)
+        }));
       }
     }
     return last;
