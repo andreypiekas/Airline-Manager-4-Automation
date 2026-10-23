@@ -17,6 +17,8 @@ import type {RenameTarget} from './plan';
 type NativeMode='reg'|'routeReg';
 export type VerifiedNativeTextEditor={
  field:RenamePhase; targetId:string;mode:NativeMode;queryKey:string;
+ /** Native AJAX response destination, verified as details root or its ancestor. */
+ responseTargetId:string;
  button:Locator;input:Locator;opener:Locator;
 };
 
@@ -25,17 +27,50 @@ export type VerifiedNativeTextEditor={
  * for the selected route/aircraft and selected input. This is NOT an
  * authorization to forge a request; saves always click the verified UI.
  */
-export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode,inputId:string):string|null{
+/** Parse ONLY the native, fully anchored Ajax grammar; the returned target
+ * still needs an independent DOM containment check before any Save is legal.
+ * No request construction or execution happens here.
+ */
+export function parseNativeTextSaveHandler(
+ callback:string,id:string,mode:NativeMode,inputId:string
+):{queryKey:string;responseTargetId:string}|null{
  if(!/^[1-9]\d*$/.test(id)||!/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(inputId))return null;
  if(callback.length>600)return null;
  const compact=callback.replace(/\s/g,'');
  const exact=new RegExp(
   "^playSound\\('neutral_click'\\);Ajax\\('fleet_details\\.php\\?id="+id+
   "&mode="+mode+"&([A-Za-z_][A-Za-z0-9_]{0,24})='\\+\\$\\('#"+inputId+
-  "'\\)\\.val\\(\\),'detailsAction',this\\);$");
- const matched=exact.exec(compact);
- const key=matched?.[1]||'';
- return key&&key!=='id'&&key!=='mode'?key:null;
+  "'\\)\\.val\\(\\),'([A-Za-z][A-Za-z0-9_-]{0,90})',this\\);$");
+ const match=exact.exec(compact),queryKey=match?.[1]||'',responseTargetId=match?.[2]||'';
+ if(!queryKey||queryKey==='id'||queryKey==='mode'||!responseTargetId)return null;
+ return {queryKey,responseTargetId};
+}
+
+/** Backward-compatible strict helper: only the previously approved literal
+ * response destination passes. For alternative native destinations, callers
+ * MUST perform the independent DOM verification in preflight and before Save.
+ */
+export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode,inputId:string):string|null{
+ const parsed=parseNativeTextSaveHandler(callback,id,mode,inputId);
+ return parsed?.responseTargetId==='detailsAction'?parsed.queryKey:null;
+}
+
+/** Read-only validation: destination is a unique existing DOM node containing
+ * the verified details root, or the root itself. Never accept unrelated,
+ * duplicate or document-wide response regions. No selector source is logged.
+ */
+export async function verifiedNativeResponseTarget(
+ details:Locator,responseTargetId:string
+):Promise<boolean>{
+ if(!/^[A-Za-z][A-Za-z0-9_-]{0,90}$/.test(responseTargetId))return false;
+ return details.evaluate((root,targetId)=>{
+  if(!(root instanceof HTMLElement)||root.id!=='detailsAction')return false;
+  const nodes=document.querySelectorAll('[id="'+targetId+'"]');
+  if(nodes.length!==1)return false;
+  const target=nodes[0];
+  return target!==document.body&&target!==document.documentElement&&
+   (target===root||target.contains(root));
+ },responseTargetId);
 }
 
 /** Bounded, read-only evidence: only boolean grammar indicators are persisted. Never persist native JavaScript,
@@ -46,6 +81,7 @@ export type NativeSaveSyntaxEvidence={
  expectedAjaxResponseContainer:boolean;
  exactlyOneAjaxCall:boolean;
  callbackWithinLimit:boolean;
+ verifiedResponseContainerInDOM?:boolean;
 };
 export type NativeInputDiagnostic={
  field:RenamePhase;inputCount:number;textInputCount:number;
@@ -136,11 +172,22 @@ export async function preflightNativeTextEditors(
    el instanceof HTMLInputElement&&(el.type==='text'||el.type==='search')?
     el.id||'':''
   ));
-  const {matching,diagnostic}=diagnoseNativeTextInputs(callback,id,mode,inputIds,field);
+  const {diagnostic}=diagnoseNativeTextInputs(callback,id,mode,inputIds,field);
+  // A native response destination differing from the historical literal is
+  // acceptable ONLY if the same exact handler syntax is recognized and the
+  // destination uniquely contains the live, identity-checked details region.
+  const parsed=inputIds.flatMap((inputId,index)=>{
+   const handler=inputId?parseNativeTextSaveHandler(callback,id,mode,inputId):null;
+   return handler?[{index,handler}]:[];
+  });
+  const responseTargetVerified=parsed.length===1&&
+   await verifiedNativeResponseTarget(details,parsed[0].handler.responseTargetId);
+  const matching=responseTargetVerified?[parsed[0].index]:[];
+  diagnostic.strictNativeMatchCount=matching.length;
+  diagnostic.syntaxEvidence.verifiedResponseContainerInDOM=responseTargetVerified;
+  if(responseTargetVerified)diagnostic.classification='MATCHED';
   onDiagnostic(diagnostic);
   if(matching.length!==1){
-   // Zero native matches might mean no suitable input, no .val() reference,
-   // or a genuinely different Ajax grammar. Never guess or click on Save.
    if(diagnostic.classification==='NO_TEXT_INPUT')
     throw Error('RENAME_PILOT_NO_TEXT_INPUT');
    if(diagnostic.classification==='NO_VALUE_REFERENCE')
@@ -149,9 +196,10 @@ export async function preflightNativeTextEditors(
     throw Error('RENAME_PILOT_NATIVE_SAVE_SYNTAX_UNSUPPORTED');
    throw Error('RENAME_PILOT_INPUT_AMBIGUOUS');
   }
+  const responseTargetId=parsed[0].handler.responseTargetId;
+  const queryKey=parsed[0].handler.queryKey;
   const input=inputs.nth(matching[0]);
   const inputId=inputIds[matching[0]];
-  const queryKey=nativeTextSaveQueryKey(callback,id,mode,inputId);
   if(!queryKey||await details.locator('[id="'+inputId+'"]').count()!==1||
      !await input.isEnabled()||!await input.isEditable())
    throw Error('RENAME_PILOT_INPUT_UNVERIFIED');
@@ -177,7 +225,7 @@ export async function preflightNativeTextEditors(
     matches.push({index:i,code});
   }
   if(matches.length!==1)throw Error('RENAME_PILOT_OPENER_UNVERIFIED');
-  results.push({field,targetId:id,mode,queryKey,button,input,
+  results.push({field,targetId:id,mode,queryKey,responseTargetId,button,input,
    opener:controls.nth(matches[0].index)});
  }
  if(results.length!==2)throw Error('RENAME_PILOT_TWO_FIELDS_REQUIRED');
@@ -204,7 +252,10 @@ export async function saveNativeTextField(
   throw Error('RENAME_PILOT_EDITOR_NOT_VISIBLE');
  const cb=await editor.button.getAttribute('onclick')||'';
  const inputId=await editor.input.getAttribute('id')||'';
- if(nativeTextSaveQueryKey(cb,editor.targetId,editor.mode,inputId)!==editor.queryKey)
+ const parsed=parseNativeTextSaveHandler(cb,editor.targetId,editor.mode,inputId);
+ if(!parsed||parsed.queryKey!==editor.queryKey||
+    parsed.responseTargetId!==editor.responseTargetId||
+    !await verifiedNativeResponseTarget(page.locator('#detailsAction'),editor.responseTargetId))
   throw Error('RENAME_PILOT_EDITOR_CHANGED');
  if(await editor.input.getAttribute('oninput')||await editor.input.getAttribute('onchange')||
     await editor.input.getAttribute('onkeyup')||await editor.input.getAttribute('onblur'))
