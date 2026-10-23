@@ -36,6 +36,8 @@ export interface ExecutionEntry {
   reason: string; demand: DemandDecision | null; actualOnboard: AircraftSnapshot['onboard'];
   /** Verified onboard × freshly observed fares. Estimate only, not the Finance ledger. */
   estimatedGrossTicketRevenue?: number | null;
+  /** Fixed, non-sensitive failure category for read-only departure preparation. Never a raw browser error. */
+  prepareFailureCode?: string;
   resourceEvidence?: {
     fuelHoldingLbsAtRunStart:number;
     fuelCommittedBefore:number;
@@ -86,6 +88,24 @@ function verifiedCurrentRouteFuelRequirement(
   const age=now-Date.parse(e.observedAt);
   if(!Number.isFinite(age)||age<0||age>maxAgeSeconds*1000)return null;
   return {fuelLbs:e.fuelLbs,samples:0};
+}
+
+const SAFE_PREPARE_FAILURE_CODES=new Set([
+  'DEPARTURE_FLEET_COUNT_CHANGED','DEPARTURE_HANDLER_UNVERIFIED',
+  'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
+  'RESEARCH_ROUTE_COUNT_UNAVAILABLE','RESEARCH_PAGINATION_INVALID',
+  'RESEARCH_ROUTE_NOT_FOUND','RESEARCH_PAGINATION_CONTROL_UNVERIFIED',
+  'RESEARCH_PAGINATION_LIMIT','RESEARCH_ROUTE_NOT_AVAILABLE',
+  'RESEARCH_IDENTITY_INVALID','RESEARCH_STATE_UNAVAILABLE',
+  'RESEARCH_CONTEXT_CHANGED','RESEARCH_NOT_READY','DETAILS_CARD_NOT_VISIBLE',
+  'INTERACTIVE_CHALLENGE_DETECTED_STOP'
+]);
+/** Persist only fixed diagnostic codes. Playwright errors may contain DOM, URLs or private data. */
+function safePrepareFailureCode(error:unknown):string {
+  const message=error instanceof Error?error.message:'';
+  if(SAFE_PREPARE_FAILURE_CODES.has(message))return message;
+  if(/timeout/i.test(message))return 'PLAYWRIGHT_TIMEOUT';
+  return 'UNCLASSIFIED';
 }
 
 /** No retries, bulk fallback, route mutations or financial modules. A report writer must persist BEFORE the click. */
@@ -166,7 +186,11 @@ export class IndividualDepartureExecutor {
       // Any ready aircraft may proceed from any airport when the existing route,
       // native Depart control, fresh demand and all safety/resource gates are verified.
       let fresh: AircraftSnapshot;
-      try {fresh=await this.port.prepare(expected);}catch{entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';continue;}
+      try {fresh=await this.port.prepare(expected);}catch(error){
+        entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
+        entry.prepareFailureCode=safePrepareFailureCode(error);
+        continue;
+      }
       if(fresh.state!=='ready'||!sameContext(expected,fresh)){entry.reason='AIRCRAFT_CONTEXT_CHANGED';continue;}
       const key=demandPoolKey(fresh,this.demand.poolScope);
       if(inconsistentPools.has(key)){entry.reason='DEMAND_POOL_TOTALS_INCONSISTENT_AT_INITIAL_COLLECTION';continue;}
