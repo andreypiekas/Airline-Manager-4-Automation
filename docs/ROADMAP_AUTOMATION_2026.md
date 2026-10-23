@@ -45,6 +45,7 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 
 - [x] Incluir prévia somente leitura da fórmula comunitária MIT de tarifas Y/J/F e teto bruto hipotético por destino nos artefatos de referência (ambos os modos; sem influência na decisão). Fonte: https://github.com/abc8747/am4 no commit fixado; validação live continua pendente.
 - [ ] Validate data provenance and compatibility with https://brasil.gt.tc/rotas.
+- [x] Acrescentar comparação somente leitura de teto de ciclos completos em 24h, limitada por duração ida+volta e demanda compartilhada, apenas quando o intervalo econômico tiver validação; não extrapolar reset nem garantir lucro diário.
 - [ ] Compare candidate routes using live verified aircraft, demand, bookings, Fuel, CO2, maintenance, cost, income and daily cycles.
 - [ ] Provide evidence-backed KEEP/HOLD/REROUTE recommendations in read-only mode first.
 - [ ] Enable mutations only after separate offline, safety and economic validation.
