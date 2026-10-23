@@ -7,6 +7,8 @@ import { DemandReader } from '../demand/reader';
 import { OptimizationConfig } from './report';
 import { fleetObservations } from './fleet-observations';
 import { collectOpenRouteSuggestions, probeOpenRouteControl } from './suggestion-reader';
+import { collectLiveCatalogQuotes, selectLiveCatalogQuoteTargets, type LiveCatalogQuoteScan } from './catalog-live-reader';
+import { discoverCatalogRoutesForAircraft } from './reference-discovery';
 import { ModelCostReadResult, ModelCostReference, readMarketPriceReferences, readModelCostReferenceResult } from './cost-reference-reader';
 import { candidateDemandEvidence } from './candidate-evidence';
 import { candidateReservationScenario, reservationConfig } from './reservations';
@@ -36,7 +38,7 @@ import { planVariableRouteDecision, routeDecisionSetComparisonReady } from './ro
 import { validateReturnJournal, type Journal, type LiveAnchoredFlightHistoryStitchDiagnostic } from './return-journal';
 import { dailyReviewDue } from './review-schedule';
 
-export interface ResearchConfig { enabled: boolean; maxAircraft: number; maxSuggestions: number; timeout: number }
+export interface ResearchConfig { enabled: boolean; maxAircraft: number; maxSuggestions: number; catalogQueries?:number; timeout: number }
 export function researchQueueRotation<T>(entries:readonly T[],now:Date,windowMinutes=30){
   if(!Array.isArray(entries)||!Number.isFinite(now.getTime())||!Number.isSafeInteger(windowMinutes)||windowMinutes<1||windowMinutes>1440)
     throw new Error('RESEARCH_QUEUE_ROTATION_INVALID');
@@ -54,7 +56,9 @@ export function researchConfig(env: NodeJS.ProcessEnv = process.env): ResearchCo
     return value;
   };
   return { enabled: enabled === 'true', maxAircraft: bounded('ROUTE_RESEARCH_MAX_AIRCRAFT',3,10),
-    maxSuggestions: bounded('ROUTE_RESEARCH_MAX_SUGGESTIONS',5,10), timeout: 10000 };
+    maxSuggestions: bounded('ROUTE_RESEARCH_MAX_SUGGESTIONS',5,10),
+    catalogQueries: (()=>{const n=Number(env.ROUTE_RESEARCH_CATALOG_QUERIES?.trim()||'2');if(!Number.isSafeInteger(n)||n<0||n>5)throw new Error('RESEARCH_CONFIG_INVALID');return n;})(),
+    timeout: 10000 };
 }
 
 /** Observation only: quotes are never converted into complete economic reviews. */
@@ -62,9 +66,20 @@ export async function researchFleetCandidates(page: Page, collection: Collection
   // Validate injected configuration too, before any navigation.
   if (typeof config.enabled !== 'boolean' || !Number.isSafeInteger(config.maxAircraft) || config.maxAircraft < 1 || config.maxAircraft > 10 ||
     !Number.isSafeInteger(config.maxSuggestions) || config.maxSuggestions < 1 || config.maxSuggestions > 10 ||
+    (config.catalogQueries!==undefined&&(!Number.isSafeInteger(config.catalogQueries)||config.catalogQueries<0||config.catalogQueries>5))||
     !Number.isSafeInteger(config.timeout) || config.timeout < 1 || config.timeout > 30000) throw new Error('RESEARCH_CONFIG_INVALID');
   if(!Number.isFinite(now.getTime()))throw new Error('RESEARCH_TIME_INVALID');
   const observations = fleetObservations(collection, optimization.aircraftOrigins, now, optimization.maxAgeSeconds, optimization.airlineBases);
+  let catalogForLive:RouteCatalog|null=null, airportsForLive:AirportCatalog|null=null;
+  if(config.enabled&&(config.catalogQueries??0)>0&&collection.complete){
+    try{
+      const routes=await loadReference<RouteCatalog>('routes.json');
+      const airports=await loadReference<AirportCatalog>('airports.json');
+      if(routes.schemaVersion===1&&Array.isArray(routes.routes)&&[1,2].includes(airports.schemaVersion)&&Array.isArray(airports.airports)){
+        catalogForLive=routes;airportsForLive=airports;
+      }
+    }catch{/* Catalog quote discovery is optional; the native suggestion workflow remains usable. */}
+  }
   let reviewJournal:Journal|null=null,reviewJournalAvailable=true;
   if(optimization.returnJournal){
     try{
@@ -92,7 +107,8 @@ export async function researchFleetCandidates(page: Page, collection: Collection
       aircraftId:a.aircraftId,registration:a.registration,origin:a.operationalOrigin,researchOrigin,routeId:a.routeId,status,
       trigger:demandTriggered?'demand_insufficient' as const:'scheduled_review' as const,
       demandOccupancyPercentage:demandTriggered?demand?.occupancyPercentage??null:null,
-      result:null as Awaited<ReturnType<typeof collectOpenRouteSuggestions>> | null
+      result:null as Awaited<ReturnType<typeof collectOpenRouteSuggestions>> | null,
+      catalogLive:null as LiveCatalogQuoteScan|null
     };
   });
   const demandQueued=aircraft.filter(a=>a.status==='queued_demand').sort((a,b)=>
@@ -127,6 +143,23 @@ export async function researchFleetCandidates(page: Page, collection: Collection
       await page.locator('#flightInfoContainer #introSuggest').waitFor({state:'visible',timeout:config.timeout});
       entry.result = await collectOpenRouteSuggestions(page,fresh,entry.researchOrigin,config.maxSuggestions,config.timeout,optimization.minOccupancy);
       entry.status = entry.result.status;
+      if(entry.status==='observed'&&catalogForLive&&airportsForLive&&(config.catalogQueries??0)>0){
+        const prospects=discoverCatalogRoutesForAircraft(
+          fresh,entry.researchOrigin,catalogForLive,airportsForLive,new Date(),optimization.maxAgeSeconds,100
+        );
+        const targets=selectLiveCatalogQuoteTargets(prospects,airportsForLive,
+          [...entry.result.quotes,...entry.result.screenedOut],config.catalogQueries!);
+        if(targets.length){
+          entry.catalogLive=await collectLiveCatalogQuotes(page,fresh,entry.researchOrigin,
+            targets,config.timeout,optimization.minOccupancy);
+          // Even successful catalog probes cannot make a curated set globally complete.
+          entry.result.quotes.push(...entry.catalogLive.quotes);
+          entry.result.screenedOut.push(...entry.catalogLive.screenedOut);
+          entry.result.warnings.push(...entry.catalogLive.warnings);
+          entry.result.scanned+=entry.catalogLive.attempted;
+          if(entry.catalogLive.stoppedEarly)entry.status='partial';
+        }
+      }
     } catch {entry.status='unavailable';report.warnings.push(`RESEARCH_UNAVAILABLE:${entry.aircraftId}`);}
     finally {
       try {await openList(page,config.timeout);}
@@ -182,7 +215,7 @@ export async function researchFleetCandidates(page: Page, collection: Collection
 export async function writeRouteResearchReport(report: Awaited<ReturnType<typeof researchFleetCandidates>>, directory='test-results/demand') {
   await mkdir(directory,{recursive:true});
   await writeFile(join(directory,'route-research.json'),JSON.stringify(report,null,2)+'\n');
-  const rows = report.aircraft.map(a => `- ${a.aircraftId}: ${a.status}; gatilho ${a.trigger}; origem de pesquisa ${a.researchOrigin ?? 'indisponivel'}; ocupacao que disparou pesquisa ${a.demandOccupancyPercentage===null?'n/d':a.demandOccupancyPercentage.toFixed(2)+'%'}; candidatos mantidos ${a.result?.quotes.length ?? 0}; sugestoes examinadas ${a.result?.scanned ?? 0}; descartadas por teto de ocupacao ${a.result?.screenedOut.length ?? 0}.`);
+  const rows = report.aircraft.map(a => `- ${a.aircraftId}: ${a.status}; gatilho ${a.trigger}; origem de pesquisa ${a.researchOrigin ?? 'indisponivel'}; ocupacao que disparou pesquisa ${a.demandOccupancyPercentage===null?'n/d':a.demandOccupancyPercentage.toFixed(2)+'%'}; candidatos mantidos ${a.result?.quotes.length ?? 0}; consultas nativas/curadas examinadas ${a.result?.scanned ?? 0}; consultas adicionais catalogo ${a.catalogLive?.attempted ?? 0}, observadas ${a.catalogLive?.observed ?? 0}; descartadas por teto de ocupacao ${a.result?.screenedOut.length ?? 0}.`);
   const probeRows=report.diagnosticProbes.length?report.diagnosticProbes:(report.diagnosticProbe?[report.diagnosticProbe]:[]);
   const diagnostic=probeRows.length?[
     '',
@@ -199,7 +232,8 @@ export async function writeRouteResearchReport(report: Awaited<ReturnType<typeof
     ])
   ]:[];
   await writeFile(join(directory,'route-research.md'),['# Consulta de rotas — somente leitura','',...rows,...diagnostic,'',
-    'Sugestoes limitadas nao demonstram a melhor rota. Demanda restante, custos completos e tarifas efetivas ainda precisam ser confirmados.',
+    'Consultas adicionais curadas usam apenas a resposta nativa de leitura new_route_info.php, validada por aircraftId, airportId e origem/destino. Nao criam rotas.',
+    'Mesmo apos ampliar candidatas, o catalogo nao e global. Demanda restante, custos completos e tarifas efetivas precisam ser confirmados. Nenhuma consulta isolada autoriza uma troca.',
     ...report.warnings.map(w => '- '+w),''].join('\n'));
 }
 
