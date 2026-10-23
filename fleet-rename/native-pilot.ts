@@ -38,12 +38,21 @@ export function nativeTextSaveQueryKey(callback:string,id:string,mode:NativeMode
  return key&&key!=='id'&&key!=='mode'?key:null;
 }
 
-/** Bounded, read-only evidence. No IDs, callback source, labels or input values. */
+/** Bounded, read-only evidence: only boolean grammar indicators are persisted. Never persist native JavaScript,
+ * DOM selectors, query values, IDs, callback source or page text. */
+export type NativeSaveSyntaxEvidence={
+ neutralClickSound:boolean;
+ expectedAjaxTarget:boolean;
+ expectedAjaxResponseContainer:boolean;
+ exactlyOneAjaxCall:boolean;
+ callbackWithinLimit:boolean;
+};
 export type NativeInputDiagnostic={
  field:RenamePhase;inputCount:number;textInputCount:number;
  valueReferencedInputCount:number;strictNativeMatchCount:number;
  classification:'MATCHED'|'NO_TEXT_INPUT'|'NO_VALUE_REFERENCE'|
   'SAVE_HANDLER_SYNTAX_UNSUPPORTED'|'AMBIGUOUS';
+ syntaxEvidence:NativeSaveSyntaxEvidence;
 };
 /** Classification is intentionally separate from authorization: a .val()
  * reference alone NEVER approves a native Save click.
@@ -58,6 +67,16 @@ export function diagnoseNativeTextInputs(
   compact.includes('$("#'+inputId+'").val()'));
  const matching=eligible.flatMap(({inputId,index})=>
   nativeTextSaveQueryKey(callback,id,mode,inputId)?[index]:[]);
+ // Distinguish a changed UI sound/target/result container from a changed
+ // input concatenation syntax. Evidence is diagnostic only and NEVER grants
+ // permission to click Save: nativeTextSaveQueryKey remains authoritative.
+ const syntaxEvidence:NativeSaveSyntaxEvidence={
+  neutralClickSound:compact.startsWith("playSound('neutral_click');"),
+  expectedAjaxTarget:compact.includes("Ajax('fleet_details.php?id="+id+"&mode="+mode+"&"),
+  expectedAjaxResponseContainer:compact.includes(",'detailsAction',this);"),
+  exactlyOneAjaxCall:(compact.match(/Ajax\(/g)||[]).length===1,
+  callbackWithinLimit:callback.length<=600
+ };
  const classification:NativeInputDiagnostic['classification']=
   matching.length===1?'MATCHED':
   eligible.length===0?'NO_TEXT_INPUT':
@@ -66,7 +85,7 @@ export function diagnoseNativeTextInputs(
    'SAVE_HANDLER_SYNTAX_UNSUPPORTED':'AMBIGUOUS';
  return {matching,diagnostic:{field,inputCount:inputIds.length,
   textInputCount:eligible.length,valueReferencedInputCount:valueReferenced.length,
-  strictNativeMatchCount:matching.length,classification}};
+  strictNativeMatchCount:matching.length,classification,syntaxEvidence}};
 }
 /** Static stages only: never include callback source, field IDs, route names,
  * error messages, page HTML or input values in a persisted diagnostic.
