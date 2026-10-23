@@ -161,11 +161,11 @@ test('a mixed count-drift then duplicate failure does not cause a third inventor
  },async()=>{})).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
  expect(attempts).toBe(2);
 });
-test('identity failures are never retried or silently accepted',async()=>{
+test('nonrecoverable identity failures are never retried or silently accepted',async()=>{
  let attempts=0,reopens=0;
  await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
-  attempts++;throw Error('RENAME_FLEET_ROUTE_ID_DUPLICATE');
- },async()=>{reopens++;})).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+  attempts++;throw Error('RENAME_FLEET_REGISTRATION_MISSING');
+ },async()=>{reopens++;})).rejects.toThrow('RENAME_FLEET_REGISTRATION_MISSING');
  expect(attempts).toBe(1);expect(reopens).toBe(0);
 });
 test('only the read-only modes invoke count-drift recovery; a real pilot never retries',async()=>{
