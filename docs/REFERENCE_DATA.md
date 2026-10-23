@@ -49,6 +49,14 @@ F = Auto × 1.06
 
 A fonte operacional continua sendo o Auto Price observado na rota ativa.
 
+## Referência de tarifas e receita potencial (abc8747/am4)
+
+O `reference-report.json` acrescenta `communityPriceScenarios` às rotas candidatas, com tarifa
+teórica Y/J/F para Easy e Realism e teto **bruto e hipotético** por partida, limitado pela
+demanda estática diária do catálogo e assentos atuais. Esses números não representam
+ocupação ou lucro esperado e não mudam a ordenação ou a autorização de nenhuma operação.
+Veja [proveniência, cálculo e licença MIT](./AM4_COMMUNITY_ROUTE_PRICING.md).
+
 ## Reprodutibilidade
 
 Quando scripts de importação forem usados, preserve:
