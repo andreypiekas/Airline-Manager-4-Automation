@@ -194,6 +194,47 @@ export class CampaignUtils {
             reason: verified ? 'POST_PURCHASE_ACTIVE_CONFIRMED' : 'POST_PURCHASE_ACTIVE_NOT_CONFIRMED' };
     }
 
+    /**
+     * One-shot recovery after an obscured Marketing control. This method is
+     * intentionally read-only: it never opens a purchase flow or assumes a
+     * campaign is active from a previous run. The caller must have reopened
+     * the Marketing panel through a challenge-guarded normal click.
+     */
+    public async verifyRequiredCampaignsReadOnly(): Promise<CampaignEvidence> {
+        await assertNoInteractiveChallenge(this.page, 'campaign:readonly-recovery');
+        const ecoMatches = this.page.locator('td:visible')
+            .filter({ hasText: /^[^A-Za-z0-9]*Eco[\\s-]+friendly\\s*$/i });
+        const reputationMatches = this.page.locator('td:visible')
+            .filter({ hasText: /^[^A-Za-z0-9]*Airline\\s+reputation\\s*$/i });
+        const ecoVerified = await ecoMatches.count() === 1;
+        const reputationVerified = this.increaseAirlineReputation
+            ? await reputationMatches.count() === 1
+            : false;
+        const ecoFriendly: CampaignItemEvidence = {
+            required: true, activeBefore: ecoVerified, purchaseAttempted: false,
+            verifiedActive: ecoVerified, status: ecoVerified ? 'already_active' : 'unverified',
+            reason: ecoVerified ? 'READONLY_ACTIVE_UNIQUE' : 'READONLY_ACTIVE_NOT_UNIQUE_OR_MISSING'
+        };
+        const airlineReputation: CampaignItemEvidence = this.increaseAirlineReputation
+            ? {
+                required: true, activeBefore: reputationVerified, purchaseAttempted: false,
+                verifiedActive: reputationVerified,
+                status: reputationVerified ? 'already_active' : 'unverified',
+                reason: reputationVerified ? 'READONLY_ACTIVE_UNIQUE' : 'READONLY_ACTIVE_NOT_UNIQUE_OR_MISSING'
+            }
+            : {
+                required: false, activeBefore: false, purchaseAttempted: false,
+                verifiedActive: false, status: 'not_required', reason: 'REPUTATION_NOT_REQUIRED'
+            };
+        const allRequiredVerified = ecoVerified &&
+            (!airlineReputation.required || reputationVerified);
+        return {
+            schemaVersion: 1, observedAt: new Date().toISOString(),
+            ecoFriendly, airlineReputation,
+            allRequiredVerified, departureAuthorized: allRequiredVerified
+        };
+    }
+
     public async createCampaign(): Promise<CampaignEvidence> {
         console.log('Iniciando verificacao de campanhas...');
         await assertNoInteractiveChallenge(this.page, 'campaign:start');
