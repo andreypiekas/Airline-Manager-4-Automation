@@ -89,7 +89,7 @@ test('read-only preparation errors retain only fixed non-sensitive diagnostics a
   expect(report.halted).toBe(false);
   expect(s.clicks()).toBe(0);
   expect(JSON.stringify(report)).not.toContain('DO_NOT_LOG');
-  expect(s.saved.at(-1)?.entries[0].prepareFailureCode).toBe(expectedCode);
+  expect(s.saved[s.saved.length-1]?.entries[0].prepareFailureCode).toBe(expectedCode);
  }
 });
 
