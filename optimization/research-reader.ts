@@ -39,13 +39,17 @@ import { validateReturnJournal, type Journal, type LiveAnchoredFlightHistoryStit
 import { dailyReviewDue } from './review-schedule';
 
 export interface ResearchConfig { enabled: boolean; maxAircraft: number; maxSuggestions: number; catalogQueries?:number; timeout: number }
-export function researchQueueRotation<T>(entries:readonly T[],now:Date,windowMinutes=30){
-  if(!Array.isArray(entries)||!Number.isFinite(now.getTime())||!Number.isSafeInteger(windowMinutes)||windowMinutes<1||windowMinutes>1440)
+export function researchQueueRotation<T>(entries:readonly T[],now:Date,windowMinutes=30,stride=1){
+  if(!Array.isArray(entries)||!Number.isFinite(now.getTime())||!Number.isSafeInteger(windowMinutes)||windowMinutes<1||windowMinutes>1440||
+    !Number.isSafeInteger(stride)||stride<1||stride>10)
     throw new Error('RESEARCH_QUEUE_ROTATION_INVALID');
-  if(!entries.length)return {entries:[] as T[],slot:0,offset:0,windowMinutes};
+  if(!entries.length)return {entries:[] as T[],slot:0,offset:0,windowMinutes,stride};
   const slot=Math.floor(now.getTime()/(windowMinutes*60_000));
-  const offset=slot%entries.length;
-  return {entries:[...entries.slice(offset),...entries.slice(0,offset)],slot,offset,windowMinutes};
+  // Rotate by the number of scheduled aircraft we can actually inspect in
+  // this window. One-slot rotation used to recheck almost the same aircraft
+  // every run (126 aircraft / 3 per run -> only one new aircraft per window).
+  const offset=(slot*stride)%entries.length;
+  return {entries:[...entries.slice(offset),...entries.slice(0,offset)],slot,offset,windowMinutes,stride};
 }
 export function researchConfig(env: NodeJS.ProcessEnv = process.env): ResearchConfig {
   const enabled = env.ENABLE_ROUTE_RESEARCH?.trim().toLowerCase() || 'false';
@@ -116,12 +120,13 @@ export async function researchFleetCandidates(page: Page, collection: Collection
     a.aircraftId.localeCompare(b.aircraftId)
   );
   const scheduledQueued=aircraft.filter(a=>a.status==='queued');
-  const rotation=researchQueueRotation(scheduledQueued,now);
+  const availableScheduledSlots=Math.max(1,config.maxAircraft-Math.min(demandQueued.length,config.maxAircraft));
+  const rotation=researchQueueRotation(scheduledQueued,now,30,availableScheduledSlots);
   const prioritized=[...demandQueued,...rotation.entries];
   const report = {schemaVersion:4,generatedAt:now.toISOString(),dryRun:true,mutationAuthorized:false,
     candidatesComplete:false,comparisonReady:false,collectionComplete:collection.complete,config,uiRestored:true,
     queueRotation:{eligible:prioritized.length,demandTriggeredEligible:demandQueued.length,scheduledEligible:scheduledQueued.length,
-      slot:rotation.slot,offset:rotation.offset,windowMinutes:rotation.windowMinutes},
+      slot:rotation.slot,offset:rotation.offset,stride:rotation.stride,windowMinutes:rotation.windowMinutes},
     warnings:reviewJournalAvailable?[] as string[]:['RESEARCH_JOURNAL_UNAVAILABLE'],aircraft,
     diagnosticProbe:null as Awaited<ReturnType<typeof probeOpenRouteControl>> | null,
     diagnosticProbes:[] as Awaited<ReturnType<typeof probeOpenRouteControl>>[]};

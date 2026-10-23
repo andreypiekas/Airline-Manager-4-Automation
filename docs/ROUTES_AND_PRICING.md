@@ -74,6 +74,22 @@ com desempate por cobertura de assentos estática. Isso **não é lucro líquido
 nem demanda restante e nem previsão de ocupação real. Não descarta a possibilidade
 de rotas repetidas: apenas informa se o par é o da rota atual.
 
+### Cobertura rotativa da frota
+
+A fila da revisão programada é repartida em **lotes**, em vez de avançar
+apenas uma posição a cada janela. Em cada janela de 30 minutos, o deslocamento
+é o número de vagas de pesquisa disponíveis depois de priorizar as aeronaves
+bloqueadas por demanda insuficiente.
+
+Com 126 aeronaves todas elegíveis e três vagas de pesquisa, esse desenho
+alcança 126 identidades em 42 janelas **na condição ideal de frota estável**,
+sem reexaminar três vezes quase o mesmo grupo. Frota, disponibilidade,
+retorno à base e bloqueios mudam entre janelas; a cobertura real pode ser
+mais lenta e não é uma garantia de execução.
+
+A pesquisa rotativa é observação. Ela nunca sinaliza que as cotações ou
+os cálculos já estão completos e não altera o limite de trocas reais por run.
+
 ### Consulta real de destinos curados (leitura, antes da decisão)
 
 Além das sugestões nativas, `optimization/catalog-live-reader.ts` agora seleciona
