@@ -86,7 +86,10 @@ export async function retryOneUnstableReadOnlyFleetSnapshot<T>(
  * details are opened in the inventory pass. On incomplete native pagination,
  * refuse the entire plan instead of silently renaming a subset.
  */
-export async function collectRenameInventory(page:Page,timeout=15000):Promise<CollectionResult>{
+/** Optional callback reports static 1-based read-only pagination/lookup stages.
+ * Never expose route IDs, registrations, HTML or callback strings.
+ */
+export async function collectRenameInventory(page:Page,timeout=15000,onStage:(stage:string)=>void=()=>{}):Promise<CollectionResult>{
  await assertNoInteractiveChallenge(page,'rename:inventory');
  const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
  if(await heading.count()!==1)throw Error('RENAME_FLEET_COUNT_UNVERIFIED');
@@ -105,8 +108,10 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
   await assertNoInteractiveChallenge(page,'rename:inventory-page');
   if(parseTotal(await heading.innerText({timeout}))!==total)throw Error('RENAME_FLEET_COUNT_CHANGED');
   const expected=Math.min(20,total-pageIndex*20);
+  onStage('COLLECT_FLEET_PAGE_'+(pageIndex+1)+'_WAIT_ROWS');
   await expect.poll(async()=>routeRows.evaluateAll(es=>es.filter(e=>!!e.getClientRects().length).length),
    {timeout}).toBe(expected);
+  onStage('COLLECT_FLEET_PAGE_'+(pageIndex+1)+'_READ_CARDS');
   const cards=await routeRows.evaluateAll((elements,pattern)=>elements.filter(e=>!!e.getClientRects().length).map(e=>{
    const links=Array.from(e.querySelectorAll('a')).flatMap(a=>{
     const id=(a.getAttribute('onclick')||'').replace(/\s/g,'').match(new RegExp(pattern))?.[1];
@@ -168,6 +173,7 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
   if(await next.count()!==1||(await next.getAttribute('onclick')||'').replace(/\s/g,'')!==native)
    throw Error('RENAME_FLEET_NEXT_CONTROL_UNVERIFIED');
   const oldFirst=cards[0].routeId;
+  onStage('COLLECT_FLEET_PAGE_'+(pageIndex+1)+'_NEXT');
   await next.click({timeout});
   await expect.poll(()=>routeRows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||null),
    {timeout}).not.toBe('routeMainList'+oldFirst);
@@ -181,6 +187,7 @@ export async function collectRenameInventory(page:Page,timeout=15000):Promise<Co
   console.log('[RenameInventory] '+JSON.stringify({
    status:'READ_ONLY_DETAILS_LOOKUP',item:index+1,total:missing.length
   }));
+  onStage('COLLECT_FLEET_DETAILS_LOOKUP_'+(index+1));
   item.registration=await readMissingRegistrationFromNativeDetails(page,item,total,timeout);
  }
  if(!result.aircraft.every(a=>a.registration.trim()))

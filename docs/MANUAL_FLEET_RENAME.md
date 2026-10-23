@@ -38,6 +38,14 @@ O SHA256 considera os IDs de aeronave e rota, o registro atual, os nomes desejad
 
 **Correção de 22/10/2026:** como o cálculo de SHA256 foi corrigido, **nenhum hash de prévia anterior é reutilizável** (inclusive `4f054eb6…`). Execute nova `preview` com a `main` atual e os prefixos originais, revise o CSV e use apenas o novo SHA256 no piloto.
 
+### Timeout na leitura da frota — diagnóstico por página sem salvar
+
+A [preview #39958613524](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39958613524) (23/10/2026, `main=54be88d`) concluiu login e abertura da lista, mas parou na coleta `COLLECT_FLEET` depois do limite anterior de 14 segundos com `RENAME_UI_WAIT_TIMEOUT`. O relatório tinha `fleetCount=0` e `digest=null`, portanto **não gerou nova prévia nem autorizou piloto**. Esse resultado não diagnostica falha do parser do botão Save nem comprova se a demora foi de renderização, paginação ou leitura excepcional de registro.
+
+Agora apenas `preview` e `pilot-check` usam espera limitada de **25 segundos por verificação de UI**, com etapas não sensíveis: `COLLECT_FLEET_PAGE_N_WAIT_ROWS`, `COLLECT_FLEET_PAGE_N_READ_CARDS`, `COLLECT_FLEET_PAGE_N_NEXT` e `COLLECT_FLEET_DETAILS_LOOKUP_N`. O número N é somente a **posição**, sem nomes, IDs, URLs, HTML ou dados de usuário. O modo de gravação `pilot` mantém espera de 14 segundos, confirmação independente, sem nova tentativa de mutação. Se a contagem da página não corresponder exatamente à esperada, o comando **continua falhando fechado**; não aceita páginas incompletas ou IDs ambíguos.
+
+Depois de CI/merge, executar **somente** uma nova `preview` manual com `XP`/`XR`, confirmar hash e frota, e então um `pilot-check` read-only. Não utilizar o hash de 116 aeronaves anterior se a frota mudou.
+
 ### Contagem da frota muda durante uma prévia ou pilot-check
 
 A [execução read-only #39809109069](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39809109069) parou em `COLLECT_FLEET` com `RENAME_FLEET_COUNT_CHANGED`, antes de verificar os editores e **sem renomeação**. Isso significa que a contagem exibida variou **durante o inventário**; o log não demonstra se houve alteração real da frota ou atualização temporária da UI.
