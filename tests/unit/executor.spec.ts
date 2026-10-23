@@ -4,7 +4,7 @@ import { AircraftSnapshot, CollectionResult } from '../../demand/types';
 import { readDemandConfig } from '../../demand/config';
 import { flightCountdownObservation } from '../../optimization/flight-timing';
 import { departureControlShape } from '../../demand/departure-control-evidence';
-import { hasIncompleteInitialDepartureCollection } from '../../demand/execute-run';
+import { hasIncompleteInitialDepartureCollection,hasUnverifiedFuelDeparture } from '../../demand/execute-run';
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
@@ -266,6 +266,54 @@ test('aircraft without verified fuel requirement is held without poisoning later
  expect(r.entries[1].resourceEvidence).toMatchObject({trackingComplete:true,verifiedRouteFuelLbs:20000});
 });
 
+
+test('variable historical fuel values reserve the maximum rather than blocking qualified departure',async()=>{
+ const history={status:'observed' as const,observedAt:new Date().toISOString(),
+  source:'inspected-aircraft-flight-history' as const,complete:false as const,
+  comparisonReady:false as const,mutationAuthorized:false as const,entries:[
+   {relativeTime:'1 hour ago',from:'AAA',to:'GRU',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:172793,revenue:1000},
+   {relativeTime:'2 hours ago',from:'GRU',to:'AAA',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:167609,revenue:1000}
+  ]};
+ const aircraft=snapshot({flightHistory:history});
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,fuelHoldingLbsAtRunStart:200000});
+ const report=await s.executor.run();
+ expect(s.clicks()).toBe(1);
+ expect(report.entries[0]).toMatchObject({status:'departed',resourceEvidence:{
+  verifiedRouteFuelLbs:172793,matchingHistorySamples:2,fuelEvidenceSource:'history',
+  fuelAvailableBefore:200000
+ }});
+});
+
+test('variable fuel history blocks safely when stock covers only the lower sample',async()=>{
+ const history={status:'observed' as const,observedAt:new Date().toISOString(),
+  source:'inspected-aircraft-flight-history' as const,complete:false as const,
+  comparisonReady:false as const,mutationAuthorized:false as const,entries:[
+   {relativeTime:'1 hour ago',from:'AAA',to:'GRU',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:172793,revenue:1000},
+   {relativeTime:'2 hours ago',from:'GRU',to:'AAA',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:167609,revenue:1000},
+   {relativeTime:'3 hours ago',from:'AAA',to:'TXL',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:80,J:0,F:0},fuelLbs:999999,revenue:1000}
+  ]};
+ const aircraft=snapshot({flightHistory:history});
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,fuelHoldingLbsAtRunStart:170000});
+ const report=await s.executor.run();
+ expect(s.clicks()).toBe(0);
+ expect(report.entries[0]).toMatchObject({
+  status:'held',reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY',
+  resourceEvidence:{verifiedRouteFuelLbs:172793,matchingHistorySamples:2}
+ });
+ expect(hasUnverifiedFuelDeparture(report)).toBe(false);
+});
+
+test('missing historical and fresh quote evidence leaves a HOLD and flags incomplete CI',async()=>{
+ const aircraft=snapshot();
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,fuelHoldingLbsAtRunStart:200000});
+ const report=await s.executor.run();
+ expect(s.clicks()).toBe(0);
+ expect(report.entries[0]).toMatchObject({status:'held',reason:'FUEL_REQUIREMENT_UNVERIFIED'});
+ expect(hasUnverifiedFuelDeparture(report)).toBe(true);
+ expect(hasUnverifiedFuelDeparture({...report,entries:report.entries.map(e=>({
+  ...e,demand:e.demand?{...e.demand,decision:'hold_insufficient' as const}:null
+ }))})).toBe(false);
+});
 
 test('completion reserve holds before fresh evaluation and avoids expensive reads near deadline',async()=>{
  const s=setup({mutationDeadlineEpochMs:Date.now()+60_000});
