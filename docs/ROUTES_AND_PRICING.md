@@ -80,6 +80,30 @@ Dados ausentes permanecem ausentes. Não são preenchidos com zero.
 | `already_reviewed` | evento diário/retorno já consumido |
 | `unavailable` | contexto insuficiente |
 
+## Cenário teórico de ciclos em 24 horas
+
+O relatório `candidate-data.json` passa a registrar `dailyPotential` por candidata e
+`dailyPotentialRanking` por aeronave. O motor só calcula essa sensibilidade quando
+um ciclo direto de **ida e volta** tiver intervalo econômico validado, reservas de demanda
+compartilhada completas e observação recente.
+
+Para cada classe ativa, são computados os passageiros necessários para **ambos** os trechos
+usando a faixa superior de ocupação verificada. O teto de ciclos é o menor entre:
+
+- `floor(24 / duração_do_ciclo_em_horas)` — sem considerar paradas ou manutenção;
+- `min(floor(demanda_compartilhada_restante_classe / assentos_necessários_por_ciclo_classe))`.
+
+O resultado é **um teto teórico**, não um cronograma executável e nem a previsão real de
+lucro diário. Multiplicar a estimativa de lucro variável por esse teto considera
+preços e custos constantes e desconta a taxa de criação uma única vez.
+Ele não antecipa renovação da demanda, turnarounds, futuras partidas de outras aeronaves
+nem eventual mudança de preços. A realidade pode permitir **menos** ciclos ou nenhuma
+partida. Os intervalos são sensitividades condicionais, não garantias.
+
+Essa classificação somente leitura não altera o algoritmo de KEEP/HOLD/REROUTE e não
+pode autorizar criação, troca de rota, decolagem ou preços. Candidatas com dados
+incompletos não recebem projeção numérica.
+
 ## Reroute
 
 O executor real é fail-closed.
