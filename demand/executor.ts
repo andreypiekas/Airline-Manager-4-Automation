@@ -188,11 +188,16 @@ export class IndividualDepartureExecutor {
       if(decision.decision!=='would_depart'){entry.reason=decision.reason;continue;}
       entry.reason=decision.reason;
       const historicalFuelEvidence=verifiedHistoricalFuelRequirement(fresh);
-      const quoteFuelEvidence=historicalFuelEvidence?null:verifiedCurrentRouteFuelRequirement(
+      const quoteFuelEvidence=verifiedCurrentRouteFuelRequirement(
         fresh,this.settings.currentRouteFuelEvidence,this.demand.maxAgeSeconds
       );
-      const fuelEvidence=historicalFuelEvidence||quoteFuelEvidence;
-      const fuelEvidenceSource=historicalFuelEvidence?'history':quoteFuelEvidence?'current-route-quote':null;
+      // When both independent sources are present, debit the larger observed
+      // requirement. Never let an earlier lower history mask a larger fresh quote.
+      const fuelEvidence=historicalFuelEvidence&&quoteFuelEvidence
+        ?(historicalFuelEvidence.fuelLbs>=quoteFuelEvidence.fuelLbs?historicalFuelEvidence:quoteFuelEvidence)
+        :(historicalFuelEvidence||quoteFuelEvidence);
+      const fuelEvidenceSource=fuelEvidence===historicalFuelEvidence&&fuelEvidence?'history':
+        fuelEvidence===quoteFuelEvidence&&fuelEvidence?'current-route-quote':null;
       if(!this.settings.dryRun&&this.settings.fuelHoldingLbsAtRunStart!==undefined){
         const available=Math.max(0,this.settings.fuelHoldingLbsAtRunStart-fuelCommitted);
         entry.resourceEvidence={
