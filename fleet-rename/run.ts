@@ -354,7 +354,10 @@ export async function renameNativePrompt(page:Page,details:Awaited<ReturnType<ty
 }
 function htmlSafe(s:string){return s.replace(/[|<>\r\n]/g,' ');}
 export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=process.env,directory='test-results/fleet-rename'){
- const timeout=14000,operation=(env.RENAME_OPERATION||'preview').trim();
+ const operation=(env.RENAME_OPERATION||'preview').trim();
+ // Only the read-only full-fleet scans get a longer UI wait. A real pilot
+ // keeps its original 14s limit and never retries or relaxes authorization.
+ const timeout=operation==='preview'||operation==='pilot-check'?25000:14000;
  if(!['inspect','inspect-open','preview','pilot-check','pilot','apply'].includes(operation))throw Error('RENAME_OPERATION_INVALID');
  // Until one real double-field pilot is verified, bulk apply must not run.
  if(operation==='apply')throw Error('RENAME_BULK_REQUIRES_VALIDATED_PILOT');
@@ -401,7 +404,7 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
   // Preview/pilot-check are read-only: a changed route heading invalidates
   // the partial first snapshot. Reopen and read a fresh complete snapshot
   // exactly once. Never repeat in pilot (real mutation mode).
-  const collect=()=>collectRenameInventory(page,timeout);
+  const collect=()=>collectRenameInventory(page,timeout,markStage);
   const fleet:CollectionResult=(operation==='preview'||operation==='pilot-check')
    ?await retryOneUnstableReadOnlyFleetSnapshot(collect,async()=>{
       markStage('COLLECT_FLEET_REOPEN_AFTER_COUNT_CHANGE_READ_ONLY');
