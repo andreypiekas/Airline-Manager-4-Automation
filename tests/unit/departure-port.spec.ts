@@ -1,5 +1,5 @@
-import { test,expect } from '@playwright/test';
-import { verifiedDepartureHandler } from '../../demand/departure-port';
+import { test,expect,Page } from '@playwright/test';
+import { verifiedDepartureHandler,PlaywrightDeparturePort,safeDepartureConfirmReadCode } from '../../demand/departure-port';
 import { executionEnvironment } from '../../demand/execute-run';
 import { readDemandConfig } from '../../demand/config';
 const handler="$('#panel, .flight-info').hide();hideFlightInfo();$('#routeViewDepart').hide();Ajax('route_depart.php?id=123&ref=list&costIndex=0','target',this);";
@@ -32,3 +32,44 @@ test('all-fleet departures use explicit all mode; malformed caps still fail',()=
   expect(()=>executionEnvironment(cfg,{...realEnv,DEMAND_MAX_DEPARTURES_PER_RUN:invalid})).toThrow('DEMAND_EXECUTION_LIMIT_INVALID');
 });
 test('cannot select legacy bulk departure with real demand mode',()=>expect(()=>readDemandConfig({...realEnv,ENABLE_DEMAND_MANAGER:'false'})).toThrow());
+
+test('post-click confirmation errors are sanitized without exposing browser details',()=>{
+  for(const [message,expected] of [
+    ['RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_LIST_CONTROL_UNVERIFIED'],
+    ['RESEARCH_PAGINATION_INVALID','RESEARCH_PAGINATION_INVALID'],
+    ['locator.waitFor: Timeout 15000ms exceeded; URL https://private.example/?token=DO_NOT_LOG','PLAYWRIGHT_TIMEOUT'],
+    ['DOM secret DO_NOT_LOG','UNCLASSIFIED']
+  ] as const){
+    const code=safeDepartureConfirmReadCode(new Error(message));
+    expect(code).toBe(expected);
+    expect(code).not.toContain('DO_NOT_LOG');
+    expect(code).not.toContain('https://');
+  }
+  expect(safeDepartureConfirmReadCode(null)).toBe('UNCLASSIFIED');
+});
+
+test('missing post-click target snapshot logs three read-only retries, no departure click',async()=>{
+  let clicks=0;
+  const page={
+    locator:()=>({
+      count:async()=>0,isVisible:async()=>false,
+      getAttribute:async()=>null,
+      click:async()=>{clicks++;}
+    }),
+    waitForTimeout:async()=>{}
+  } as unknown as Page;
+  const port=new PlaywrightDeparturePort(page,1);
+  const warnings:string[]=[];
+  const original=console.warn;
+  try{
+    console.warn=(...parts:unknown[])=>{warnings.push(parts.join(' '));};
+    const after=await port.confirm({aircraftId:'1',routeId:'2'} as never);
+    expect(after).toBeNull();
+  }finally{
+    console.warn=original;
+  }
+  expect(clicks).toBe(0);
+  expect(warnings).toEqual([1,2,3].map(attempt=>
+    '[DepartureConfirmRead] '+JSON.stringify({attempt,code:'RESEARCH_LIST_CONTROL_UNVERIFIED'})
+  ));
+});
