@@ -122,6 +122,45 @@ test('a second count change fails closed: no third collection and no mutation',a
  },async()=>{reopens++;})).rejects.toThrow('RENAME_FLEET_COUNT_CHANGED');
  expect(attempts).toBe(2);expect(reopens).toBe(1);
 });
+test('a read-only duplicate route ID discards the first full snapshot and retries once',async()=>{
+ let attempts=0,reopens=0,discards=0;
+ const fresh=await retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+  attempts++;
+  if(attempts===1)throw Error('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+  return {complete:true,expectedRoutes:126,aircraft:[{aircraftId:'1',routeId:'2'}]};
+ },async()=>{reopens++;},()=>{discards++;});
+ expect(fresh).toMatchObject({complete:true,expectedRoutes:126});
+ expect(attempts).toBe(2);
+ expect(reopens).toBe(1);
+ expect(discards).toBe(1);
+});
+test('persistent duplicate route or aircraft IDs abort after only two full snapshots',async()=>{
+ for(const issue of ['RENAME_FLEET_ROUTE_ID_DUPLICATE','RENAME_FLEET_AIRCRAFT_ID_DUPLICATE']){
+  let attempts=0,reopens=0;
+  await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+   attempts++;throw Error(issue);
+  },async()=>{reopens++;})).rejects.toThrow(issue);
+  expect(attempts).toBe(2);expect(reopens).toBe(1);
+ }
+});
+test('a different identity or control failure never starts a duplicate retry',async()=>{
+ for(const issue of ['RENAME_FLEET_DETAILS_CONTROL_AMBIGUOUS','RENAME_FLEET_REGISTRATION_MISSING',
+  'RENAME_FLEET_ROUTE_LABEL_MISSING_OR_INVALID','RENAME_FLEET_PAGE_INCOMPLETE']){
+  let attempts=0,reopens=0;
+  await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+   attempts++;throw Error(issue);
+  },async()=>{reopens++;})).rejects.toThrow(issue);
+  expect(attempts).toBe(1);expect(reopens).toBe(0);
+ }
+});
+test('a mixed count-drift then duplicate failure does not cause a third inventory',async()=>{
+ let attempts=0;
+ await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
+  attempts++;
+  throw Error(attempts===1?'RENAME_FLEET_COUNT_CHANGED':'RENAME_FLEET_ROUTE_ID_DUPLICATE');
+ },async()=>{})).rejects.toThrow('RENAME_FLEET_ROUTE_ID_DUPLICATE');
+ expect(attempts).toBe(2);
+});
 test('identity failures are never retried or silently accepted',async()=>{
  let attempts=0,reopens=0;
  await expect(retryOneUnstableReadOnlyFleetSnapshot(async()=>{
