@@ -96,7 +96,7 @@ export function discoverCatalogRoutesForAircraft(
   // Any conflicting record for the same undirected airport pair quarantines the whole pair.
   const grouped=new Map<string,ReferenceRoute[]>();
   for(const route of relevant){
-    const other=route.from===origin?route.to:route.from;
+    const other:string=route.from===origin?route.to:route.from;
     if(!code(other)||other===origin){result.excluded.invalidReference++;continue;}
     const key=pair(origin,other);grouped.set(key,[...(grouped.get(key)||[]),route]);
   }
