@@ -46,6 +46,14 @@ Agora apenas `preview` e `pilot-check` usam espera limitada de **25 segundos por
 
 Depois de CI/merge, executar **somente** uma nova `preview` manual com `XP`/`XR`, confirmar hash e frota, e então um `pilot-check` read-only. Não utilizar o hash de 116 aeronaves anterior se a frota mudou.
 
+### IDs de rota/avião duplicados durante paginação: coleta integral, uma repetição segura
+
+A [execução `pilot-check` #39979624226](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39979624226) (23/10/2026) leu a frota indicada como **126 aeronaves**, mas encontrou `RENAME_FLEET_ROUTE_ID_DUPLICATE` ao ler a quinta página (após 80 registros). Não se trata de duas aeronaves voando na mesma rota comercial: é a **repetição de um identificador interno de rota** já coletado. A causa pode ser reordenação da lista entre páginas, mas não há prova disso. A operação foi corretamente bloqueada, sem gravação.
+
+O inventário manual `preview`/`pilot-check`, ambos somente de leitura, agora descarta o primeiro inventário inteiro e reabre a lista nativa **uma única vez** caso a contagem mude ou caso encontre `RENAME_FLEET_ROUTE_ID_DUPLICATE` ou `RENAME_FLEET_AIRCRAFT_ID_DUPLICATE`. O segundo inventário começa do zero com conjuntos de IDs novos: **não mescla, ignora nem tolera IDs repetidos**, mesmo que as rotas comerciais iguais sejam legítimas. Qualquer duplicidade persistente ou outra identidade inconsistente continua falhando; não há terceira tentativa.
+
+**O modo `pilot` com escrita NÃO executa essa repetição; `apply` de frota completa continua bloqueado.** A prévia concluída deve ser nova e o SHA256 precisa corresponder exatamente ao inventário integral atual. O estágio seguro de diagnóstico de reabertura é `COLLECT_FLEET_REOPEN_AFTER_INCONSISTENT_SNAPSHOT_READ_ONLY`.
+
 ### Contagem da frota muda durante uma prévia ou pilot-check
 
 A [execução read-only #39809109069](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/39809109069) parou em `COLLECT_FLEET` com `RENAME_FLEET_COUNT_CHANGED`, antes de verificar os editores e **sem renomeação**. Isso significa que a contagem exibida variou **durante o inventário**; o log não demonstra se houve alteração real da frota ou atualização temporária da UI.

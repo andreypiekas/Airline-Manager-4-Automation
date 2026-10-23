@@ -401,13 +401,13 @@ export async function runManualFleetRename(page:Page,env:NodeJS.ProcessEnv=proce
    await save();return report;
   }
   markStage('COLLECT_FLEET');
-  // Preview/pilot-check are read-only: a changed route heading invalidates
-  // the partial first snapshot. Reopen and read a fresh complete snapshot
-  // exactly once. Never repeat in pilot (real mutation mode).
+  // Preview/pilot-check are read-only: a changed route heading or duplicated
+  // pagination identity invalidates the partial first snapshot. Reopen and
+  // read a fresh complete snapshot exactly once. Never retry a real pilot.
   const collect=()=>collectRenameInventory(page,timeout,markStage);
   const fleet:CollectionResult=(operation==='preview'||operation==='pilot-check')
    ?await retryOneUnstableReadOnlyFleetSnapshot(collect,async()=>{
-      markStage('COLLECT_FLEET_REOPEN_AFTER_COUNT_CHANGE_READ_ONLY');
+      markStage('COLLECT_FLEET_REOPEN_AFTER_INCONSISTENT_SNAPSHOT_READ_ONLY');
       await openFleetList(page,timeout);
       markStage('COLLECT_FLEET_SECOND_FULL_SNAPSHOT');
     },()=>markStage('COLLECT_FLEET_DISCARD_UNSTABLE_SNAPSHOT'))

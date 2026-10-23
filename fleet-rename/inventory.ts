@@ -63,17 +63,24 @@ export async function readMissingRegistrationFromNativeDetails(
   await details.locator('.col-5 span.l-text').allTextContents());
  return registration;
 }
-/** Retry exactly one whole read-only snapshot if the native heading changed
- * mid-collection. The first partial snapshot is discarded, never combined.
- * Identity/control failures and all failures of the second read stop outright.
- * Mutation-mode callers MUST NOT use this helper.
+/** Retry exactly one *entire* read-only inventory when its heading changes,
+ * or when pagination repeats a route/aircraft ID across pages. This can be
+ * caused by reordering during the scan, but the cause is NOT assumed.
+ * Discard all first-pass data and reopen native Fleet. A repeated problem on
+ * pass two still aborts; no unique ID is skipped, merged or auto-repaired.
+ * Other identity/control failures and ALL mutation runs remain fail-closed.
  */
 export async function retryOneUnstableReadOnlyFleetSnapshot<T>(
  collect:()=>Promise<T>,reopen:()=>Promise<void>,onRetry:()=>void=()=>{}
 ):Promise<T>{
  try{return await collect();}
  catch(error){
-  if(!(error instanceof Error)||error.message!=='RENAME_FLEET_COUNT_CHANGED')
+  const recoverable=new Set([
+   'RENAME_FLEET_COUNT_CHANGED',
+   'RENAME_FLEET_ROUTE_ID_DUPLICATE',
+   'RENAME_FLEET_AIRCRAFT_ID_DUPLICATE'
+  ]);
+  if(!(error instanceof Error)||!recoverable.has(error.message))
    throw error;
   onRetry();
   await reopen();
