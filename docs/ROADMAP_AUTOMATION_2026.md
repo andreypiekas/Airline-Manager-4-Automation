@@ -46,7 +46,8 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 - [x] Incluir prévia somente leitura da fórmula comunitária MIT de tarifas Y/J/F e teto bruto hipotético por destino nos artefatos de referência (ambos os modos; sem influência na decisão). Fonte: https://github.com/abc8747/am4 no commit fixado; validação live continua pendente.
 - [x] Pesquisar independentemente todas as combinações **conhecidas** do catálogo curado por aeronave/base, com limite de 20 candidatas, filtros conservadores de pista/alcance e ranking por teto bruto estático; identificar bases esparsas no `catalog-discovery.md`. Não é cobertura global nem pesquisa live.
 - [ ] Ampliar a fonte estática para todas as bases e pares de aeroportos, especialmente TXL; validar renovação/frescura e proveniência de demanda.
-- [ ] Habilitar inspeção live por destino IATA/ID somente após confirmar controles nativos de consulta read-only e limites de requisições; não criar rotas para sondagem.
+- [x] Consultar read-only pelo ID inequívoco do catálogo após confirmar contexto nativo, com orçamento máximo de cinco cotações adicionais por aeronave e duas por padrão; cada resposta segue para os gates econômicos atuais e nunca autoriza reroute por si só.
+- [ ] Ampliar cobertura de destinos desconhecidos e validar observações live independentes do saldo de demanda de novas rotas para permitir comparações completas; manter HOLD quando faltam dados.
 - [ ] Validate data provenance and compatibility with https://brasil.gt.tc/rotas.
 - [x] Acrescentar comparação somente leitura de teto de ciclos completos em 24h, limitada por duração ida+volta e demanda compartilhada, apenas quando o intervalo econômico tiver validação; não extrapolar reset nem garantir lucro diário.
 - [ ] Compare candidate routes using live verified aircraft, demand, bookings, Fuel, CO2, maintenance, cost, income and daily cycles.
