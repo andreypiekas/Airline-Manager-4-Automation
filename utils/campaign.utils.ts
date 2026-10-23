@@ -203,9 +203,9 @@ export class CampaignUtils {
     public async verifyRequiredCampaignsReadOnly(): Promise<CampaignEvidence> {
         await assertNoInteractiveChallenge(this.page, 'campaign:readonly-recovery');
         const ecoMatches = this.page.locator('td:visible')
-            .filter({ hasText: /^[^A-Za-z0-9]*Eco[\\s-]+friendly\\s*$/i });
+            .filter({ hasText: /^[^A-Za-z0-9]*Eco[\s-]+friendly\s*$/i });
         const reputationMatches = this.page.locator('td:visible')
-            .filter({ hasText: /^[^A-Za-z0-9]*Airline\\s+reputation\\s*$/i });
+            .filter({ hasText: /^[^A-Za-z0-9]*Airline\s+reputation\s*$/i });
         const ecoVerified = await ecoMatches.count() === 1;
         const reputationVerified = this.increaseAirlineReputation
             ? await reputationMatches.count() === 1
