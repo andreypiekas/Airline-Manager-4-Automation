@@ -82,6 +82,10 @@ test('packaged references generate a simulation artifact and incomplete collecti
   const report=await writeReferenceReport(collection,config,directory,new Date('2026-09-01T03:00:00Z'));
   expect(report.warnings).toEqual([]);
   expect(report.routes[0]).toMatchObject({aircraftId:'1',candidates:expect.any(Array)});
+   expect(report.routes[0]).toMatchObject({candidates:expect.arrayContaining([expect.objectContaining({
+     communityPriceScenarios:expect.objectContaining({gameModeVerified:false,comparisonReady:false,mutationAuthorized:false,
+       scenarios:expect.objectContaining({easy:expect.any(Object),realism:expect.any(Object)})})
+   })])});
   const disk=JSON.parse(await readFile(join(directory,'reference-report.json'),'utf8'));
   expect(disk.routes[0].candidates.length).toBeGreaterThan(0);
   expect(disk).toMatchObject({dryRun:true,mutationAuthorized:false,referenceOnly:true,fuel:{status:'ocr-unverified',purchaseAuthorized:false}});

@@ -43,6 +43,7 @@ Source of truth: [production workflow](../.github/workflows/playwright.yml). Thi
 - [ ] Determine the authorized access/export contract of the specific Discord route bot.
 - [ ] Discord indicado pelo usuário para identificar o bot de rotas: https://discord.gg/pJMxbxNaz. **Referência fornecida, ainda sem verificação do bot, permissões ou exportação**; não integrar via scraping não autorizado ou automação de conta de usuário.
 
+- [x] Incluir prévia somente leitura da fórmula comunitária MIT de tarifas Y/J/F e teto bruto hipotético por destino nos artefatos de referência (ambos os modos; sem influência na decisão). Fonte: https://github.com/abc8747/am4 no commit fixado; validação live continua pendente.
 - [ ] Validate data provenance and compatibility with https://brasil.gt.tc/rotas.
 - [ ] Compare candidate routes using live verified aircraft, demand, bookings, Fuel, CO2, maintenance, cost, income and daily cycles.
 - [ ] Provide evidence-backed KEEP/HOLD/REROUTE recommendations in read-only mode first.

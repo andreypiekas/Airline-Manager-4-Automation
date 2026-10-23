@@ -4,13 +4,15 @@ import { CollectionResult } from '../demand/types';
 import { OptimizationConfig } from './report';
 import { resolveAircraftOrigin } from './aircraft-origins';
 import { calendarReference, FuelCalendar, loadReference, RouteCatalog, shortlistRoutes } from './reference-data';
+import { communityRoutePriceScenarios } from './community-route-prices';
 export async function writeReferenceReport(collection: CollectionResult, config: OptimizationConfig, directory='test-results/demand', now=new Date()) {
   let routes: unknown[]=[];const warnings:string[]=[];
   try {
     const catalog=await loadReference<RouteCatalog>('routes.json');
     if(catalog.schemaVersion!==1 || !Array.isArray(catalog.routes)) throw new Error();
     routes=collection.aircraft.map(a=>({aircraftId:a.aircraftId,registration:a.registration,
-      candidates:collection.complete?shortlistRoutes(a,resolveAircraftOrigin(a,collection,config.aircraftOrigins,config.airlineBases).origin,catalog):[]}));
+      candidates:collection.complete?shortlistRoutes(a,resolveAircraftOrigin(a,collection,config.aircraftOrigins,config.airlineBases).origin,catalog)
+        .map(candidate=>({...candidate,communityPriceScenarios:communityRoutePriceScenarios(candidate.distanceKm,a.capacity,candidate.referenceDemand)})):[]}));
   } catch {warnings.push('ROUTE_REFERENCE_UNAVAILABLE');}
   let fuel:unknown={status:'unsupported-month'},co2:unknown={status:'unsupported-month'};
   try {
