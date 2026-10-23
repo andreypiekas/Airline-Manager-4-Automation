@@ -31,6 +31,16 @@ Elas não substituem:
 
 Uma lista de candidatos baseada em referência não é garantia de melhor rota global.
 
+## Descoberta independente das sugestões do jogo
+
+A pesquisa read-only `optimization/reference-discovery.ts` usa o catálogo
+`routes.json` por inteiro, com filtros de alcance, pista e demanda estática,
+para listar até 20 possibilidades por aeronave. Os arquivos
+`reference-report.json` (campo `catalogDiscovery`) e
+`catalog-discovery.md` informam a cobertura de cada base, inclusive quando
+não existem dados suficientes. Nenhum resultado significa melhor rota global:
+a pesquisa não substitui os dados live e não autoriza alterações.
+
 ## Fuel e CO₂
 
 Calendários de preço armazenados em `data/reference/` são somente referência.

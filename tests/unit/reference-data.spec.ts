@@ -89,6 +89,14 @@ test('packaged references generate a simulation artifact and incomplete collecti
   const disk=JSON.parse(await readFile(join(directory,'reference-report.json'),'utf8'));
   expect(disk.routes[0].candidates.length).toBeGreaterThan(0);
   expect(disk).toMatchObject({dryRun:true,mutationAuthorized:false,referenceOnly:true,fuel:{status:'ocr-unverified',purchaseAuthorized:false}});
+   expect(disk.catalogDiscovery).toMatchObject({
+     catalogGlobalCoverageProven:false,authoritativeDemand:false,
+     liveRouteValidationRequired:true,comparisonReady:false,mutationAuthorized:false,
+     coverage:expect.arrayContaining([expect.objectContaining({origin:'GRU',unlistedDestinationsUnknown:true})])
+   });
+   expect(disk.catalogDiscovery.aircraft[0]).toMatchObject({
+     status:'unavailable',ranked:[],mutationAuthorized:false
+   });
   const incomplete=await writeReferenceReport({...collection,complete:false},config,directory);
   expect(incomplete.routes[0]).toMatchObject({candidates:[]});
  } finally {await rm(directory,{recursive:true,force:true});}

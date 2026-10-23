@@ -53,6 +53,42 @@ Quando o Demand Manager confirma `hold_insufficient`, a rota atual não é trata
 
 Estar apenas em solo não prova um retorno.
 
+## Pesquisa direta do catálogo comunitário — além das sugestões nativas
+
+O arquivo `reference-report.json` inclui `catalogDiscovery` e o novo
+`catalog-discovery.md` mostra cobertura por base e candidatos por aeronave,
+independentemente dos botões de sugestão do AM4. O algoritmo lê **todos os
+registros conhecidos** do catálogo curado `data/reference/routes.json`
+(sem realizar requisições adicionais ao jogo) e seleciona no máximo 20 opções
+para cada aeronave elegível.
+
+Filtros conservadores de pré-pesquisa:
+- identidade, base operacional, estado e capacidade atual da aeronave sem ambiguidades;
+- alcance direto da aeronave;
+- pista de ambos os aeroportos, conforme cadastro comunitário inequívoco;
+- demanda diária estática e distância válidas, sem pares duplicados conflitantes;
+- cálculo de tarifa teórica nos dois modos Easy e Realism, sem adivinhar o modo real.
+
+A ordem é dada pelo **menor teto bruto hipotético por partida entre os dois modos**,
+com desempate por cobertura de assentos estática. Isso **não é lucro líquido**,
+nem demanda restante e nem previsão de ocupação real. Não descarta a possibilidade
+de rotas repetidas: apenas informa se o par é o da rota atual.
+
+### Cobertura incompleta
+
+A versão atual do arquivo foi extraída de `All_routes.xlsx`, filtrado na
+importação principalmente pelos hubs GRU, XAP e DTW. TXL possui cobertura escassa.
+Esse conjunto **não representa todas as possíveis rotas do jogo** e não cobre
+automaticamente escalas. Bases e destinos sem registros aparecem explicitamente
+como *não cobertos*, nunca como *sem oportunidades*.
+
+O filtro de pistas é propositalmente conservador, mesmo quando o modo Easy
+permitiria mais opções. As rotas resultantes ainda precisam ser consultadas
+individualmente no jogo, com confirmação de demanda restante, ida/volta, duração,
+pista/alcance, tarifa Auto, competição de outras aeronaves e custos reais.
+Este relatório não entra diretamente no executor: `comparisonReady=false`
+e `mutationAuthorized=false` sempre.
+
 ## Candidatos
 
 Um candidato econômico precisa conter evidências suficientes sobre:
