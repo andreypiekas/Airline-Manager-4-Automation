@@ -90,7 +90,6 @@ export function discoverCatalogRoutesForAircraft(
     catalog.schemaVersion!==1||!Array.isArray(catalog.routes))return unavailable;
   const result:CatalogAircraftDiscovery={...unavailable,status:'no_verified_reference_candidates',
     reason:'NO_DIRECT_CANDIDATE_WITH_UNAMBIGUOUS_RUNWAY_AND_STATIC_DEMAND'};
-  const seen=new Set<string>(),invalid=new Set<string>();
   const candidates:CatalogDiscoveryCandidate[]=[];
   const relevant=catalog.routes.filter(r=>r.from===origin||r.to===origin);
   result.examinedRows=relevant.length;
@@ -108,7 +107,7 @@ export function discoverCatalogRoutesForAircraft(
       r.referenceDemand?.Y!==first.referenceDemand?.Y||
       r.referenceDemand?.J!==first.referenceDemand?.J||
       r.referenceDemand?.F!==first.referenceDemand?.F);
-    if(anyConflict){invalid.add(key);result.excluded.conflictedOrDuplicate+=records.length;continue;}
+    if(anyConflict){result.excluded.conflictedOrDuplicate+=records.length;continue;}
     // Exact duplicate records are processed once only, transparently counted.
     if(records.length>1)result.excluded.conflictedOrDuplicate+=records.length-1;
     if(!validRoute(first)){result.excluded.invalidReference++;continue;}
@@ -130,7 +129,6 @@ export function discoverCatalogRoutesForAircraft(
     if(!Number.isFinite(minGross)||!Number.isFinite(coverage)||coverage<=0){
       result.excluded.noDemandOrFareEvidence++;continue;
     }
-    seen.add(key);
     candidates.push({
       from:origin,to,distanceKm:first.distanceKm,sourceRow:first.sourceRow,referenceDemand:{...first.referenceDemand},
       minTheoreticalGrossAcrossModes:minGross,referenceSeatCoveragePercent:coverage,
