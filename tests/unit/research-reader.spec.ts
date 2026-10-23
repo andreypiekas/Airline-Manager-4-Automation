@@ -241,6 +241,35 @@ test('retryable route research queue rotates fairly across half-hour windows',()
  expect(next.entries[0]).not.toBe(first.entries[0]);
 });
 
+test('scheduled batch rotation inspects distinct sets and covers a 126-aircraft fleet',()=>{
+  const fleet=Array.from({length:126},(_,i)=>String(i+1));
+  const epoch=Date.parse('2026-10-04T05:00:00Z');
+  const inspected=new Set<string>();
+  let previous=new Set<string>();
+  for(let i=0;i<42;i++){
+    const slot=researchQueueRotation(fleet,new Date(epoch+i*30*60000),30,3);
+    expect(slot.stride).toBe(3);
+    const batch=slot.entries.slice(0,3);
+    expect(new Set(batch).size).toBe(3);
+    expect(batch.some(x=>previous.has(x))).toBe(false);
+    batch.forEach(x=>inspected.add(x));
+    previous=new Set(batch);
+  }
+  expect(inspected.size).toBe(126);
+});
+
+test('batch stride matches remaining scheduled capacity after urgent demand work',()=>{
+  const fleet=Array.from({length:12},(_,i)=>String(i+1));
+  const start=new Date('2026-10-04T05:00:00Z');
+  const next=new Date(start.getTime()+30*60000);
+  const a=researchQueueRotation(fleet,start,30,2);
+  const b=researchQueueRotation(fleet,next,30,2);
+  expect(b.offset).toBe((a.offset+2)%fleet.length);
+  expect(a.entries.slice(0,2).some(x=>b.entries.slice(0,2).includes(x))).toBe(false);
+  expect(()=>researchQueueRotation(fleet,next,30,0)).toThrow('RESEARCH_QUEUE_ROTATION_INVALID');
+  expect(()=>researchQueueRotation(fleet,next,30,11)).toThrow('RESEARCH_QUEUE_ROTATION_INVALID');
+});
+
 test('route research queue rotation validates its time window without navigation',()=>{
  expect(()=>researchQueueRotation([1],new Date('invalid'))).toThrow('RESEARCH_QUEUE_ROTATION_INVALID');
  expect(()=>researchQueueRotation([1],new Date(),0)).toThrow('RESEARCH_QUEUE_ROTATION_INVALID');
