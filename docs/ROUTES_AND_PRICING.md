@@ -261,3 +261,18 @@ ROUTE_MAX_REROUTES_PER_RUN=1
 ```
 
 Route review e reroute continuam dependentes de evidência econômica verificada; o executor não força uma troca apenas para testar o caminho de mutação.
+
+
+## Revisao por aeronave: rota atual → calculo → decisao
+
+A coleta validada do jogo ja identifica a rota operacional de cada aeronave. Agora o artifact `aircraft-route-review.json` e a tabela `aircraft-route-review.md` registram, para cada uma:
+
+1. rota atual e desempenho dos voos recentes DO MESMO par (ambos os sentidos), separando receita, consumo efetivo de Fuel e quotas de CO2;
+2. valor de reposicao dos insumos com preco atual do mercado, quando observado com identificacao e validade temporal;
+3. numero de cotacoes obtidas pelo mecanismo nativo do jogo e pelas referencias estaticas curadas;
+4. numero de comparacoes economicamente prontas, decisao conservadora `keep_route`, `would_reroute`, `hold` ou ainda sem pesquisa;
+5. rota proposta somente quando houver comparacao individual comprovada e autorizacoes economicas validas.
+
+**Receita menos Fuel e CO2 NAO e lucro liquido.** Nao inclui A-check, reparos, taxas e despesas nao observadas. Nao marca a rota como globalmente melhor nem autoriza alteracao. O executor existente so recebe o plano comprovado, revalida o jogo e aplica o limite de alteracoes por execucao.
+
+A ferramenta externa de rotas no Discord nao foi integrada: nao ha autenticacao/API validada para consulta automatica. Os calculos deste relatorio usam as cotacoes nativas e o catalogo local, deixando claro que a cobertura de alternativas nao e exaustiva. Para integrar uma calculadora externa no futuro, exigir schema validado, fonte confiavel e comprovacao live antes de mutacoes.
