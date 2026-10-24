@@ -85,27 +85,33 @@ test('short native windows never allow incomplete 112/113 fleet to pass',async (
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
-test('Routes(N) cannot declare success while another native page exists',async ({page})=>{
+test('complete native count keeps existing behavior for residual non-authoritative Next',async ({page})=>{
   await nativeShortWindowFleet(page,[3,1],3);
   const result=await new DemandReader(page,120).collect();
-  expect(result.complete).toBe(false);
-  expect(result.warnings).toContain('PAGINATION_MORE_PAGES_THAN_ROUTE_COUNT');
+  expect(result.complete).toBe(true);
+  expect(result.aircraft).toHaveLength(3);
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(0);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
-test('full page with distinct routes but duplicate aircraft identities is never authorized',async ({page})=>{
-  await nativeShortWindowFleet(page,[2],2);
+test('short-window inventory refuses duplicate aircraft IDs despite complete route count',async ({page})=>{
+  await nativeShortWindowFleet(page,[19,2],21);
   await page.evaluate(()=>{
-    const cards=Array.from(document.querySelectorAll('#routesContainer [id^="routeMainList"]'));
-    const first=cards[0].querySelector('a')!;
-    const second=cards[1].querySelector('a')!;
-    second.setAttribute('onclick',first.getAttribute('onclick')!);
-    second.querySelector('[id^="acRegList"]')!.id=first.querySelector('[id^="acRegList"]')!.id;
+    const w=window as any;
+    const original=w.renderNative;
+    w.renderNative=(index:number)=>{
+      original(index);
+      if(index===1){
+        const row=document.querySelector('#routesContainer [id^="routeMainList"]')!;
+        const anchor=row.querySelector('a')!;
+        anchor.setAttribute('onclick',"playSound('neutral_click');Ajax('fleet_details.php?id=31001','detailsAction');if(intro==0){$('#routeAction').hide();}");
+        row.querySelector('[id^="acRegList"]')!.id='acRegList31001';
+      }
+    };
   });
   const result=await new DemandReader(page,120).collect();
   expect(result.complete).toBe(false);
-  expect(result.warnings).toContain('FLEET_AIRCRAFT_IDENTITY_INCOMPLETE_OR_DUPLICATE');
+  expect(result.warnings).toContain('FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED');
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
 
