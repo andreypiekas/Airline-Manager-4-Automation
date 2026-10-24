@@ -6,7 +6,9 @@ const BRANCH = 'am4-runtime-state';
 const MAX_BYTES = 900000; // Contents API full JSON response is limited to files <= 1 MB.
 const TRANSPORT_HISTORY_LIMITS = {
   reviewEntriesPerAircraftOrigin: 4,
-  departuresPerAircraft: 8,
+  // Recent confirmed history is advisory evidence; retain six cycles per aircraft.
+  // Uncertain mutations and their resolutions remain unbounded and untouched.
+  departuresPerAircraft: 6,
   flightHistoryAnchorsPerAircraft: 3,
   supplyObservationsPerKind: 48,
   holdObservationsPerAircraft: 12,

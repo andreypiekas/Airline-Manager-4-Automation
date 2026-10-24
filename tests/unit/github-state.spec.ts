@@ -97,8 +97,8 @@ test('transport compaction preserves safety events while bounding historical evi
     uiHealthObservations:Array.from({length:100},(_,i)=>({eventId:'ui_'+i,type:'ui-health',observedAt:'2026-01-01T00:00:00.000Z',status:'healthy',surfaces:['fleet']}))};
   const compacted=compactReturnJournalForTransport(journal);
   expect(compacted.entries).toHaveLength(4);
-  expect(compacted.events.filter((e:any)=>e.type==='departure')).toHaveLength(8);
-  expect(compacted.events.filter((e:any)=>e.type==='arrival-observed')).toHaveLength(8);
+  expect(compacted.events.filter((e:any)=>e.type==='departure')).toHaveLength(6);
+  expect(compacted.events.filter((e:any)=>e.type==='arrival-observed')).toHaveLength(6);
   expect(compacted.events.filter((e:any)=>e.type==='flight-history-anchor')).toHaveLength(3);
   expect(compacted.events).toContainEqual(uncertain);
   expect(compacted.supplyObservations).toHaveLength(96);
@@ -118,6 +118,51 @@ test('save compacts an oversized append-only journal before transport',async()=>
   await expect(client.save()).resolves.toBe('saved');
   expect((remote.data as any).uiHealthObservations).toHaveLength(48);
   expect(Buffer.byteLength(JSON.stringify(remote.data))).toBeLessThan(900000);
+});
+
+
+test('high-volume state saves below 900 KB without dropping uncertain mutations',async()=>{
+  const remote=server(),client=new GitHubReturnState(options(),remote.request);
+  await client.restore();
+  const now='2026-01-01T00:00:00.000Z',later='2026-01-01T01:00:00.000Z';
+  const data:any={...empty(),events:[],supplyObservations:[],holdObservations:[],uiHealthObservations:[]};
+  for(let i=0;i<128;i++){
+    const aircraftId=String(i),registration='AC-'+i;
+    for(let k=0;k<8;k++){
+      const eventId='dep_'+i+'_'+k;
+      data.events.push({eventId,type:'departure',aircraftId,registration,routeId:'10',
+        from:'AAA',to:'BBB',observedAt:now,result:'departed',
+        demand:{availableBefore:{Y:100,J:0,F:0},possiblePassengers:{Y:90,J:0,F:0},occupancyPercentage:90},
+        actualOnboard:{Y:90,J:0,F:0}});
+      if(k<6)data.events.push({eventId:'arr_'+i+'_'+k,type:'arrival-observed',
+        departureEventId:eventId,aircraftId,registration,routeId:'10',from:'AAA',to:'BBB',
+        departedAt:now,observedAt:later,result:'arrived_observed'});
+    }
+    for(let k=0;k<3;k++)data.events.push({eventId:'hist_'+i+'_'+k,type:'flight-history-anchor',
+      aircraftId,registration,observedAt:now,cycles:k,rows:[{relativeTime:'1 hour ago',
+        from:'AAA',to:'BBB',co2Quotas:1,onboard:{Y:1,J:0,F:0},fuelLbs:2,revenue:3}]});
+    for(let k=0;k<10;k++)data.holdObservations.push({eventId:'hold_'+i+'_'+k,
+      type:'demand-hold',aircraftId,routeId:'10',observedAt:now,
+      occupancyPercentage:10,reason:'hold_insufficient'});
+  }
+  const uncertain={eventId:'uncertain_must_survive',type:'departure-uncertain',
+    aircraftId:'1',registration:'AC-1',routeId:'10',from:'AAA',to:'BBB',
+    observedAt:now,result:'outcome_unknown',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:TEST',sourceRunId:'1'};
+  data.events.push(uncertain);
+  for(let i=0;i<96;i++)data.supplyObservations.push({eventId:'supply_'+i,
+    type:'supply-observation',kind:i%2?'fuel':'co2',observedAt:now,
+    pricePer1000:1,holding:1,remainingCapacity:1,balance:1});
+  for(let i=0;i<48;i++)data.uiHealthObservations.push({eventId:'ui_'+i,
+    type:'ui-health',observedAt:now,status:'healthy',surfaces:['login','fleet','maintenance','marketing','supplies']});
+  expect(Buffer.byteLength(JSON.stringify(data))).toBeGreaterThan(900000);
+  await writeFile(join(options().directory,'return-journal.json'),JSON.stringify(data));
+  await expect(client.save()).resolves.toBe('saved');
+  const saved=remote.data as any;
+  expect(Buffer.byteLength(JSON.stringify(saved))).toBeLessThan(900000);
+  expect(saved.events.filter((e:any)=>e.type==='departure')).toHaveLength(128*6);
+  expect(saved.events).toContainEqual(uncertain);
+  expect(saved.events.filter((e:any)=>e.type==='arrival-observed').every(
+    (e:any)=>saved.events.some((d:any)=>d.eventId===e.departureEventId))).toBe(true);
 });
 
 test('saved history cannot be removed or edited',async()=>{
