@@ -21,6 +21,8 @@ export interface LiveCatalogQuoteScan {
   screenedOut:Array<{airportId:string;to:string;coverageCeilingPercent:number|null;reason:string}>;
   warnings:string[];
   stoppedEarly:boolean;
+  /** Sanitized phase of the failed read-only verification; never request, DOM or account content. */
+  failureStage:null|'challenge'|'planner'|'response'|'quote_identity'|'screening'|'close';
   mutationAuthorized:false;
 }
 
@@ -83,7 +85,7 @@ export async function collectLiveCatalogQuotes(
     targets.length>5)throw new Error('CATALOG_LIVE_QUERY_CONFIG_INVALID');
   const output:LiveCatalogQuoteScan={
     aircraftId:aircraft.aircraftId,attempted:0,observed:0,quotes:[],screenedOut:[],
-    warnings:[],stoppedEarly:false,mutationAuthorized:false
+    warnings:[],stoppedEarly:false,failureStage:null,mutationAuthorized:false
   };
   const age=Date.now()-Date.parse(aircraft.observedAt);
   if(!Number.isFinite(age)||age<0||age>300000||aircraft.issue||aircraft.state!=='ready'||
@@ -102,8 +104,10 @@ export async function collectLiveCatalogQuotes(
     }
     ids.add(target.airportId);
     output.attempted++;
+    let stage:NonNullable<LiveCatalogQuoteScan['failureStage']>='challenge';
     try{
       await assertNoInteractiveChallenge(page,'route:catalog-quote');
+      stage='planner';
       const trigger=page.locator('#flightInfoContainer #introSuggest');
       if(await trigger.count()!==1||!await trigger.isVisible()||
         !await trigger.isEnabled())throw new Error('CATALOG_PLANNER_CONTROL_UNVERIFIED');
@@ -113,6 +117,7 @@ export async function collectLiveCatalogQuotes(
         throw new Error('CATALOG_PLANNER_CONTEXT_UNVERIFIED');
       const panel=page.locator('#newRouteInfo');
       if(await panel.count()!==1||await panel.isVisible())throw new Error('CATALOG_PREVIOUS_PANEL_NOT_CLOSED');
+      stage='response';
       const requestUrl=`new_route_info.php?id=${aircraft.aircraftId}&airportId=${target.airportId}&ferry=0`;
       const responsePromise=page.waitForResponse(r=>{
         try{
@@ -131,11 +136,13 @@ export async function collectLiveCatalogQuotes(
       const response=await responsePromise;
       if(!response.ok())throw new Error('CATALOG_READONLY_QUOTE_RESPONSE_FAILED');
       await panel.waitFor({state:'visible',timeout});
+      stage='quote_identity';
       const read=await readOpenCandidateQuoteAfterVerifiedAjax(page,{
         aircraftId:aircraft.aircraftId,registration:aircraft.registration,
         airportId:target.airportId,from:origin,to:target.to
       });
       if(read.status!=='observed')throw new Error('CATALOG_READONLY_QUOTE_IDENTITY_UNVERIFIED');
+      stage='screening';
       const screening=screenCandidateEconomics(read.quote,aircraft.capacity,minCoveragePercent,new Date(),300);
       try{read.quote.routeResponseDiagnostics=inspectRouteQuoteResponse(await response.text());}
       catch{read.quote.routeResponseDiagnostics=inspectRouteQuoteResponse('');}
@@ -144,9 +151,11 @@ export async function collectLiveCatalogQuotes(
           coverageCeilingPercent:screening.coverageCeilingPercent,reason:screening.reason});
       }else output.quotes.push(read.quote);
       output.observed++;
+      stage='close';
       await closeVerifiedQuote(page,timeout);
     }catch{
       output.stoppedEarly=true;
+      output.failureStage=stage;
       output.warnings.push('CATALOG_LIVE_QUOTE_OR_UI_UNVERIFIED');
       break;
     }
