@@ -45,7 +45,7 @@ async function nativeShortWindowFleet(page:Page,windows:number[],reportedCount:n
       }
     };
     w.Ajax=(target:string)=>{
-      const match=target.match(/^routes\\.php\\?start=(\\d+)&sort=$/);
+      const match=target.match(/^routes\.php\?start=(\d+)&sort=$/);
       if(!match){w.mutations++;return;}
       w.pageAdvances++;
       w.renderNative(Number(match[1])/20);
