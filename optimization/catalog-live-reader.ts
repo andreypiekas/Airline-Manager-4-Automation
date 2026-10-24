@@ -55,7 +55,7 @@ export function selectLiveCatalogQuoteTargets(
     throw new Error('CATALOG_LIVE_QUERY_CONFIG_INVALID');
   const origin=discovery.origin!;
   const freshPeer=(a:AircraftSnapshot)=>!a.issue&&
-    (a.state==='ready'||a.state==='inflight')&&a.operational!==null&&!!a.capacity&&
+    (a.state==='ready'||a.state==='inflight')&&!!a.operational&&!!a.capacity&&
     !!a.remaining&&!!a.dailyTotal&&
     ['Y','J','F'].every(k=>{
       const cabin=k as 'Y'|'J'|'F';
