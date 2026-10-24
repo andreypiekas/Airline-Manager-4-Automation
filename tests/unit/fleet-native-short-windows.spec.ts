@@ -93,3 +93,27 @@ test('Routes(N) cannot declare success while another native page exists',async (
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(0);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+
+test('full page with distinct routes but duplicate aircraft identities is never authorized',async ({page})=>{
+  await nativeShortWindowFleet(page,[2],2);
+  await page.evaluate(()=>{
+    const cards=Array.from(document.querySelectorAll('#routesContainer [id^="routeMainList"]'));
+    const first=cards[0].querySelector('a')!;
+    const second=cards[1].querySelector('a')!;
+    second.setAttribute('onclick',first.getAttribute('onclick')!);
+    second.querySelector('[id^="acRegList"]')!.id=first.querySelector('[id^="acRegList"]')!.id;
+  });
+  const result=await new DemandReader(page,120).collect();
+  expect(result.complete).toBe(false);
+  expect(result.warnings).toContain('FLEET_AIRCRAFT_IDENTITY_INCOMPLETE_OR_DUPLICATE');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('target lookup traverses short native windows without assuming initial page size',async ({page})=>{
+  await nativeShortWindowFleet(page,[15,13,15,14,19,19,18],113);
+  const {findFleetRoute}=await import('../../demand/navigation');
+  await findFleetRoute(page,{routeId:'1113',aircraftId:'31113'} as any,120);
+  expect(await page.locator('#routeMainList1113').isVisible()).toBe(true);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(6);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
