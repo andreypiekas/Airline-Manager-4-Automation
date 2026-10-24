@@ -123,7 +123,7 @@ test('rounded live factor is refined only by stable observed history inside its 
  expect(r.status).toBe('verified_single_cabin_equivalence');expect(r.formulaVerified).toBe(true);expect(r.quoteFactor).toBe(displayed);expect(r.calibratedFactorPerUnit).toBeCloseTo(actual,4);expect(r.fixedQuotasPerKm).toBeCloseTo(fixedObserved,3);
 });
 test('recent eight consecutive flights corroborate a changed CO2 policy without using stale historical model',()=>{
- const loads:[[number,number,number],...(number[])[]]=[
+ const loads:Array<[number,number,number]>=[
   [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3],[80,8,2],[95,1,5],
   [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3]
  ];
@@ -146,7 +146,7 @@ test('recent eight consecutive flights corroborate a changed CO2 policy without 
 });
 
 test('recent-history fallback refuses stale, gapped or conflicting observations',()=>{
- const mixes:[[number,number,number],...(number[])[]]=[
+ const mixes:Array<[number,number,number]>=[
   [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3],[80,8,2],[95,1,5],
   [120,4,3],[117,4,3]
  ];
