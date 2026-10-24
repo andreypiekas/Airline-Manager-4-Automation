@@ -137,6 +137,9 @@ export class DemandReader {
       const heading = await this.page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ }).innerText();
       result.expectedRoutes = integerText(heading.match(/\((\d+)\)/)![1]);
       let maxPages=1,firstPageSize=0;
+      // Routes(N) counts identities, while the native Next cursor advances
+      // in 20-slot offsets. Short rendered windows do not end pagination.
+      const maxReadOnlyPages=Math.min(64,Math.max(1,result.expectedRoutes));
       for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
@@ -174,14 +177,18 @@ export class DemandReader {
         }
         if(pageIndex>0){
           stage='PAGINATION_PAGE_VERIFY';
-          const required=Math.min(firstPageSize,result.expectedRoutes-seenRoutes.size);
+          const required=Math.min(nativePageSize,result.expectedRoutes-seenRoutes.size);
           // Native offset pagination counts slots, not the rows captured by
           // preceding pages. If a prior native window rendered 19/20 cards,
           // the last start=60 page of Routes(67) naturally contains 7 cards;
           // requiring 8 here falsely reports PAGINATION_DUPLICATE.
-          const nativeRemainder=Math.min(firstPageSize,
-            result.expectedRoutes-pageIndex*firstPageSize);
-          const isLastNativePage=pageIndex===maxPages-1;
+          const nextOnPage=this.page.locator('#routesContainer .pagination')
+            .getByRole('link',{name:'Next',exact:true});
+          const nextCount=await nextOnPage.count();
+          const nextOffset=nextCount===1 && await nextOnPage.isVisible()
+            ? nativeNextStart(await nextOnPage.getAttribute('onclick')||'') : null;
+          const nativeNextVerified=nextOffset===(pageIndex+1)*nativePageSize;
+          const nativeEndVerified=nextCount===0;
           try{
             await expect.poll(()=>freshPage(required),{timeout:this.timeout}).toBe(true);
           }catch{
@@ -196,8 +203,7 @@ export class DemandReader {
             const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
             const nativeNext=await next.count()===1 && await next.isVisible() &&
               nativeNextStart(await next.getAttribute('onclick')||'')===(pageIndex+1)*nativePageSize;
-            const safeShort=pageIndex<maxPages-1 &&
-              required===nativePageSize &&
+            const safeShort=(nativeNextVerified||nativeEndVerified) &&
               ids.length>0 && ids.length<required &&
               new Set(ids).size===ids.length &&
               ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
@@ -208,9 +214,9 @@ export class DemandReader {
             // This is inspection-only; full unique fleet coverage is still
             // required before any operational action.
             const overlaps=ids.filter(id=>seenRoutes.has(id));
-            const safeBoundaryOverlap=pageIndex<maxPages-1 &&
-              required===nativePageSize &&
-              ids.length===required && new Set(ids).size===ids.length &&
+            const safeBoundaryOverlap=(nativeNextVerified||nativeEndVerified) &&
+              ids.length>0 && ids.length<=nativePageSize && new Set(ids).size===ids.length &&
+              ids.length-overlaps.length<=required &&
               overlaps.length===1 &&
               verifiedPages[pageIndex-1]?.includes(overlaps[0])===true &&
               // The live pagination may repeat one previously verified
@@ -218,20 +224,8 @@ export class DemandReader {
               // the later identity equality check rejects changed aircraft,
               // and N distinct route AND aircraft IDs remain mandatory before
               // any operational action can be authorized.
-              ids.every(id=>/^[1-9]\d*$/.test(id)) && nativeNext;
-            const lastNativeMatchesOffset=isLastNativePage &&
-              ids.length>=nativeRemainder && ids.length<required &&
-              new Set(ids).size===ids.length &&
-              ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
-              await next.count()===0;
-            if(lastNativeMatchesOffset){
-              console.warn('[FleetPageDiagnostic] '+JSON.stringify({
-                status:'FINAL_NATIVE_OFFSET_WINDOW_READ_ONLY',
-                page:pageIndex,nativeOffset:pageIndex*firstPageSize,
-                nativeExpected:nativeRemainder,remainingForFullCoverage:required,
-                visible:ids.length,missingForFullCoverage:required-ids.length
-              }));
-            }else if(safeShort){
+              ids.every(id=>/^[1-9]\d*$/.test(id)) && (nativeNextVerified||nativeEndVerified);
+            if(safeShort){
               shortIntermediatePages.push(pageIndex);
               console.warn('[FleetPageDiagnostic] '+JSON.stringify({
                 status:'INTERMEDIATE_NATIVE_WINDOW_SHORT_READ_ONLY_CONTINUE',
@@ -275,7 +269,7 @@ export class DemandReader {
           const usesNative20=result.expectedRoutes>nativePageSize &&
             await nativeNext.count()===1 && nativeNextStart(await nativeNext.getAttribute('onclick')||'')===nativePageSize;
           firstPageSize=usesNative20?nativePageSize:cards.length;
-          maxPages=routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize));
+          maxPages=Math.min(maxReadOnlyPages,routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize)));
         }
         // Routes(N) must not drift while paging, even transiently. Opening
         // details may later reset the Fleet list and visually restore an
@@ -322,6 +316,13 @@ export class DemandReader {
           }
         }
         if(seenRoutes.size===result.expectedRoutes){
+          // The heading is not proof that no additional native page exists.
+          const finalNext=this.page.locator('#routesContainer .pagination')
+            .getByRole('link',{name:'Next',exact:true});
+          if(await finalNext.count()!==0){
+            result.warnings.push('PAGINATION_MORE_PAGES_THAN_ROUTE_COUNT');
+            return result;
+          }
           // Phase 2: inspect details only after the whole route inventory is
           // verified. Re-open native Fleet only if the target row is absent.
           stage='AIRCRAFT_DETAILS';
@@ -376,6 +377,20 @@ export class DemandReader {
         }
         stage='PAGINATION_NEXT';
         const next = this.page.locator('#routesContainer .pagination').getByRole('link', { name: 'Next', exact: true });
+        // Routes(N)/20 is only a lower bound when native windows render short.
+        // Extend read-only iteration ONLY through the exact native offset;
+        // a later mutation still needs all N unique aircraft and route IDs.
+        const following=nativeNextStart(await next.getAttribute('onclick')||'');
+        if(pageIndex===maxPages-1 && await next.count()===1 &&
+           await next.isVisible() && following===(pageIndex+1)*nativePageSize &&
+           maxPages<maxReadOnlyPages){
+          maxPages++;
+          console.warn('[FleetPagination] '+JSON.stringify({
+            status:'NATIVE_CURSOR_EXTENDED_READ_ONLY',page:pageIndex,
+            observed:seenRoutes.size,expected:result.expectedRoutes,
+            nextStart:following,limit:maxReadOnlyPages
+          }));
+        }
         if (pageIndex===maxPages-1 || await next.count()!==1) {
           result.warnings.push('ROUTE_COUNT_MISMATCH','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
           if(firstWindowShort||shortIntermediatePages.length)
