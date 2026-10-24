@@ -1,6 +1,7 @@
 import { collectCandidateData, writeCandidateDataReport, researchConfig, researchFleetCandidates, writeRouteResearchReport } from '../optimization/research-reader';
 import { writeOccupancyAudit } from './occupancy-audit';
 import { writeReferenceReport } from '../optimization/reference-report';
+import { buildAircraftRouteReview, writeAircraftRouteReview } from '../optimization/aircraft-route-review';
 import { RouteReview } from '../optimization/route-optimizer';
 import { writeFleetObservations } from '../optimization/fleet-observations';
 import { analyzeOptimizationWithJournal, optimizationConfig, writeOptimizationReport } from '../optimization/report';
@@ -47,6 +48,9 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
     : [];
   const candidateData=await collectCandidateData(page,collection,researchReport,optimization.minOccupancy,liveStitches,report);
   await writeCandidateDataReport(candidateData);
+  const routeReview=buildAircraftRouteReview({collection,research:researchReport,analysis:candidateData});
+  await writeAircraftRouteReview(routeReview);
+  console.log('[AircraftRouteReview] '+JSON.stringify(routeReview.summary));
   if(optimization.returnJournal&&/^[1-9]\d*$/.test(process.env.GITHUB_RUN_ID||'')){
     const anchors=await appendFlightHistoryAnchors(optimization.returnJournal.directory,optimization.returnJournal.scope,process.env.GITHUB_RUN_ID!,collection,candidateData.flightHistoryCoverage);
     console.log('[History] Ancoras compactas de Flight History acrescentadas: '+anchors+'.');
