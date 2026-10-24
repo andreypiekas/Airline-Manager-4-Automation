@@ -57,15 +57,17 @@ test('aggregate route comparison readiness requires every inspected decision to 
   expect(routeDecisionSetComparisonReady([])).toBe(false);
   expect(routeDecisionSetComparisonReady([hold])).toBe(false);
   expect(routeDecisionSetComparisonReady([{...hold,decision:'unavailable'}])).toBe(false);
-  expect(routeDecisionSetComparisonReady([{...hold,decision:'keep_route'}])).toBe(true);
-  expect(routeDecisionSetComparisonReady([{...hold,decision:'would_reroute'}])).toBe(true);
+  expect(routeDecisionSetComparisonReady([{...hold,decision:'keep_route'}])).toBe(false);
+  expect(routeDecisionSetComparisonReady([{...hold,candidateSetComplete:true,decision:'keep_route'}])).toBe(true);
+  expect(routeDecisionSetComparisonReady([{...hold,decision:'would_reroute'}])).toBe(false);
+  expect(routeDecisionSetComparisonReady([{...hold,candidateSetComplete:true,decision:'would_reroute'}])).toBe(true);
   expect(routeDecisionSetComparisonReady([
     {...hold,aircraftId:'101',decision:'keep_route'},
     {...hold,aircraftId:'102',decision:'hold'}
   ])).toBe(false);
   expect(routeDecisionSetComparisonReady([
-    {...hold,aircraftId:'101',decision:'keep_route'},
-    {...hold,aircraftId:'102',decision:'would_reroute'}
+    {...hold,aircraftId:'101',decision:'keep_route',candidateSetComplete:true},
+    {...hold,aircraftId:'102',decision:'would_reroute',candidateSetComplete:true}
   ])).toBe(true);
 });
 
@@ -76,6 +78,32 @@ test('partially verified candidate set stays HOLD instead of prematurely KEEP or
   const r=planVariableRouteDecision('101',[ready,incomplete]);
   expect(r).toMatchObject({decision:'hold',compared:1,dominating:0,selected:null,
     reason:'INCOMPLETE_VERIFIED_CANDIDATE_COMPARISON_SET',mutationAuthorized:false});
+});
+
+test('one independently verified dominant alternative may improve current route even if other probes are incomplete',()=>{
+  const winner=candidate('AAA',1300);
+  const unverified=candidate('BBB',10000);unverified.comparisonReady=false;
+  const result=planVariableRouteDecision('101',[winner,unverified]);
+  expect(result).toMatchObject({
+    decision:'would_reroute',selected:{from:'GRU',to:'AAA',airportId:'1'},
+    compared:1,dominating:1,candidateSetComplete:false,
+    reason:'PROVEN_CONSERVATIVE_IMPROVEMENT_WITH_PARTIAL_CANDIDATE_SET',
+    dryRun:true,mutationAuthorized:false
+  });
+  expect(routeDecisionSetComparisonReady([result])).toBe(false);
+  expect(unverified.comparisonReady).toBe(false);
+});
+
+test('partial set never authorizes a speculative improvement or a premature keep',()=>{
+  const unready=candidate('BBB',100000);unready.comparisonReady=false;
+  const notBetter=candidate('AAA',1000,'keep_current');
+  const hold=planVariableRouteDecision('101',[notBetter,unready]);
+  expect(hold).toMatchObject({decision:'hold',selected:null,
+    candidateSetComplete:false,reason:'INCOMPLETE_VERIFIED_CANDIDATE_COMPARISON_SET'});
+  const incompleteControl=candidate('AAA',1000,'candidate_dominates',false);
+  const blocked=planVariableRouteDecision('101',[incompleteControl,unready]);
+  expect(blocked).toMatchObject({decision:'hold',selected:null,candidateSetComplete:false,
+    reason:'BEST_DOMINANT_CANDIDATE_MUTATION_CONTROL_UNVERIFIED'});
 });
 
 test('best economic dominant must itself have native mutation evidence',()=>{

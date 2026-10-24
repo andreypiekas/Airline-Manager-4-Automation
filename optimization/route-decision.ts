@@ -24,6 +24,8 @@ export interface VariableRouteDecision {
   selected:null|{from:string;to:string;airportId:string;conservativeProfitPerHour:number;firstCycleLow:number};
   compared:number;
   dominating:number;
+  /** False if any inspected candidate lacks an economically verified comparison. */
+  candidateSetComplete:boolean;
   reason:string;
   dryRun:true;
   mutationAuthorized:false;
@@ -41,7 +43,7 @@ export function planVariableRouteDecision(
   candidates:RouteDecisionCandidate[]
 ):VariableRouteDecision {
   const base:VariableRouteDecision={
-    aircraftId,decision:'unavailable',selected:null,compared:0,dominating:0,
+    aircraftId,decision:'unavailable',selected:null,compared:0,dominating:0,candidateSetComplete:false,
     reason:'ROUTE_COMPARISON_SET_UNAVAILABLE',dryRun:true,mutationAuthorized:false
   };
   if(!/^[1-9]\d*$/.test(aircraftId)||!Array.isArray(candidates)||!candidates.length||
@@ -51,20 +53,20 @@ export function planVariableRouteDecision(
   const comparable=candidates.filter(c=>c.comparisonReady&&c.variableCycleComparison.comparisonReady&&
     c.variableCycleComparison.status!=='unavailable'&&c.candidateVariableCycle.status==='verified_interval');
   if(!comparable.length)return {...base,decision:'hold',reason:'NO_VERIFIED_VARIABLE_CYCLE_COMPARISON'};
-  // KEEP means every inspected candidate was actually compared. A partial set
-  // can never prove that the current route should be retained.
-  if(comparable.length!==candidates.length)return {
-    ...base,decision:'hold',compared:comparable.length,
-    reason:'INCOMPLETE_VERIFIED_CANDIDATE_COMPARISON_SET'
-  };
-
+  const candidateSetComplete=comparable.length===candidates.length;
+  // A proven improvement over the current route is independently actionable.
+  // Other unverified candidates may be better, but cannot negate the proven
+  // conservative dominance over the current route. Incomplete review MUST NOT
+  // be represented as a global/completed comparison, or authorize KEEP.
   const economicDominant=comparable.filter(c=>c.variableCycleComparison.status==='candidate_dominates'&&
     finite(c.candidateVariableCycle.recurringCycleProfitPerHour.low)&&
     finite(c.candidateVariableCycle.firstCycleAfterSetup.low)&&c.candidateVariableCycle.firstCycleAfterSetup.low!>0);
 
   if(!economicDominant.length)return {
-    ...base,decision:'keep_route',compared:comparable.length,dominating:0,
-    reason:'NO_INSPECTED_CANDIDATE_PROVES_CONSERVATIVE_DOMINANCE'
+    ...base,decision:candidateSetComplete?'keep_route':'hold',
+    compared:comparable.length,dominating:0,candidateSetComplete,
+    reason:candidateSetComplete?'NO_INSPECTED_CANDIDATE_PROVES_CONSERVATIVE_DOMINANCE':
+      'INCOMPLETE_VERIFIED_CANDIDATE_COMPARISON_SET'
   };
 
   economicDominant.sort((a,b)=>
@@ -76,22 +78,24 @@ export function planVariableRouteDecision(
   const control=best.routeMutationControl;
   if(!control?.nativeClickReady||!control.endpointVerified||!control.targetVerified||
     !control.aircraftIdMatchesContext||!control.airportIdMatchesContext)return {
-      ...base,decision:'hold',compared:comparable.length,dominating:economicDominant.length,
+      ...base,decision:'hold',compared:comparable.length,dominating:economicDominant.length,candidateSetComplete,
       reason:'BEST_DOMINANT_CANDIDATE_MUTATION_CONTROL_UNVERIFIED'
     };
 
   return {
-    ...base,decision:'would_reroute',compared:comparable.length,dominating:economicDominant.length,
+    ...base,decision:'would_reroute',compared:comparable.length,dominating:economicDominant.length,candidateSetComplete,
     selected:{
       from:best.from,to:best.to,airportId:best.airportId,
       conservativeProfitPerHour:best.candidateVariableCycle.recurringCycleProfitPerHour.low!,
       firstCycleLow:best.candidateVariableCycle.firstCycleAfterSetup.low!
     },
-    reason:'BEST_CONSERVATIVE_LOW_BOUND_AMONG_VERIFIED_DOMINATING_CANDIDATES'
+    reason:candidateSetComplete?'BEST_CONSERVATIVE_LOW_BOUND_AMONG_VERIFIED_DOMINATING_CANDIDATES':
+      'PROVEN_CONSERVATIVE_IMPROVEMENT_WITH_PARTIAL_CANDIDATE_SET'
   };
 }
 
 /** True only when route economics produced a completed safe decision. HOLD remains retryable and never marks comparison ready. */
 export function routeDecisionSetComparisonReady(decisions:readonly VariableRouteDecision[]):boolean{
-  return decisions.length>0&&decisions.every(d=>d.decision==='keep_route'||d.decision==='would_reroute');
+  return decisions.length>0&&decisions.every(d=>d.candidateSetComplete&&
+    (d.decision==='keep_route'||d.decision==='would_reroute'));
 }
