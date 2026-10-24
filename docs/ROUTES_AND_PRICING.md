@@ -177,6 +177,27 @@ Dados ausentes permanecem ausentes. Não são preenchidos com zero.
 | `already_reviewed` | evento diário/retorno já consumido |
 | `unavailable` | contexto insuficiente |
 
+## Troca individual comprovada com pesquisa parcial
+
+A pesquisa pode retornar várias cotações, mas algumas não têm histórico suficiente
+para comprovar ida e volta, demanda restante, concorrência ou custos. Se **ao menos
+uma** candidata passou por **todos** os critérios de comparação conservadora
+`candidate_dominates` contra a rota atual, tem lucro positivo mesmo após
+a taxa de troca e possui controle de mutação confirmado, é possível propor
+`would_reroute` para **essa candidata verificada**, sem aguardar que todas
+as alternativas inconclusivas sejam resolvidas.
+
+Esse resultado recebe `candidateSetComplete=false` e **não** anuncia melhor
+rota global, nem uma pesquisa concluída. `routeDecisionSetComparisonReady`
+continua falso enquanto houver qualquer candidata inconclusiva.
+
+Um conjunto parcial **sem** candidata independentemente comprovada
+permanece em `hold`: ele nunca vira `keep_route` por falta de evidência.
+Uma candidata sem controles nativos confiáveis também continua em `hold`.
+A autorização para executar mantém todos os gates existentes, o fingerprint
+revalidado, o limite por execução, confirmação pós-alteração e quarentena
+em caso de resultado incerto.
+
 ## Cenário teórico de ciclos em 24 horas
 
 O relatório `candidate-data.json` passa a registrar `dailyPotential` por candidata e
