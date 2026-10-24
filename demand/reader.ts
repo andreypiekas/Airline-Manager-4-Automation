@@ -380,7 +380,8 @@ export class DemandReader {
         // Routes(N)/20 is only a lower bound when native windows render short.
         // Extend read-only iteration ONLY through the exact native offset;
         // a later mutation still needs all N unique aircraft and route IDs.
-        const following=nativeNextStart(await next.getAttribute('onclick')||'');
+        const following=await next.count()===1
+          ?nativeNextStart(await next.getAttribute('onclick')||'') : null;
         if(pageIndex===maxPages-1 && await next.count()===1 &&
            await next.isVisible() && following===(pageIndex+1)*nativePageSize &&
            maxPages<maxReadOnlyPages){
