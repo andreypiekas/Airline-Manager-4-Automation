@@ -1,6 +1,7 @@
 import type { AircraftSnapshot } from '../demand/types';
 import type { CandidateQuote } from './quote-reader';
 import type { RouteCatalog } from './reference-data';
+import { relativeAgeIntervalMinutes } from './demand-reset-ledger';
 
 export interface Co2CalibrationSample {
   from:string;
@@ -26,6 +27,9 @@ export interface Co2CalibrationEvidence {
   weightedMeanAbsoluteErrorRatio:number|null;
   physicalMeanAbsoluteErrorRatio:number|null;
   formulaVerified:boolean;
+  /** Diagnostic: only the most recent chronological eight rows can replace a drifted lifetime fit. */
+  fitScope?:'full_history'|'recent_consecutive_eight'|'unavailable';
+  fitSamplesUsed?:number;
   reason:string;
   comparisonReady:false;
   mutationAuthorized:false;
@@ -68,7 +72,8 @@ export function calibrateCo2FromFlightHistory(
     quoteFactor:null,calibratedFactorPerUnit:null,fixedQuotasPerKm:null,samples:[],
     weightedResidualSpread:null,physicalResidualSpread:null,
     weightedMeanAbsoluteErrorRatio:null,physicalMeanAbsoluteErrorRatio:null,
-    formulaVerified:false,reason:'EVIDENCE_INCOMPLETE',comparisonReady:false,mutationAuthorized:false
+    formulaVerified:false,fitScope:'unavailable',fitSamplesUsed:0,
+    reason:'EVIDENCE_INCOMPLETE',comparisonReady:false,mutationAuthorized:false
   };
   if(!Number.isSafeInteger(maxAgeSeconds)||maxAgeSeconds<1||!catalog||catalog.schemaVersion!==1||
     !Array.isArray(catalog.routes)||aircraft.issue||!aircraft.capacity||!aircraft.flightHistory||
@@ -112,33 +117,78 @@ export function calibrateCo2FromFlightHistory(
   }
   if(samples.length<4)return {...base,quoteFactor:factor,samples,reason:'TOO_FEW_RESOLVED_HISTORY_SAMPLES'};
 
-  const weightedFit=fit(samples,s=>s.weightedCabinUnits),physicalFit=fit(samples,s=>s.physicalPassengers);
-  if(!weightedFit||!physicalFit)return {...base,quoteFactor:factor,samples,reason:'HISTORY_LOAD_VARIATION_INSUFFICIENT'};
-  const fixed=weightedFit.intercept,weightedSpread=weightedFit.residualSpread,physicalSpread=physicalFit.residualSpread;
-  const weightedMae=weightedFit.mae,physicalMae=physicalFit.mae;
-  // The UI exposes the live factor rounded to two decimals. Historical calibration may refine
-  // that displayed value, but only inside the exact rounding interval represented by the UI.
-  const factorCompatible=Math.abs(weightedFit.slope-factor)<0.005;
-  const premiumMix=new Set(samples.map(s=>s.onboard.J+2*s.onboard.F)).size>=2&&samples.some(s=>s.onboard.J+s.onboard.F>0);
-  const loadMix=new Set(samples.map(s=>s.weightedCabinUnits)).size>=3;
+  const assess=(rows:Co2CalibrationSample[])=>{
+    const weightedFit=fit(rows,s=>s.weightedCabinUnits);
+    const physicalFit=fit(rows,s=>s.physicalPassengers);
+    if(!weightedFit||!physicalFit)return null;
+    const fixed=weightedFit.intercept,weightedSpread=weightedFit.residualSpread;
+    const weightedMae=weightedFit.mae,physicalSpread=physicalFit.residualSpread,physicalMae=physicalFit.mae;
+    // The current UI rounds the factor to two decimals. Never silently
+    // accept historical slopes outside that displayed interval.
+    const factorCompatible=Math.abs(weightedFit.slope-factor)<0.005;
+    const premiumMix=new Set(rows.map(r=>r.onboard.J+2*r.onboard.F)).size>=2&&
+      rows.some(r=>r.onboard.J+r.onboard.F>0);
+    const loadMix=new Set(rows.map(r=>r.weightedCabinUnits)).size>=3;
+    const stable=factorCompatible&&weightedFit.slope>0&&Number.isFinite(fixed)&&
+      fixed>=0&&weightedSpread<=0.025&&weightedMae<=0.005;
+    const distinguishes=premiumMix&&loadMix&&
+      (physicalSpread>=weightedSpread+0.05||physicalMae>=Math.max(0.002,weightedMae*2));
+    const economyOnly=aircraft.capacity!.Y>0&&aircraft.capacity!.J===0&&aircraft.capacity!.F===0&&
+      rows.every(r=>r.onboard.J===0&&r.onboard.F===0);
+    const singleCabinEquivalent=economyOnly&&loadMix;
+    return {weightedFit,physicalFit,fixed,weightedSpread,weightedMae,physicalSpread,physicalMae,
+      factorCompatible,stable,singleCabinEquivalent,
+      verified:stable&&(distinguishes||singleCabinEquivalent)};
+  };
+  let selected=assess(samples);
+  if(!selected)return {...base,quoteFactor:factor,samples,reason:'HISTORY_LOAD_VARIATION_INSUFFICIENT'};
+  let fitScope:'full_history'|'recent_consecutive_eight'='full_history';
+  let fitSamplesUsed=samples.length;
 
-  const stable=factorCompatible&&weightedFit.slope>0&&Number.isFinite(fixed)&&fixed>=0&&weightedSpread<=0.025&&weightedMae<=0.005;
-  const distinguishes=premiumMix&&loadMix&&(physicalSpread>=weightedSpread+0.05||physicalMae>=Math.max(0.002,weightedMae*2));
-  const economyOnly=aircraft.capacity.Y>0&&aircraft.capacity.J===0&&aircraft.capacity.F===0&&samples.every(s=>s.onboard.J===0&&s.onboard.F===0);
-  // For an economy-only layout, physical passengers and Y+2J+3F are mathematically identical.
-  // In that case a stable live-history fit with several load levels is sufficient to verify
-  // quota prediction for this aircraft without pretending we distinguished premium weights.
-  const singleCabinEquivalent=economyOnly&&loadMix;
-  const verified=stable&&(distinguishes||singleCabinEquivalent);
+  // Older training, fleet configuration, or route-model changes can make a
+  // lifetime fit nonstationary. Recalibrate ONLY from the eight *first*
+  // consecutive chronological rows, not an opportunistically chosen subset,
+  // and only when the new interval independently agrees with the LIVE factor.
+  // Any gap, ambiguous relative age, or instability keeps the original HOLD.
+  const newest=aircraft.flightHistory.entries.slice(0,8);
+  const ages=newest.map(r=>relativeAgeIntervalMinutes(r.relativeTime));
+  const contiguous=newest.length===8&&samples.length>=8&&newest.every((h,i)=>{
+    const r=samples[i];
+    return r.from===h.from&&r.to===h.to&&r.quotas===h.co2Quotas&&
+      r.onboard.Y===h.onboard.Y&&r.onboard.J===h.onboard.J&&r.onboard.F===h.onboard.F;
+  });
+  const ageOrdered=ages.length===8&&ages.every((a,i)=>
+    a!==null&&a.lower>=0&&(i===0||ages[i-1]!==null&&a.lower>=ages[i-1]!.lower));
+  const recentlyObserved=ageOrdered&&ages[0]!.lower<=360&&ages[7]!.upper<=1440;
+  if(!selected.verified&&contiguous&&recentlyObserved){
+    const recent=assess(samples.slice(0,8));
+    if(recent?.verified){
+      selected=recent;
+      fitScope='recent_consecutive_eight';
+      fitSamplesUsed=8;
+    }
+  }
+
+  const verified=selected.verified;
+  const singleCabinEquivalent=selected.singleCabinEquivalent;
   return {
     ...base,
-    status:verified?(singleCabinEquivalent?'verified_single_cabin_equivalence':'verified_weighted_cabin_units'):stable?'insufficient':'inconsistent',
-    quoteFactor:factor,calibratedFactorPerUnit:round(weightedFit.slope),fixedQuotasPerKm:round(fixed),samples,
-    weightedResidualSpread:round(weightedSpread),physicalResidualSpread:round(physicalSpread),
-    weightedMeanAbsoluteErrorRatio:round(weightedMae),physicalMeanAbsoluteErrorRatio:round(physicalMae),
-    formulaVerified:verified,
-    reason:verified?(singleCabinEquivalent?'LIVE_HISTORY_SUPPORTS_ECONOMY_ONLY_EQUIVALENT_FORMULA_WITH_STABLE_PER_KM_INTERCEPT':'LIVE_HISTORY_SUPPORTS_WEIGHTED_CABIN_UNITS_WITH_STABLE_PER_KM_INTERCEPT'):
-      !factorCompatible?'HISTORICAL_FACTOR_OUTSIDE_LIVE_DISPLAY_ROUNDING':!stable?'WEIGHTED_FORMULA_NOT_STABLE':'PREMIUM_CABIN_MIX_INSUFFICIENT_TO_DISTINGUISH_FORMULA'
+    status:verified?(singleCabinEquivalent?'verified_single_cabin_equivalence':'verified_weighted_cabin_units'):
+      selected.stable?'insufficient':'inconsistent',
+    quoteFactor:factor,calibratedFactorPerUnit:round(selected.weightedFit.slope),
+    fixedQuotasPerKm:round(selected.fixed),samples,
+    weightedResidualSpread:round(selected.weightedSpread),
+    physicalResidualSpread:round(selected.physicalSpread),
+    weightedMeanAbsoluteErrorRatio:round(selected.weightedMae),
+    physicalMeanAbsoluteErrorRatio:round(selected.physicalMae),
+    formulaVerified:verified,fitScope,fitSamplesUsed,
+    reason:verified?(fitScope==='recent_consecutive_eight'?
+      'EIGHT_NEWEST_CONSECUTIVE_FLIGHTS_AGREE_WITH_LIVE_QUOTE_FACTOR':
+      singleCabinEquivalent?'LIVE_HISTORY_SUPPORTS_ECONOMY_ONLY_EQUIVALENT_FORMULA_WITH_STABLE_PER_KM_INTERCEPT':
+      'LIVE_HISTORY_SUPPORTS_WEIGHTED_CABIN_UNITS_WITH_STABLE_PER_KM_INTERCEPT'):
+      !selected.factorCompatible?'HISTORICAL_FACTOR_OUTSIDE_LIVE_DISPLAY_ROUNDING':
+      !selected.stable?'WEIGHTED_FORMULA_NOT_STABLE':
+      'PREMIUM_CABIN_MIX_INSUFFICIENT_TO_DISTINGUISH_FORMULA'
   };
 }
 
