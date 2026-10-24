@@ -153,7 +153,7 @@ test('high-volume state saves below 900 KB without dropping uncertain mutations'
     type:'supply-observation',kind:i%2?'fuel':'co2',observedAt:now,
     pricePer1000:1,holding:1,remainingCapacity:1,balance:1});
   for(let i=0;i<48;i++)data.uiHealthObservations.push({eventId:'ui_'+i,
-    type:'ui-health',observedAt:now,status:'healthy',surfaces:['fleet']});
+    type:'ui-health',observedAt:now,status:'healthy',surfaces:['login','fleet','maintenance','marketing','supplies']});
   expect(Buffer.byteLength(JSON.stringify(data))).toBeGreaterThan(900000);
   await writeFile(join(options().directory,'return-journal.json'),JSON.stringify(data));
   await expect(client.save()).resolves.toBe('saved');
