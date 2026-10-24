@@ -316,6 +316,14 @@ export class DemandReader {
           }
         }
         if(seenRoutes.size===result.expectedRoutes){
+          // Do not trust a complete route count without a one-to-one mapping
+          // to independently parsed native aircraft IDs (including full pages).
+          const aircraftIds=result.aircraft.map(a=>a.aircraftId);
+          if(result.aircraft.some(a=>!/^[1-9]\d*$/.test(a.routeId)||!/^[1-9]\d*$/.test(a.aircraftId)) ||
+             new Set(aircraftIds).size!==result.expectedRoutes){
+            result.warnings.push('FLEET_AIRCRAFT_IDENTITY_INCOMPLETE_OR_DUPLICATE');
+            return result;
+          }
           // The heading is not proof that no additional native page exists.
           const finalNext=this.page.locator('#routesContainer .pagination')
             .getByRole('link',{name:'Next',exact:true});
