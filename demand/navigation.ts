@@ -102,7 +102,8 @@ export async function findFleetRoute(page: Page, aircraft: AircraftSnapshot, tim
   const seen = new Set<string>();
   for (let index=0; index<maxPages; index++) {
     const currentHeading=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
-    if(currentHeading!==`Routes (${totalRoutes})`)throw new Error('RESEARCH_FLEET_COUNT_CHANGED');
+    const matchCurrent=/^Routes\s*\((\d+)\)$/.exec(currentHeading);
+    if(!matchCurrent||Number(matchCurrent[1])!==totalRoutes)throw new Error('RESEARCH_FLEET_COUNT_CHANGED');
     const rows = page.locator('#routesContainer [id^="routeMainList"]');
     const first = await rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id || null);
     if (!first || seen.has(first)) throw new Error('RESEARCH_PAGINATION_INVALID');
