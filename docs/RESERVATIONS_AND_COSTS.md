@@ -73,3 +73,14 @@ Dados agregados como salários, marketing ou manutenção em lote não são auto
 Uma candidata só deve alcançar `comparisonReady=true` quando todos os componentes obrigatórios daquela comparação estiverem suficientemente verificados.
 
 Se qualquer dimensão crítica estiver ausente, o resultado correto é `HOLD`, não uma estimativa otimista.
+
+
+## Calibracao recente conservadora de CO2
+
+O fator de CO2 exibido numa cotacao atual precisa ser corroborado por consumos do historico real de voos; nunca pela demanda estatica de um catalogo.
+
+Quando a regressao historica completa e instavel apos mudancas operacionais, o bot pode avaliar UMA segunda janela fixa: os oito voos mais recentes, consecutivos, ordenados por idade relativa e dentro das ultimas 24 horas. A janela nunca pode pular uma linha sem distancia comprovada ou historico incompleto.
+
+A regressao recente continua exigindo os mesmos limites rigorosos: fator compativel com o arredondamento do jogo, intercepto nao negativo, erro e residuo baixos, variacao de ocupacao suficiente e composicao de cabine verificavel. Se os oito voos mais recentes divergirem do fator live, a calibracao permanece indisponivel e nao autoriza troca.
+
+Os campos fitScope e fitSamplesUsed identificam a janela utilizada. A serie completa permanece no diagnostico para auditoria. Isto NAO contorna os criterios separados de demanda restante, reservas, custos e seguranca de mutacao.
