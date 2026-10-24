@@ -221,7 +221,7 @@ export async function researchFleetCandidates(page: Page, collection: Collection
 export async function writeRouteResearchReport(report: Awaited<ReturnType<typeof researchFleetCandidates>>, directory='test-results/demand') {
   await mkdir(directory,{recursive:true});
   await writeFile(join(directory,'route-research.json'),JSON.stringify(report,null,2)+'\n');
-  const rows = report.aircraft.map(a => `- ${a.aircraftId}: ${a.status}; gatilho ${a.trigger}; origem de pesquisa ${a.researchOrigin ?? 'indisponivel'}; ocupacao que disparou pesquisa ${a.demandOccupancyPercentage===null?'n/d':a.demandOccupancyPercentage.toFixed(2)+'%'}; candidatos mantidos ${a.result?.quotes.length ?? 0}; consultas nativas/curadas examinadas ${a.result?.scanned ?? 0}; consultas adicionais catalogo ${a.catalogLive?.attempted ?? 0}, observadas ${a.catalogLive?.observed ?? 0}; descartadas por teto de ocupacao ${a.result?.screenedOut.length ?? 0}.`);
+  const rows = report.aircraft.map(a => `- ${a.aircraftId}: ${a.status}; gatilho ${a.trigger}; origem de pesquisa ${a.researchOrigin ?? 'indisponivel'}; ocupacao que disparou pesquisa ${a.demandOccupancyPercentage===null?'n/d':a.demandOccupancyPercentage.toFixed(2)+'%'}; candidatos mantidos ${a.result?.quotes.length ?? 0}; consultas nativas/curadas examinadas ${a.result?.scanned ?? 0}; consultas adicionais catalogo ${a.catalogLive?.attempted ?? 0}, observadas ${a.catalogLive?.observed ?? 0}, etapa de falha ${a.catalogLive?.failureStage ?? 'nenhuma'}; descartadas por teto de ocupacao ${a.result?.screenedOut.length ?? 0}.`);
   const probeRows=report.diagnosticProbes.length?report.diagnosticProbes:(report.diagnosticProbe?[report.diagnosticProbe]:[]);
   const diagnostic=probeRows.length?[
     '',
