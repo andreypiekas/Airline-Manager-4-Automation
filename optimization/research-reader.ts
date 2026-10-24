@@ -153,7 +153,8 @@ export async function researchFleetCandidates(page: Page, collection: Collection
           fresh,entry.researchOrigin,catalogForLive,airportsForLive,new Date(),optimization.maxAgeSeconds,100
         );
         const targets=selectLiveCatalogQuoteTargets(prospects,airportsForLive,
-          [...entry.result.quotes,...entry.result.screenedOut],config.catalogQueries!);
+          [...entry.result.quotes,...entry.result.screenedOut],config.catalogQueries!,
+          collection.aircraft,new Date(),optimization.maxAgeSeconds);
         if(targets.length){
           entry.catalogLive=await collectLiveCatalogQuotes(page,fresh,entry.researchOrigin,
             targets,config.timeout,optimization.minOccupancy);
