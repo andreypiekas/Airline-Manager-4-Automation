@@ -4,7 +4,7 @@ import { AircraftSnapshot, CollectionResult } from '../../demand/types';
 import { readDemandConfig } from '../../demand/config';
 import { flightCountdownObservation } from '../../optimization/flight-timing';
 import { departureControlShape } from '../../demand/departure-control-evidence';
-import { hasIncompleteInitialDepartureCollection,hasUnverifiedFuelDeparture } from '../../demand/execute-run';
+import { hasIncompleteInitialDepartureCollection,hasUnverifiedFuelDeparture,hasCampaignVerificationBlock } from '../../demand/execute-run';
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
@@ -364,4 +364,17 @@ test('completion reserve holds before fresh evaluation and avoids expensive read
  expect(s.reads()).toBe(1); // initial snapshot only; no per-aircraft fresh collection
  expect(r.halted).toBe(false);
  expect(r.entries[0]).toMatchObject({status:'held',reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION'});
+});
+
+test('required campaign unverified is a reportable production block, never a green no-departure cycle',async()=>{
+  const blocked=setup({campaignVerified:false,limit:'all'});
+  const report=await blocked.executor.run();
+  expect(report.summary).toMatchObject({evaluated:1,departed:0,held:1,unknown:0});
+  expect(report.entries[0]).toMatchObject({status:'held',reason:'CAMPAIGN_NOT_VERIFIED'});
+  expect(blocked.clicks()).toBe(0);
+  expect(hasCampaignVerificationBlock(report)).toBe(true);
+  expect(hasCampaignVerificationBlock({entries:[{status:'held',reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY'}] as any})).toBe(false);
+  expect(hasCampaignVerificationBlock({entries:[{status:'held',reason:'DEMAND_INSUFFICIENT'}] as any})).toBe(false);
+  expect(hasCampaignVerificationBlock({entries:[{status:'departed',reason:'CAMPAIGN_NOT_VERIFIED'}] as any})).toBe(false);
+  expect(hasCampaignVerificationBlock({entries:[]})).toBe(false);
 });
