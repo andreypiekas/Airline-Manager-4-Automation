@@ -122,6 +122,46 @@ test('rounded live factor is refined only by stable observed history inside its 
  const r=calibrateCo2FromFlightHistory(a,[live],catalog(),now);
  expect(r.status).toBe('verified_single_cabin_equivalence');expect(r.formulaVerified).toBe(true);expect(r.quoteFactor).toBe(displayed);expect(r.calibratedFactorPerUnit).toBeCloseTo(actual,4);expect(r.fixedQuotasPerKm).toBeCloseTo(fixedObserved,3);
 });
+test('recent eight consecutive flights corroborate a changed CO2 policy without using stale historical model',()=>{
+ const loads:[[number,number,number],...(number[])[]]=[
+  [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3],[80,8,2],[95,1,5],
+  [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3]
+ ];
+ const entries=loads.map(([Y,J,F],i)=>{
+   const current=i<8?factor:.12;
+   const h=history(Y,J,F,i%2?'SCL':'GRU',i%2?'GRU':'SCL');
+   return {...h,relativeTime:(i<8?i+1:i+7)+' hours ago',
+     co2Quotas:Math.round(distance*(current*(Y+2*J+3*F)+fixed))};
+ });
+ const a=aircraft(entries);
+ const r=calibrateCo2FromFlightHistory(a,[quote()],catalog(),now);
+ expect(r).toMatchObject({
+   status:'verified_weighted_cabin_units',formulaVerified:true,
+   fitScope:'recent_consecutive_eight',fitSamplesUsed:8,
+   reason:'EIGHT_NEWEST_CONSECUTIVE_FLIGHTS_AGREE_WITH_LIVE_QUOTE_FACTOR',
+   mutationAuthorized:false
+ });
+ expect(r.samples).toHaveLength(14);
+ expect(r.calibratedFactorPerUnit).toBeCloseTo(factor,4);
+});
+
+test('recent-history fallback refuses stale, gapped or conflicting observations',()=>{
+ const mixes:[[number,number,number],...(number[])[]]=[
+  [120,4,3],[117,4,3],[0,6,4],[100,10,1],[90,1,2],[115,5,3],[80,8,2],[95,1,5],
+  [120,4,3],[117,4,3]
+ ];
+ const entries=mixes.map(([Y,J,F],i)=>({
+   ...history(Y,J,F),relativeTime:(i+1)+' hours ago',
+   co2Quotas:Math.round(distance*((i<8?factor:.12)*(Y+2*J+3*F)+fixed))
+ }));
+ const a=aircraft(entries);
+ const different=quote(.15);
+ expect(calibrateCo2FromFlightHistory(a,[different],catalog(),now).formulaVerified).toBe(false);
+ const late=aircraft(entries.map((x,i)=>({...x,relativeTime:(i+30)+' hours ago'})));
+ expect(calibrateCo2FromFlightHistory(late,[quote()],catalog(),now).formulaVerified).toBe(false);
+ const skipped=aircraft(entries.map((x,i)=>i===0?{...x,from:'ZZZ',to:'XXX'}:x));
+ expect(calibrateCo2FromFlightHistory(skipped,[quote()],catalog(),now).formulaVerified).toBe(false);
+});
 test('history slope outside live displayed-factor rounding remains fail closed',()=>{
  const entries=[10,30,60,90].map(Y=>history(Y,0,0));const a=aircraft(entries);a.capacity={Y:100,J:0,F:0};
  const r=calibrateCo2FromFlightHistory(a,[quote(.17)],catalog(),now);expect(r.formulaVerified).toBe(false);expect(r.reason).toBe('HISTORICAL_FACTOR_OUTSIDE_LIVE_DISPLAY_ROUNDING');
