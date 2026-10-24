@@ -119,6 +119,22 @@ continuam `hold`, não são trocadas. O limite por execução não significa
 que todas as possibilidades foram examinadas. O bot não usa telas de
 teste como prova de uma troca realizada em produção.
 
+### Evidência observada na frota para priorizar pesquisas
+
+Quando há diversas opções no catálogo, o leitor de cotações dá prioridade a
+pares cuja demanda restante já foi observada **recentemente em outras aeronaves
+da frota**, preferindo os pares com observações dos dois sentidos. Isso
+reordena apenas as **consultas somente leitura**; jamais reaproveita esses
+números como autorização de troca. A análise econômica continua exigindo
+reservas completas de outras aeronaves, limites conservadores, custos e
+comparação validada.
+
+O relatório de pesquisa agora registra o campo sanitizado `failureStage`
+quando uma consulta adicional termina sem confirmação. As etapas possíveis
+são `challenge`, `planner`, `response`, `quote_identity`,
+`screening` e `close`. Nenhuma URL, sessão ou conteúdo do painel é
+gravado nesse campo.
+
 ### Cobertura incompleta
 
 A versão atual do arquivo foi extraída de `All_routes.xlsx`, filtrado na
