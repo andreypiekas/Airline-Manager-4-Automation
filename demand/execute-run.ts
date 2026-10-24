@@ -185,5 +185,21 @@ export async function runDemandExecution(
     }));
     throw Error('DEMAND_EXECUTION_INCOMPLETE_FUEL_EVIDENCE');
   }
+  // An unverified required campaign is a production HOLD, not a healthy
+  // completed dispatch cycle. Preserve the report and never bypass the gate.
+  if(!settings.dryRun&&hasCampaignVerificationBlock(report)){
+    const heldByCampaign=report.entries.filter(e=>e.status==='held'&&
+      e.reason==='CAMPAIGN_NOT_VERIFIED').length;
+    console.error('[DepartureCampaign] '+JSON.stringify({
+      status:'INCOMPLETE_DUE_TO_UNVERIFIED_REQUIRED_CAMPAIGN',
+      departed:report.summary.departed,heldByCampaign,
+      message:'Campanha exigida sem confirmacao fresca; nenhuma partida foi autorizada para essas aeronaves.'
+    }));
+    throw Error('DEMAND_EXECUTION_INCOMPLETE_CAMPAIGN_EVIDENCE');
+  }
   return report;
+}
+
+export function hasCampaignVerificationBlock(report:Pick<ExecutionReport,'entries'>):boolean {
+  return report.entries.some(e=>e.status==='held'&&e.reason==='CAMPAIGN_NOT_VERIFIED');
 }
