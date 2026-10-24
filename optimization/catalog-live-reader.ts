@@ -38,16 +38,44 @@ const noConflicted=(a:AirportCatalog|null,to:string)=>{
 /** Select only unambiguous destination identifiers from independently sourced airport rows.
  * The source is incomplete; these are leads, NOT authorization to reroute.
  */
+/**
+ * Optional peer evidence only CHANGES INSPECTION ORDER. Remaining demand and
+ * financial comparison are still recalculated independently after a fresh
+ * native quote: this ranking never grants permission to create a route.
+ */
 export function selectLiveCatalogQuoteTargets(
   discovery:CatalogAircraftDiscovery,airports:AirportCatalog|null,
-  alreadyInspected:readonly {to:string}[],maxQueries:number
+  alreadyInspected:readonly {to:string}[],maxQueries:number,
+  fleet:readonly AircraftSnapshot[]=[],now=new Date(),maxAgeSeconds=300
 ):LiveCatalogTarget[]{
   if(!Number.isSafeInteger(maxQueries)||maxQueries<0||maxQueries>5)throw new Error('CATALOG_LIVE_QUERY_CONFIG_INVALID');
   if(maxQueries===0||discovery.status!=='ranked_reference'||!exact(discovery.origin||'')||
     !Array.isArray(discovery.ranked))return [];
+  if(!Number.isFinite(now.getTime())||!Number.isSafeInteger(maxAgeSeconds)||maxAgeSeconds<=0)
+    throw new Error('CATALOG_LIVE_QUERY_CONFIG_INVALID');
+  const origin=discovery.origin!;
+  const freshPeer=(a:AircraftSnapshot)=>!a.issue&&
+    (a.state==='ready'||a.state==='inflight')&&a.operational!==null&&!!a.capacity&&
+    !!a.remaining&&!!a.dailyTotal&&
+    ['Y','J','F'].every(k=>{
+      const cabin=k as 'Y'|'J'|'F';
+      return Number.isSafeInteger(a.remaining![cabin])&&a.remaining![cabin]>=0&&
+        Number.isSafeInteger(a.dailyTotal![cabin])&&a.dailyTotal![cabin]>=a.remaining![cabin];
+    })&&
+    Number.isFinite(Date.parse(a.observedAt))&&
+    now.getTime()>=Date.parse(a.observedAt)&&
+    now.getTime()-Date.parse(a.observedAt)<=maxAgeSeconds*1000;
+  const peers=fleet.filter(freshPeer);
+  const coverage=(dest:string)=>{
+    const outbound=peers.some(a=>a.from===origin&&a.to===dest);
+    const inbound=peers.some(a=>a.from===dest&&a.to===origin);
+    return Number(outbound)+Number(inbound);
+  };
+  const ranks=discovery.ranked.map((r,index)=>({r,index,peerCoverage:coverage(r.to)}))
+    .sort((a,b)=>b.peerCoverage-a.peerCoverage||a.index-b.index);
   const skip=new Set(alreadyInspected.map(x=>x.to));
   const result:LiveCatalogTarget[]=[];
-  for(const r of discovery.ranked){
+  for(const {r} of ranks){
     if(result.length>=maxQueries)break;
     if(r.from!==discovery.origin||!exact(r.to)||skip.has(r.to)||r.sameAirportPairAsCurrentRoute)continue;
     const airportId=noConflicted(airports,r.to);
