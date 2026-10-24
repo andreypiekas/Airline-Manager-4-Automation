@@ -45,6 +45,28 @@ test('discovery selects only unique reference airport IDs and skips already quer
     .toThrow('CATALOG_LIVE_QUERY_CONFIG_INVALID');
 });
 
+test('catalog quote prioritizes pairs with independently observed fresh fleet demand in both directions',()=>{
+  const operational={rangeKm:6000,minRunwayFt:6000,flightHours:1,cycles:1,homeBase:null,flightId:null};
+  const observed={
+    ...fresh(),operational,remaining:{Y:80,J:10,F:3},dailyTotal:{Y:200,J:30,F:10}
+  };
+  const peers:AircraftSnapshot[]=[
+    {...observed,aircraftId:'201',routeId:'21',from:'AAA',to:'CCC'},
+    {...observed,aircraftId:'202',routeId:'22',from:'CCC',to:'AAA'},
+    {...observed,aircraftId:'203',routeId:'23',from:'AAA',to:'BBB'},
+  ];
+  const picked=selectLiveCatalogQuoteTargets(discovery,airports,[],2,peers,new Date());
+  expect(picked.map(p=>p.to)).toEqual(['CCC','BBB']);
+  expect(picked.every(p=>p.source==='curated-catalog-unambiguous-airport-id')).toBe(true);
+  // Stale or incomplete snapshots cannot affect inspection order.
+  const stale=peers.map(p=>({...p,observedAt:new Date(Date.now()-601000).toISOString()}));
+  expect(selectLiveCatalogQuoteTargets(discovery,airports,[],2,stale,new Date()).map(p=>p.to))
+    .toEqual(['BBB','CCC']);
+  const incomplete=peers.map(p=>({...p,remaining:null}));
+  expect(selectLiveCatalogQuoteTargets(discovery,airports,[],2,incomplete,new Date()).map(p=>p.to))
+    .toEqual(['BBB','CCC']);
+});
+
 test('incomplete catalog discovery cannot produce requests',()=>{
   expect(selectLiveCatalogQuoteTargets({...discovery,status:'unavailable'},airports,[],5)).toEqual([]);
   expect(selectLiveCatalogQuoteTargets(discovery,null,[],5)).toEqual([]);
@@ -64,6 +86,7 @@ test('read-only probe with invalid native quote never sends create-route mutatio
   const result=await collectLiveCatalogQuotes(page,fresh(),'AAA',
     selectLiveCatalogQuoteTargets(discovery,airports,[],1),1000);
   expect(result).toMatchObject({attempted:1,observed:0,stoppedEarly:true,mutationAuthorized:false,
+    failureStage:'response',
     warnings:expect.arrayContaining(['CATALOG_LIVE_QUOTE_OR_UI_UNVERIFIED'])});
   expect(urls).toHaveLength(1);
   expect(urls[0]).toContain('new_route_info.php?id=101&airportId=200&ferry=0');
