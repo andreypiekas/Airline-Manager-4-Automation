@@ -60,6 +60,22 @@ async function readOpenDemandQuote(page:Page,expected:{registration:string;from:
  * collected current-route remaining and daily-total values. It never clicks
  * Create route and never turns the label into remaining demand by assumption.
  */
+/** Verify an explicit aircraft selection against the ORIGINAL full Fleet snapshot.
+ * Never fabricate a single-aircraft complete collection to bypass integrity.
+ */
+export function selectCalibrationAircraft(
+  collection:CollectionResult,maxSamples:number,onlyAircraftIds?:ReadonlySet<string>
+):AircraftSnapshot[]{
+  if(!collection.complete||collection.expectedRoutes!==collection.aircraft.length||
+     !Number.isSafeInteger(maxSamples)||maxSamples<1||maxSamples>10||
+     (onlyAircraftIds!==undefined&&(!onlyAircraftIds.size||onlyAircraftIds.size>maxSamples||
+       [...onlyAircraftIds].some(id=>!/^[1-9]\d*$/.test(id)))))return [];
+  const eligible=collection.aircraft.filter(a=>(!onlyAircraftIds||onlyAircraftIds.has(a.aircraftId))&&
+    a.state==='ready'&&!a.issue&&validCabins(a.remaining)&&validCabins(a.dailyTotal)&&
+    /^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId)&&/^[A-Z0-9]{3}$/.test(a.from)&&/^[A-Z0-9]{3}$/.test(a.to)&&a.from!==a.to);
+  return eligible.slice(0,maxSamples);
+}
+
 export async function calibrateDemandLabelOnCurrentRoutes(
   page:Page,collection:CollectionResult,airports:AirportCatalog|null,timeout=10000,maxSamples=3,
   onlyAircraftIds?:ReadonlySet<string>
@@ -72,10 +88,8 @@ export async function calibrateDemandLabelOnCurrentRoutes(
     !collection.complete||!demandCalibrationAirportCatalogSupported(airports)||
     (onlyAircraftIds!==undefined&&(!onlyAircraftIds.size||onlyAircraftIds.size>maxSamples||
        [...onlyAircraftIds].some(id=>!/^[1-9]\d*$/.test(id)))))return report;
-  const eligible=collection.aircraft.filter(a=>(!onlyAircraftIds||onlyAircraftIds.has(a.aircraftId))&&
-    a.state==='ready'&&!a.issue&&validCabins(a.remaining)&&validCabins(a.dailyTotal)&&
-    /^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId)&&/^[A-Z0-9]{3}$/.test(a.from)&&/^[A-Z0-9]{3}$/.test(a.to)&&a.from!==a.to);
-  for(const expected of eligible.slice(0,maxSamples)){
+  const eligible=selectCalibrationAircraft(collection,maxSamples,onlyAircraftIds);
+  for(const expected of eligible){
     try{
       const refs=airports.airports.filter(a=>a.iata===expected.to&&!a.conflict&&Number.isSafeInteger(a.runwayFt)&&a.runwayFt!>0);
       const ids=[...new Set(refs.flatMap(a=>a.sourceIds).filter(id=>Number.isSafeInteger(id)&&id>0))];
