@@ -38,6 +38,16 @@ Testes adicionais cobrem chegada sem alteração de `Routes(N)`, página reorden
 
 O operador pode observar esses diagnósticos em uma execução normal que **já apresente erro de inventário**, sem disparar produção manualmente.
 
+## Priorização operacional segura (inventário completo obrigatório)
+
+Quando a execução **já obteve uma coleção 100% completa e verificada**, o módulo `demand/rolling-first-page-priority.ts` compara a primeira página atual com o inventário integral da **mesma execução**. Apenas aeronaves prontas que preservarem `aircraftId + routeId + registration` podem passar à frente na fila de despacho. A prioridade durável de voos adiados continua primeiro. O controle pode ser desativado com `DEMAND_FIRST_PAGE_PRIORITY=false`.
+
+Esta é **apenas uma otimização de ordem e navegação**, não uma permissão de decolagem. `IndividualDepartureExecutor` ainda executa as verificações de frota completa, demanda, combustível, campanha, contexto fresco, handler nativo, checkpoint pré-clique e confirmação individual. Um pouso que transforme uma aeronave antes observada como `inflight` em `ready` **não** a promove apenas por essa observação: ela precisa passar novamente pelo caminho de coleta completo.
+
+Na ausência de inventário integral, se `Routes(N)` mudar, se a identidade da primeira página divergir ou se a interface estiver instável, nenhuma prioridade nova é aplicada. A operação continua em seu caminho tradicional, sem afrouxar `collection.complete`.
+
+A otimização de prioridade foi implementada para que o executor **comece pelas aeronaves prontas da primeira página quando houver prova suficiente**. Ainda não elimina a etapa de leitura integral que hoje evita partidas inseguras em cenários `141/142`.
+
 ## Condições para uma etapa posterior de despacho gradual
 
 Antes de ativar decolagens pela primeira página, devem ser demonstrados em testes e em observação real:
