@@ -85,7 +85,12 @@ export class SupplyPort {
    const panelText=(await panel.innerText()).split(/\r?\n/).map(s=>s.trim()).filter(Boolean)
      .filter(s=>/(current price|quota cost|price change|capacity|holding|total price|amount to purchase|lbs|quotas|fuel price|co2 quota|^\$?\s*[\d,.]+(?:\s*\/\s*[\d,.]+)?(?:\s+(?:lbs|quotas))?$)/i.test(s))
      .slice(0,80);
-   // Redact all numeric digits: the account formatting shape helps diagnose\n   // UI changes without persisting the user's actual balance.\n   const account=this.page.locator('#headerAccount');\n   const accountShape=await account.count()===1\n    ?(await account.innerText()).replace(/\\d+/g,'#').replace(/\\s+/g,' ').trim().slice(0,80):null;\n   return {kind,rows,panelText,accountShape,mutationAuthorized:false as false};
+   // Redact all numeric digits: the account formatting shape helps diagnose
+   // UI changes without persisting the user's actual balance.
+   const account=this.page.locator('#headerAccount');
+   const accountShape=await account.count()===1
+    ?(await account.innerText()).replace(/\d+/g,'#').replace(/\s+/g,' ').trim().slice(0,80):null;
+   return {kind,rows,panelText,accountShape,mutationAuthorized:false as false};
   }catch{return null;}
  }
  async open(kind:Commodity){
@@ -111,7 +116,12 @@ export class SupplyPort {
   if(await panel.count()!==1||!await panel.isVisible()||await account.count()!==1||!await account.isVisible())throw Error('SUPPLY_PANEL_UNVERIFIED');
   const label=kind==='fuel'?'Fuel price per 1,000 Lbs':'Co2 quota cost per 1,000';
   if(await panel.getByText(label,{exact:true}).count()!==1)throw Error('SUPPLY_UNIT_UNVERIFIED');
-  // A displayed account balance can change formatting independently of the\n  // supply panel. Never infer or round an abbreviated amount before purchase.\n  let balance:number;\n  try{balance=parseAmount(await account.innerText());}\n  catch{throw new SupplyPreMutationError('SUPPLY_BALANCE_FORMAT_UNVERIFIED');}\n  return parseSupplyText(await panel.innerText(),kind,balance);
+  // A displayed account balance can change formatting independently of the
+  // supply panel. Never infer or round an abbreviated amount before purchase.
+  let balance:number;
+  try{balance=parseAmount(await account.innerText());}
+  catch{throw new SupplyPreMutationError('SUPPLY_BALANCE_FORMAT_UNVERIFIED');}
+  return parseSupplyText(await panel.innerText(),kind,balance);
  }
  async verifyControl(kind:Commodity){
   const panel=this.page.locator('#fuelMain');
