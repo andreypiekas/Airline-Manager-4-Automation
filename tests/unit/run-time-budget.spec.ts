@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -87,4 +87,22 @@ test('pricing reservation does not prevent no-demand work or relax safety on inv
   expect(Number.isNaN(pricingBudgetMinimumBeforeDepartures(...args,true,Number.NaN))).toBe(true);
   expect(Number.isNaN(pricingBudgetMinimumBeforeDepartures(-1,300_000,120_000,true,10))).toBe(true);
   expect(Number.isNaN(pricingBudgetMinimumBeforeDepartures(Number.MAX_SAFE_INTEGER,300_000,120_000,true,10))).toBe(true);
+});
+
+test('run #968: ready flights dispatch before optional pricing if no reroute changed fares',()=>{
+  // The real run reconciled 138/138, found 11 eligible, spent ~3m on
+  // pricing, then re-scanned Routes(139 -> 140) until 16 flights timed out.
+  // Scheduling is a priority decision only; it does not authorize any click.
+  expect(deferOptionalPricingUntilAfterDepartures(true,11,0)).toBe(true);
+  expect(deferOptionalPricingUntilAfterDepartures(true,16,0)).toBe(true);
+  // Rerouted aircraft still need freshly verified pricing before dispatch.
+  expect(deferOptionalPricingUntilAfterDepartures(true,11,1)).toBe(false);
+  expect(deferOptionalPricingUntilAfterDepartures(true,0,0)).toBe(false);
+  expect(deferOptionalPricingUntilAfterDepartures(false,11,0)).toBe(false);
+  expect(deferOptionalPricingUntilAfterDepartures(true,Number.NaN,0)).toBe(false);
+  expect(deferOptionalPricingUntilAfterDepartures(true,11,-1)).toBe(false);
+  // Deferred pricing still requires the existing conservative phase budget.
+  expect(evaluateRunPhaseBudget('ticket-pricing-after-departures',0,240_000,MUTATION_PHASE_START_MINIMUM_MS).allowed).toBe(false);
+  expect(evaluateRunPhaseBudget('ticket-pricing-after-departures',0,360_000,MUTATION_PHASE_START_MINIMUM_MS).allowed).toBe(true);
+  expect(hasDepartureBudgetStarvation([{status:'held',reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'}])).toBe(true);
 });
