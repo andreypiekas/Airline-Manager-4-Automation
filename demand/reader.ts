@@ -648,9 +648,9 @@ export class DemandReader {
 
 
 /**
- * A second, clean, read-only scan is safer than merging partial pages from
- * multiple AJAX states. It never repeats a purchase, departure or mutation.
- * Only a complete, identity-checked scan with an unchanged total is usable.
+ * Recovery from native Fleet pagination churn, using only independent scans.
+ * Never stitch 140/141 partial snapshots: the *one* accepted scan must contain
+ * all Routes(N) with distinct, verified route and aircraft identities.
  */
 export async function collectFleetWithFreshRetry(
   page: Page,
@@ -659,91 +659,94 @@ export async function collectFleetWithFreshRetry(
   retryDeadlineEpochMs?: number
 ): Promise<CollectionResult> {
   const first=await new DemandReader(page,timeout,includeInflightDetails).collect();
-  if(first.complete || !first.warnings.some(w=>
+  const isRetryable=(snapshot:CollectionResult)=>snapshot.warnings.some(w=>
     w.startsWith('PAGINATION_') ||
     w==='ROUTE_COUNT_MISMATCH' ||
-    // A stable fresh scan can safely recover a genuine mid-scan Routes(N)
-    // drift, but only with a full unique inventory and a bounded count delta.
     w==='FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN' ||
-    // All N route cards can be present yet the final identity/heading proof
-    // can fail after inspecting details. Retry one independent scan, never
-    // reuse partially verified identities or authorize mutation from it.
     w==='FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED' ||
     w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
-  )) return first;
+  );
+  if(first.complete || !isRetryable(first)) return first;
 
+  // Preserve four minutes for demand verification and other operational gates.
+  // A third scan is reserved for repeated verified-boundary-overlap failures,
+  // not as a generic bypass for identity conflicts or unknown UI controls.
   const minimumRemainingMs=240000;
-  if(retryDeadlineEpochMs!==undefined && (
-    !Number.isSafeInteger(retryDeadlineEpochMs) ||
-    Date.now()+minimumRemainingMs>=retryDeadlineEpochMs
-  )){
-    first.warnings.push('FLEET_FRESH_RETRY_BUDGET_INSUFFICIENT');
-    return first;
-  }
-  console.warn('[FleetFreshRetry] '+JSON.stringify({
-    status:'START',observed:first.aircraft.length,expected:first.expectedRoutes
-  }));
-  try{
-    // The first pass already tried native Fleet navigation. Reopening that
-    // same JS/AJAX state again may reproduce the same broken pagination.
-    // One normal browser reload resets transient client-side handlers while
-    // retaining only the existing authenticated session; never re-login.
-    await assertNoInteractiveChallenge(page,'fleet-reload:before');
-    await page.reload({waitUntil:'domcontentloaded',timeout:Math.max(15000,timeout)});
-    await assertNoInteractiveChallenge(page,'fleet-reload:after');
-    await page.locator('#mapRoutes').waitFor({state:'visible',timeout:Math.max(15000,timeout)});
-    await assertNoInteractiveChallenge(page,'fleet-reload:authenticated');
-    console.warn('[FleetFreshRetry] '+JSON.stringify({status:'PAGE_RELOADED_AUTHENTICATED'}));
-    await openFleetList(page,timeout);
-    const second=await new DemandReader(page,timeout,includeInflightDetails).collect();
-    // Routes(N) may legitimately change between two *separate* scans while
-    // flights return or a route is added. Never mix cards across snapshots.
-    // A fresh, fully reconciled scan may replace the incomplete scan only
-    // when N is stable throughout the second scan, at most ONE route changed,
-    // and all N identities were read from the second scan itself.
-    const validCounts=typeof first.expectedRoutes==='number' &&
-      Number.isSafeInteger(first.expectedRoutes) && first.expectedRoutes>0 &&
-      typeof second.expectedRoutes==='number' &&
-      Number.isSafeInteger(second.expectedRoutes) && second.expectedRoutes>0;
-    const changedTotal=validCounts && first.expectedRoutes!==second.expectedRoutes;
-    const countChangeWithinBound=validCounts &&
-      Math.abs(second.expectedRoutes!-first.expectedRoutes!)<=1;
-    // Re-read the native total AFTER the second detailed scan. A fresh scan
-    // is not valid if the heading changed again during inspection.
-    let currentTotal:number|null=null;
-    try{
-      const raw=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
-      const match=/^Routes\s*\((\d+)\)$/.exec(raw);
-      if(match)currentTotal=integerText(match[1]);
-    }catch{/* Unverified total always fails closed. */}
-    const validSecond=second.complete && validCounts && countChangeWithinBound &&
-      currentTotal===second.expectedRoutes &&
-      second.aircraft.length===second.expectedRoutes &&
-      new Set(second.aircraft.map(a=>a.routeId)).size===second.expectedRoutes &&
-      new Set(second.aircraft.map(a=>a.aircraftId)).size===second.expectedRoutes &&
-      second.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId));
-    console.warn('[FleetFreshRetry] '+JSON.stringify({
-      status:validSecond?(changedTotal?'RECOVERED_FRESH_COUNT_CHANGED':'RECOVERED'):'INCOMPLETE',
-      firstObserved:first.aircraft.length,secondObserved:second.aircraft.length,
-      firstExpected:first.expectedRoutes,secondExpected:second.expectedRoutes,
-      headingAfterSecond:currentTotal,identityComplete:second.complete,
-      changedTotal,countChangeWithinBound
-    }));
-    if(validSecond)return second;
-    second.complete=false;
-    second.warnings.push(
-      second.expectedRoutes!==first.expectedRoutes
-        ? 'FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED'
-        : 'FLEET_FRESH_RETRY_INCOMPLETE'
-    );
-    if(first.aircraft.length>second.aircraft.length){
-      first.warnings.push('FLEET_FRESH_RETRY_INCOMPLETE');
-      return first;
+  const hasBudget=()=>retryDeadlineEpochMs===undefined || (
+    Number.isSafeInteger(retryDeadlineEpochMs) &&
+    Date.now()+minimumRemainingMs<retryDeadlineEpochMs
+  );
+  let best=first;
+  let previous=first;
+  const maxFreshScans=2;
+  for(let attempt=1;attempt<=maxFreshScans;attempt++){
+    if(attempt===2 && (
+      previous.expectedRoutes!==first.expectedRoutes ||
+      !previous.warnings.includes('PAGINATION_BOUNDARY_OVERLAP_NOT_RECONCILED') ||
+      previous.warnings.some(w=>w.includes('IDENTITY_CONFLICT'))
+    )) break;
+    if(!hasBudget()){
+      best.warnings.push('FLEET_FRESH_RETRY_BUDGET_INSUFFICIENT');
+      break;
     }
-    return second;
-  }catch(error){
-    if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
-    first.warnings.push('FLEET_FRESH_RETRY_FAILED:'+collectionFailureCode(error));
-    return first;
+    console.warn('[FleetFreshRetry] '+JSON.stringify({
+      status:'START',attempt,maxFreshScans,observed:previous.aircraft.length,
+      expected:previous.expectedRoutes
+    }));
+    try{
+      // A new authenticated browser load resets transient native AJAX cursors.
+      // No fresh login, mutation, direct game request or union of old cards.
+      await assertNoInteractiveChallenge(page,'fleet-reload:before');
+      await page.reload({waitUntil:'domcontentloaded',timeout:Math.max(15000,timeout)});
+      await assertNoInteractiveChallenge(page,'fleet-reload:after');
+      await page.locator('#mapRoutes').waitFor({state:'visible',timeout:Math.max(15000,timeout)});
+      await assertNoInteractiveChallenge(page,'fleet-reload:authenticated');
+      console.warn('[FleetFreshRetry] '+JSON.stringify({status:'PAGE_RELOADED_AUTHENTICATED',attempt}));
+      await openFleetList(page,timeout);
+      const scanned=await new DemandReader(page,timeout,includeInflightDetails).collect();
+      const validCounts=typeof first.expectedRoutes==='number' &&
+        Number.isSafeInteger(first.expectedRoutes) && first.expectedRoutes>0 &&
+        typeof scanned.expectedRoutes==='number' &&
+        Number.isSafeInteger(scanned.expectedRoutes) && scanned.expectedRoutes>0;
+      const changedTotal=validCounts && first.expectedRoutes!==scanned.expectedRoutes;
+      const countChangeWithinBound=validCounts &&
+        Math.abs(scanned.expectedRoutes!-first.expectedRoutes!)<=1;
+      let currentTotal:number|null=null;
+      try{
+        const raw=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
+        const match=/^Routes\s*\((\d+)\)$/.exec(raw);
+        if(match)currentTotal=integerText(match[1]);
+      }catch{/* Unverified total must fail closed. */}
+      const validScan=scanned.complete && validCounts && countChangeWithinBound &&
+        currentTotal===scanned.expectedRoutes &&
+        scanned.aircraft.length===scanned.expectedRoutes &&
+        new Set(scanned.aircraft.map(a=>a.routeId)).size===scanned.expectedRoutes &&
+        new Set(scanned.aircraft.map(a=>a.aircraftId)).size===scanned.expectedRoutes &&
+        scanned.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId));
+      console.warn('[FleetFreshRetry] '+JSON.stringify({
+        status:validScan?(changedTotal?'RECOVERED_FRESH_COUNT_CHANGED':'RECOVERED'):'INCOMPLETE',
+        attempt,firstObserved:first.aircraft.length,scannedObserved:scanned.aircraft.length,
+        firstExpected:first.expectedRoutes,scannedExpected:scanned.expectedRoutes,
+        headingAfterScan:currentTotal,identityComplete:scanned.complete,
+        changedTotal,countChangeWithinBound
+      }));
+      if(validScan)return scanned;
+      scanned.complete=false;
+      scanned.warnings.push(
+        scanned.expectedRoutes!==first.expectedRoutes
+          ? 'FLEET_FRESH_RETRY_ROUTE_COUNT_CHANGED'
+          : 'FLEET_FRESH_RETRY_INCOMPLETE'
+      );
+      previous=scanned;
+      if(scanned.aircraft.length>=best.aircraft.length)best=scanned;
+    }catch(error){
+      if(collectionFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+      best.warnings.push('FLEET_FRESH_RETRY_FAILED:'+collectionFailureCode(error));
+      break;
+    }
   }
+  // A failed retry has no departure authority, regardless of how many
+  // identities were seen across different scans.
+  best.complete=false;
+  return best;
 }
