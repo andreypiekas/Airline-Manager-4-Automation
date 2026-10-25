@@ -89,6 +89,10 @@ export class RollingFirstPagePlanner {
         observation.routeTotal === null || observation.routeTotal <= 0 ||
         observation.visible !== observation.aircraft.length ||
         observation.visible <= 0 || observation.visible > 20 ||
+        (observation.status === 'STABLE' &&
+          observation.visible !== Math.min(observation.routeTotal,20)) ||
+        (observation.status === 'SHORT_PAGE' &&
+          observation.visible >= Math.min(observation.routeTotal,20)) ||
         observation.ready !== observation.aircraft.filter(a => a.state === 'ready').length) {
       return noCandidates('UNVERIFIED');
     }
