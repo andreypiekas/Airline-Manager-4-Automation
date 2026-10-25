@@ -12,7 +12,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, pricingBudgetMinimumBeforeDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -406,6 +406,21 @@ test('All Operations', async ({ page }) => {
       );
     }
     const departureEnabled = !demandConfig.dryRun && moduleEnabled('ENABLE_DEPART');
+    const reroutedAircraftIds=new Set(
+      (routeExecutionReport?.entries||[]).filter(e=>e.status==='rerouted').map(e=>e.aircraftId)
+    );
+    // #968: pricing scanned 138 aircraft before dispatch; the live total then
+    // changed 138 -> 139 -> 140, requiring two full identity-safe rescans.
+    // All 16 eligible departures timed out. Dispatch first when no reroute
+    // requires fresh post-change fare verification; price remaining routes later.
+    const deferOptionalPricing=deferOptionalPricingUntilAfterDepartures(
+      departureEnabled,simulation.report.summary.sufficient,reroutedAircraftIds.size
+    );
+    console.log('[TicketPricingSchedule] '+JSON.stringify({
+      deferredUntilAfterDepartures:deferOptionalPricing,
+      sufficientDemand:simulation.report.summary.sufficient,
+      reroutedAircraftCount:reroutedAircraftIds.size
+    }));
     // Ticket pricing is optional, but departures with verified demand must not
     // lose their 5-minute start window to another full-fleet pricing scan.
     // In run #966, pricing consumed ~7m after 10 eligible aircraft were found,
@@ -415,7 +430,7 @@ test('All Operations', async ({ page }) => {
       OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, departureEnabled,
       simulation.report.summary.sufficient
     );
-    if (!demandConfig.dryRun && moduleEnabled('ENABLE_TICKET_PRICING_EXECUTION', false)
+    if (!deferOptionalPricing && !demandConfig.dryRun && moduleEnabled('ENABLE_TICKET_PRICING_EXECUTION', false)
       && phaseAllowed('ticket-pricing',pricingBudgetMinimum)) {
       pricingExecutionReport = await test.step(
         'Ajustar tarifas por rota',
@@ -433,9 +448,6 @@ test('All Operations', async ({ page }) => {
       throw new Error('DEMAND_EXECUTION_BUDGET_EXHAUSTED_BEFORE_DISPATCH');
     }
     if (departureBudgetAllowed) {
-      const reroutedAircraftIds=new Set(
-        (routeExecutionReport?.entries||[]).filter(e=>e.status==='rerouted').map(e=>e.aircraftId)
-      );
       const pricingVerifiedAircraftIds=new Set(
         (pricingExecutionReport?.entries||[])
           .filter(e=>e.status==='adjusted'||e.status==='unchanged')
@@ -482,6 +494,17 @@ test('All Operations', async ({ page }) => {
         await runSupplies(page,false,process.env,'test-results/demand',undefined,{
           phase:'post',mutationDeadlineEpochMs:phaseDeadlineEpochMs
         });
+      }
+      // Optional price tuning runs only after real departures and post-flight
+      // supplies. It still uses the native route/save checks and deadline.
+      // If departures fail or the budget is exhausted, no pricing mutation
+      // is attempted; the failed dispatch cannot be hidden by later work.
+      if(deferOptionalPricing&&moduleEnabled('ENABLE_TICKET_PRICING_EXECUTION',false)
+        &&phaseAllowed('ticket-pricing-after-departures',phaseBudgetsMs.ticketPricing)){
+        await test.step('Ajustar tarifas apos decolagens',async()=>await runTicketPricingExecution(page,{
+          ...process.env,
+          TICKET_PRICING_MUTATION_DEADLINE_EPOCH_MS:String(phaseDeadlineEpochMs)
+        }));
       }
     }
     return;
