@@ -24,11 +24,12 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
   const optimization = {...configuredOptimization, airlineBases: ownedBases.effectiveBases};
   const research = researchConfig();
   const collection = await collectFleetWithFreshRetry(page, 10000, true, options.collectionRetryDeadlineEpochMs);
-  // Opt-in diagnostic only. A first-page window is NEVER a substitute for a
+  // Passive diagnostic only, enabled on incomplete collections unless explicitly disabled.
+  // A first-page window is NEVER a substitute for a
   // complete Fleet collection and cannot authorize departures, pricing or reroutes.
-  if (!collection.complete && process.env.DEMAND_FIRST_PAGE_PILOT === 'true') {
+  if (!collection.complete && process.env.DEMAND_FIRST_PAGE_PILOT !== 'false') {
     try {
-      const window = await inspectFirstPageReadOnly(page, 10000);
+      const window = await inspectFirstPageReadOnly(page, 5000);
       console.warn('[FirstPagePilot] ' + JSON.stringify({
         status:window.status,routeTotal:window.routeTotal,
         visible:window.visible,ready:window.ready,mutationAuthorized:false
