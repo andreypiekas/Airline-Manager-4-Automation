@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { MaintenanceUtils, parseMaintenanceHoursToCheck } from '../../utils/maintenance.utils';
+import { MaintenanceUtils, parseMaintenanceHoursToCheck, maintenanceCheckVerificationStatus } from '../../utils/maintenance.utils';
 
 test('remaining maintenance hours require one explicit Hours to check field',()=>{
   expect(parseMaintenanceHoursToCheck('Registration: 001-A\nFlight hours\n10,443\nHours to check\n0\nWear 14%')).toBe(0);
@@ -59,4 +59,13 @@ test('challenge blocks plan-recovery callback and all interaction',async({page})
   const util=new MaintenanceUtils(page);
   await expect(util.openPlanPanel(async()=>{recoveries++;})).rejects.toThrow('INTERACTIVE_CHALLENGE_DETECTED_STOP');
   expect(recoveries).toBe(0);
+});
+
+
+test('real #960 scenario cannot be reported as completed when one of 33 card hours was not verified',()=>{
+  expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:1})).toBe('unverified');
+  expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:0})).toBe('completed_observed');
+  expect(maintenanceCheckVerificationStatus({evaluated:0,unverified:0})).toBe('unverified');
+  expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:-1})).toBe('unverified');
+  expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:Number.NaN})).toBe('unverified');
 });
