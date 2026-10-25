@@ -29,6 +29,20 @@ export function pricingBudgetMinimumBeforeDepartures(
   return Number.isSafeInteger(total)?total:Number.NaN;
 }
 
+/** Prioritize real departures over optional fare tuning when current routes
+ * are unchanged. Rerouted aircraft still require pricing verification before
+ * dispatch; invalid evidence never enables this optimization.
+ */
+export function deferOptionalPricingUntilAfterDepartures(
+  departureEnabled:boolean,
+  sufficientDemand:number,
+  reroutedAircraftCount:number,
+):boolean {
+  return departureEnabled &&
+    Number.isSafeInteger(sufficientDemand) && sufficientDemand>0 &&
+    Number.isSafeInteger(reroutedAircraftCount) && reroutedAircraftCount===0;
+}
+
 export type RunPhaseBudgetReason = 'TIME_BUDGET_AVAILABLE' | 'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_PHASE';
 
 export interface RunPhaseBudgetDecision {
