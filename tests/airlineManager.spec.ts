@@ -19,7 +19,7 @@ import { GeneralUtils } from '../utils/general.utils';
 import { FuelUtils } from '../utils/fuel.utils';
 import { CampaignUtils } from '../utils/campaign.utils';
 import { FleetUtils } from '../utils/fleet.utils';
-import { MaintenanceUtils } from '../utils/maintenance.utils';
+import { MaintenanceUtils, maintenanceCheckVerificationStatus } from '../utils/maintenance.utils';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -204,8 +204,18 @@ test('All Operations', async ({ page }) => {
         const repairEvidence=await maintenanceUtils.repairPlanes();
         await GeneralUtils.randomSleep(1500, 3000);
         await closeOpenPanel('finalizar manutencao');
-        console.log('[Operacao] Manutencao automatica finalizada.');
-        recordOperationalModule('maintenance','completed_observed',{...checkEvidence,...repairEvidence});
+        // A run may finish navigation/repair safely while one or more
+        // preventive cards lacked independent Hours to check evidence.
+        // Record that partial coverage rather than an unqualified success.
+        const maintenanceStatus=maintenanceCheckVerificationStatus(checkEvidence);
+        if(maintenanceStatus==='unverified')
+          console.warn('[Manutencao] Verificacao parcial: '+checkEvidence.unverified+
+            ' de '+checkEvidence.evaluated+' cards sem evidencia de horas.');
+        else console.log('[Operacao] Manutencao automatica finalizada com cards verificados.');
+        recordOperationalModule('maintenance',maintenanceStatus,{
+          ...checkEvidence,...repairEvidence,
+          ...(maintenanceStatus==='unverified'?{reason:'MAINTENANCE_CARD_HOURS_UNVERIFIED'}:{})
+        });
       } catch (error) {
         const reason=(error as Error)?.message;
         if(reason!=='UI_CONTROL_OBSCURED') throw error;
