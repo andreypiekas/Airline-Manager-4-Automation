@@ -1,5 +1,7 @@
 import { Page } from '@playwright/test';
-import { DeparturePort } from './executor';
+import { DeparturePort, type CurrentRouteFuelEvidence } from './executor';
+import { calibrateDemandLabelOnCurrentRoutes } from '../optimization/demand-label-calibration';
+import { loadReference, type AirportCatalog } from '../optimization/reference-data';
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
@@ -60,6 +62,7 @@ export function safeDepartureConfirmReadCode(error:unknown):string {
 export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
   private verifiedRouteCount:number|null=null;
+  private lastCompleteFleet:CollectionResult|null=null;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
   navigationMetrics(){return {...this.metrics};}
   constructor(private readonly page:Page,private readonly timeout=15000,
@@ -67,6 +70,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
     private readonly verifiedEarlierFleet?:CollectionResult){}
   async collect(){
     this.prepared=null;
+    this.lastCompleteFleet=null;
     const collectStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:collect');
     await openFleetList(this.page,this.timeout);
@@ -86,6 +90,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         ready:reused.aircraft.filter(a=>a.state==='ready').length,
         freshPerTargetValidation:true
       }));
+      this.lastCompleteFleet=reused;
       this.verifiedRouteCount=reused.expectedRoutes;
       this.metrics.dispatchCollectMs=Date.now()-collectStarted;
       return reused;
@@ -96,6 +101,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
     }));
     this.metrics.fullFleetScans++;
     const result=await collectFleetWithFreshRetry(this.page,this.timeout,true,this.collectionRetryDeadlineEpochMs);
+    this.lastCompleteFleet=result.complete?result:null;
     this.verifiedRouteCount=result.complete?result.expectedRoutes:null;
     this.metrics.dispatchCollectMs=Date.now()-collectStarted;
     if(!result.complete){
@@ -107,6 +113,46 @@ export class PlaywrightDeparturePort implements DeparturePort {
     }
     return result;
   }
+  /** One read-only live quote for an existing route, obtained immediately before
+   * the individual prepared departure. Uses the SAME independently verified
+   * Fleet snapshot, exact aircraft/route identity, unique airport source ID,
+   * native Reroute planner and identity-checked current-route quote. No
+   * Create route, Auto Price, maintenance, supplies, Depart or forced clicks.
+   * Never extends the quote's permitted age and never authorizes a mutation.
+   */
+  async readCurrentRouteFuelQuote(expected:AircraftSnapshot):Promise<CurrentRouteFuelEvidence|null>{
+    this.prepared=null;
+    const inventory=this.lastCompleteFleet;
+    if(!inventory?.complete||inventory.expectedRoutes!==inventory.aircraft.length||
+       inventory.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
+         a.routeId===expected.routeId&&a.from===expected.from&&a.to===expected.to&&
+         a.registration===expected.registration&&a.state==='ready'&&!a.issue).length!==1)
+      return null;
+    await assertNoInteractiveChallenge(this.page,'departure:fuel-quote:before');
+    let airports:AirportCatalog;
+    try{
+      airports=await loadReference<AirportCatalog>('airports.json');
+      if(!airports.license||!airports.source) return null;
+    }catch{return null;}
+    const report=await calibrateDemandLabelOnCurrentRoutes(
+      this.page,inventory,airports,Math.min(this.timeout,10000),1,
+      new Set([expected.aircraftId])
+    );
+    if(!report.uiRestored)throw new Error('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED');
+    await assertNoInteractiveChallenge(this.page,'departure:fuel-quote:after');
+    const sample=report.samples.length===1?report.samples[0]:null;
+    const quote=sample?.currentRouteQuote;
+    if(!quote||!sample||sample.aircraftId!==expected.aircraftId||
+       sample.routeId!==expected.routeId||sample.registration!==expected.registration||
+       sample.from!==expected.from||sample.to!==expected.to||
+       quote.aircraftId!==expected.aircraftId||quote.registration!==expected.registration||
+       quote.from!==expected.from||quote.to!==expected.to||
+       !Number.isSafeInteger(quote.fuelLbs)||quote.fuelLbs<=0)
+      return null;
+    return {aircraftId:expected.aircraftId,routeId:expected.routeId,
+      from:expected.from,to:expected.to,fuelLbs:quote.fuelLbs,observedAt:quote.observedAt};
+  }
+
   async prepare(expected:AircraftSnapshot){
     this.prepared=null;
     const prepareStarted=Date.now();
