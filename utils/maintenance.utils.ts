@@ -196,8 +196,11 @@ export class MaintenanceUtils {
             const planBulkCheckButton = this.page.getByRole('button', { name: 'Plan bulk check' });
             await GeneralUtils.moveAndClick(this.page, planBulkCheckButton);
             console.log("[Manutencao] Verificacoes em lote executadas.");
+        } else if(unverified===0) {
+            console.log("[Preventivo] Finalizado. Nenhum card verificado precisou de revisao.");
         } else {
-            console.log("[Preventivo] Finalizado. Aeronaves acima do limite de horas para revisao.");
+            console.warn("[Preventivo] Revisao nao executada: "+unverified+
+                " card(s) sem horas verificadas; nao assumir que estao fora do limite.");
         }
         return {evaluated:cardsCount,selected,unverified,bulkCheckExecuted:clicked};
     }
