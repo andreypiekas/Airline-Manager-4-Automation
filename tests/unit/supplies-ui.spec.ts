@@ -145,7 +145,7 @@ test('pre-mutation supply failure persists passive diagnostic',async({page})=>{
        if(kind==='co2')throw Error('SUPPLY_CAPACITY_INCONSISTENT');
        return super.snapshot(kind);
      }
-     override async diagnostic(kind:any){return {kind,rows:[{tag:'div',id:null,text:'CAPACITY',value:null,classShape:null}],panelText:['CAPACITY','900 / 1000 Quotas','HOLDING','100 Quotas'],mutationAuthorized:false as const};}
+     override async diagnostic(kind:any){return {kind,rows:[{tag:'div',id:null,text:'CAPACITY',value:null,classShape:null}],panelText:['CAPACITY','900 / 1000 Quotas','HOLDING','100 Quotas'],accountShape:null,mutationAuthorized:false as const};}
    }
    await expect(runSupplies(page,false,env,dir,new DiagnosticPort(page,500))).rejects.toThrow('SUPPLY_CAPACITY_INCONSISTENT');
    const report=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
@@ -234,4 +234,24 @@ test('post-dispatch pass refuses missing or inconclusive first supply run',async
   })).rejects.toThrow('POST_SUPPLY_PRE_REPORT_MISSING');
   expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+// Production regression #991-#993: never guess a rounded/abbreviated cash balance.
+// Report a field-specific, privacy-safe diagnostic before any purchase.
+test('abbreviated account balance blocks supply mutations with redacted format evidence',async({page})=>{
+ await fixture(page);
+ await page.evaluate("cash='$ 2.4M'");
+ const {dir,run}=await execute(page,false);
+ try{
+  await expect(run()).rejects.toThrow('SUPPLY_BALANCE_FORMAT_UNVERIFIED');
+  const report=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
+  expect(report.halted).toBe(true);
+  expect(report.entries).toHaveLength(1);
+  expect(report.entries[0]).toMatchObject({
+   kind:'fuel',status:'unavailable',reason:'READ_OR_VALIDATION_FAILED:SUPPLY_BALANCE_FORMAT_UNVERIFIED'
+  });
+  expect(report.entries[0].diagnostic.accountShape).toBe('$ #.#A');
+  expect(JSON.stringify(report)).not.toContain('2.4M');
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
+ }finally{await rm(dir,{recursive:true,force:true})}
 });
