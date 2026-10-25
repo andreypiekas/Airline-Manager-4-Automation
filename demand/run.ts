@@ -10,6 +10,7 @@ import { Page } from '@playwright/test';
 import { readDemandConfig } from './config';
 import { DemandManager } from './manager';
 import { collectFleetWithFreshRetry } from './reader';
+import { inspectFirstPageReadOnly } from './rolling-first-page';
 import { recoverMissingFlightHistories } from './history-recovery';
 import { writeDemandReport } from './report';
 import { DemandConfig, DemandReport } from './types';
@@ -23,6 +24,27 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
   const optimization = {...configuredOptimization, airlineBases: ownedBases.effectiveBases};
   const research = researchConfig();
   const collection = await collectFleetWithFreshRetry(page, 10000, true, options.collectionRetryDeadlineEpochMs);
+  // Opt-in diagnostic only. A first-page window is NEVER a substitute for a
+  // complete Fleet collection and cannot authorize departures, pricing or reroutes.
+  if (!collection.complete && process.env.DEMAND_FIRST_PAGE_PILOT === 'true') {
+    try {
+      const window = await inspectFirstPageReadOnly(page, 10000);
+      console.warn('[FirstPagePilot] ' + JSON.stringify({
+        status:window.status,routeTotal:window.routeTotal,
+        visible:window.visible,ready:window.ready,mutationAuthorized:false
+      }));
+      await mkdir('test-results/demand',{recursive:true});
+      await writeFile('test-results/demand/first-page-pilot.json',JSON.stringify({
+        schemaVersion:1,mode:'read-only',generatedAt:new Date().toISOString(),
+        status:window.status,routeTotal:window.routeTotal,visible:window.visible,
+        ready:window.ready,mutationAuthorized:false
+      },null,2)+'\n');
+    } catch {
+      console.warn('[FirstPagePilot] ' + JSON.stringify({
+        status:'UNAVAILABLE',mutationAuthorized:false
+      }));
+    }
+  }
   const recoveredHistory=await recoverMissingFlightHistories(page,collection,10000,options.collectionRetryDeadlineEpochMs);
   await mkdir('test-results/demand',{recursive:true});
   await writeFile('test-results/demand/flight-history-recovery.json',JSON.stringify(recoveredHistory,null,2)+'\n');
