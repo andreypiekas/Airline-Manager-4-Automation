@@ -361,10 +361,12 @@ export class DemandReader {
               await this.page.locator('#routeAction').waitFor({state:'visible',timeout:this.timeout});
             }
           }
-          if(firstWindowShort||shortIntermediatePages.length>0||overlapPages.length>0){
-            // Short native windows are never sufficient evidence on their
-            // own. The *entire* inventory must contain both N unique routes
-            // and N unique aircraft IDs with strictly valid identities.
+          const hasNonStandardWindows=firstWindowShort||shortIntermediatePages.length>0||overlapPages.length>0;
+          {
+            // Every inventory, including clean 20-card native windows, must
+            // contain N distinct valid route AND aircraft IDs. Otherwise a
+            // same-route/different-aircraft collision could authorize a
+            // partial or ambiguous fleet despite a matching Routes(N).
             const validRouteIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.routeId)) &&
               new Set(result.aircraft.map(a=>a.routeId)).size===result.expectedRoutes;
             const validAircraftIds=result.aircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)) &&
@@ -372,10 +374,12 @@ export class DemandReader {
             const headingNow=await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout});
             const totalStillStable=integerText(headingNow.match(/\((\d+)\)/)![1])===result.expectedRoutes;
             if(!validRouteIds||!validAircraftIds||!totalStillStable){
-              result.warnings.push('FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED');
+              result.warnings.push(hasNonStandardWindows
+                ? 'FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED'
+                : 'FLEET_INVENTORY_IDENTITY_UNVERIFIED');
               return result;
             }
-            console.warn('[FleetPageDiagnostic] '+JSON.stringify({
+            if(hasNonStandardWindows)console.warn('[FleetPageDiagnostic] '+JSON.stringify({
               status:'SHORT_WINDOW_RECONCILED',observed:seenRoutes.size,expected:result.expectedRoutes,
               shortFirst:firstWindowShort,shortIntermediatePages,overlapPages
             }));
@@ -664,6 +668,7 @@ export async function collectFleetWithFreshRetry(
     w==='ROUTE_COUNT_MISMATCH' ||
     w==='FLEET_ROUTE_COUNT_CHANGED_DURING_SCAN' ||
     w==='FLEET_SHORT_WINDOW_IDENTITY_UNVERIFIED' ||
+    w==='FLEET_INVENTORY_IDENTITY_UNVERIFIED' ||
     w==='COLLECTION_REASON:PAGINATION_DUPLICATE'
   );
   if(first.complete || !isRetryable(first)) return first;
