@@ -7,6 +7,7 @@ import { collectFleetWithFreshRetry, DemandReader } from '../../demand/reader';
 async function openFleetFixture(page: Page, mode: 'recover'|'always-overlap'|'duplicate-aircraft') {
   const html = `<!doctype html><html><body>
     <button id="mapRoutes" onclick="hideAllWhenClick();menuFleet('Routes');">Fleet</button>
+    <button>Routes (41)</button>
     <div id="routeAction"><div id="routesContainer"></div></div>
     <script>
       const w=window;
