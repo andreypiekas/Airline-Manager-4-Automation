@@ -145,7 +145,7 @@ test('pre-mutation supply failure persists passive diagnostic',async({page})=>{
        if(kind==='co2')throw Error('SUPPLY_CAPACITY_INCONSISTENT');
        return super.snapshot(kind);
      }
-     override async diagnostic(kind:any){return {kind,rows:[{tag:'div',id:null,text:'CAPACITY',value:null,classShape:null}],panelText:['CAPACITY','900 / 1000 Quotas','HOLDING','100 Quotas'],mutationAuthorized:false as const};}
+     override async diagnostic(kind:any){return {kind,rows:[{tag:'div',id:null,text:'CAPACITY',value:null,classShape:null}],panelText:['CAPACITY','900 / 1000 Quotas','HOLDING','100 Quotas'],accountShape:null,mutationAuthorized:false as const};}
    }
    await expect(runSupplies(page,false,env,dir,new DiagnosticPort(page,500))).rejects.toThrow('SUPPLY_CAPACITY_INCONSISTENT');
    const report=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
