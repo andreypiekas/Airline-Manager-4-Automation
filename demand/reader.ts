@@ -137,6 +137,9 @@ export class DemandReader {
       const heading = await this.page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ }).innerText();
       result.expectedRoutes = integerText(heading.match(/\((\d+)\)/)![1]);
       let maxPages=1,firstPageSize=0;
+      // Native +20 offsets can outlive ceil(Routes(N)/20) when some
+      // windows render fewer than 20 verified cards. Bounded read-only only.
+      const maxReadOnlyPages=Math.min(64,Math.max(1,result.expectedRoutes));
       for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
@@ -196,7 +199,7 @@ export class DemandReader {
             const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
             const nativeNext=await next.count()===1 && await next.isVisible() &&
               nativeNextStart(await next.getAttribute('onclick')||'')===(pageIndex+1)*nativePageSize;
-            const safeShort=pageIndex<maxPages-1 &&
+            const safeShort=(pageIndex<maxPages-1||nativeNext) &&
               required===nativePageSize &&
               ids.length>0 && ids.length<required &&
               new Set(ids).size===ids.length &&
@@ -208,7 +211,7 @@ export class DemandReader {
             // This is inspection-only; full unique fleet coverage is still
             // required before any operational action.
             const overlaps=ids.filter(id=>seenRoutes.has(id));
-            const safeBoundaryOverlap=pageIndex<maxPages-1 &&
+            const safeBoundaryOverlap=(pageIndex<maxPages-1||nativeNext) &&
               required===nativePageSize &&
               ids.length===required && new Set(ids).size===ids.length &&
               overlaps.length===1 &&
@@ -275,7 +278,7 @@ export class DemandReader {
           const usesNative20=result.expectedRoutes>nativePageSize &&
             await nativeNext.count()===1 && nativeNextStart(await nativeNext.getAttribute('onclick')||'')===nativePageSize;
           firstPageSize=usesNative20?nativePageSize:cards.length;
-          maxPages=routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize));
+          maxPages=Math.min(maxReadOnlyPages,routePageLimit(result.expectedRoutes,Math.max(1,firstPageSize)));
         }
         // Routes(N) must not drift while paging, even transiently. Opening
         // details may later reset the Fleet list and visually restore an
@@ -376,6 +379,21 @@ export class DemandReader {
         }
         stage='PAGINATION_NEXT';
         const next = this.page.locator('#routesContainer .pagination').getByRole('link', { name: 'Next', exact: true });
+        // The Routes(N)/20 estimate is not the end if an inspected native
+        // Next continues with the exact next +20 offset. Never invent a
+        // cursor, skip an aircraft, or authorize an incomplete inventory.
+        const following=await next.count()===1
+          ?nativeNextStart(await next.getAttribute('onclick')||'') : null;
+        if(pageIndex===maxPages-1 && await next.count()===1 &&
+           await next.isVisible() && following===(pageIndex+1)*nativePageSize &&
+           maxPages<maxReadOnlyPages){
+          maxPages++;
+          console.warn('[FleetPagination] '+JSON.stringify({
+            status:'NATIVE_CURSOR_EXTENDED_READ_ONLY',page:pageIndex,
+            observed:seenRoutes.size,expected:result.expectedRoutes,
+            nextStart:following,limit:maxReadOnlyPages
+          }));
+        }
         if (pageIndex===maxPages-1 || await next.count()!==1) {
           result.warnings.push('ROUTE_COUNT_MISMATCH','ROUTE_COUNT:'+seenRoutes.size+'/'+result.expectedRoutes);
           if(firstWindowShort||shortIntermediatePages.length)

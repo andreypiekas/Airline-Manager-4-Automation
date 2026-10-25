@@ -95,9 +95,15 @@ export async function findFleetRoute(page: Page, aircraft: AircraftSnapshot, tim
     es.filter(e=>!!e.getClientRects().length).length
   );
   if(totalRoutes>0&&firstPageRows<1)throw new Error('RESEARCH_ROUTE_COUNT_UNAVAILABLE');
-  const maxPages=routePageLimit(totalRoutes,Math.max(1,firstPageRows));
+  // The first rendered window is not a native page size: short windows can
+  // leave additional exact +20 native offsets beyond ceil(Routes(N)/20).
+  // This helper is read-only; its caller validates the route/aircraft identity.
+  const maxPages=Math.min(64,Math.max(1,totalRoutes));
   const seen = new Set<string>();
   for (let index=0; index<maxPages; index++) {
+    const currentHeading=(await page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout})).trim();
+    const matchCurrent=/^Routes\s*\((\d+)\)$/.exec(currentHeading);
+    if(!matchCurrent||Number(matchCurrent[1])!==totalRoutes)throw new Error('RESEARCH_FLEET_COUNT_CHANGED');
     const rows = page.locator('#routesContainer [id^="routeMainList"]');
     const first = await rows.evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id || null);
     if (!first || seen.has(first)) throw new Error('RESEARCH_PAGINATION_INVALID');
