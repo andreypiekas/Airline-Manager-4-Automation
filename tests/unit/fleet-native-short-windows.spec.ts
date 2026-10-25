@@ -123,3 +123,46 @@ test('target lookup traverses short native windows without assuming initial page
   expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(6);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+
+test('production #957: extend after seventh short window and confirm all 115 identities',async ({page})=>{
+  // Real #957 read 17+13+15+14+19+19=97, then 17/18 in page 7
+  // while the native UI still exposed the inspected start=140 Next.
+  // In this offline fixture the following page returns the final missing ID.
+  await nativeShortWindowFleet(page,[17,13,15,14,19,19,17,1],115);
+  const result=await new DemandReader(page,120).collect();
+  expect(result.complete).toBe(true);
+  expect(result.expectedRoutes).toBe(115);
+  expect(result.aircraft).toHaveLength(115);
+  expect(new Set(result.aircraft.map(a=>a.routeId)).size).toBe(115);
+  expect(new Set(result.aircraft.map(a=>a.aircraftId)).size).toBe(115);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(7);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('production #957: missing last aircraft and no verified Next cannot authorize completion',async ({page})=>{
+  await nativeShortWindowFleet(page,[17,13,15,14,19,19,17],115);
+  const result=await new DemandReader(page,120).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft.length).toBeLessThan(115);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('production #957: unexpected native offset cannot extend short tail',async ({page})=>{
+  await nativeShortWindowFleet(page,[17,13,15,14,19,19,17,1],115);
+  await page.evaluate(()=>{
+    const w=window as any;
+    const render=w.renderNative;
+    w.renderNative=(index:number)=>{
+      render(index);
+      if(index===6){
+        const next=document.querySelector('#routesContainer .pagination a')!;
+        next.setAttribute('onclick',"Ajax('routes.php?start=141&sort=','routeAction',this);");
+      }
+    };
+  });
+  const result=await new DemandReader(page,120).collect();
+  expect(result.complete).toBe(false);
+  expect(result.aircraft.length).toBeLessThan(115);
+  expect(await page.evaluate(()=>(window as any).pageAdvances)).toBe(6);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});

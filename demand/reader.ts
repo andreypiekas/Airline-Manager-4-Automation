@@ -199,8 +199,14 @@ export class DemandReader {
             const next=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
             const nativeNext=await next.count()===1 && await next.isVisible() &&
               nativeNextStart(await next.getAttribute('onclick')||'')===(pageIndex+1)*nativePageSize;
-            const safeShort=(pageIndex<maxPages-1||nativeNext) &&
-              required===nativePageSize &&
+            // After extending beyond ceil(Routes(N)/20), the next verified
+            // native window may contain *fewer than the remaining identities*.
+            // Keep scanning read-only, never infer a missing aircraft and
+            // never accept the inventory unless all N unique IDs reconcile.
+            const extendedTailWithNext=pageIndex>=routePageLimit(result.expectedRoutes,nativePageSize) &&
+              nativeNext && required>0 && required<nativePageSize;
+            const safeShort=nativeNext &&
+              (required===nativePageSize||extendedTailWithNext) &&
               ids.length>0 && ids.length<required &&
               new Set(ids).size===ids.length &&
               ids.every(id=>/^[1-9]\d*$/.test(id)&&!seenRoutes.has(id)) &&
