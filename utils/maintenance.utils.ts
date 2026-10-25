@@ -12,6 +12,13 @@ export function parseMaintenanceHoursToCheck(cardText:string):number|null {
     return Number.isSafeInteger(hours)&&hours>=0?hours:null;
 }
 
+/** An unverified maintenance card cannot be reported as a complete inspection. */
+export function maintenanceCheckVerificationStatus(evidence:{evaluated:number;unverified:number}):'completed_observed'|'unverified' {
+    return Number.isSafeInteger(evidence.evaluated)&&evidence.evaluated>0&&
+        Number.isSafeInteger(evidence.unverified)&&evidence.unverified===0
+        ?'completed_observed':'unverified';
+}
+
 export class MaintenanceUtils {
     page: Page;
     repairWear: string;
@@ -86,7 +93,7 @@ export class MaintenanceUtils {
         return {repairEligible:!noPlaneExists};
     }
 
-    public async checkPlanes(recoverObscuredPlan?:()=>Promise<void>):Promise<{evaluated:number;selected:number;bulkCheckExecuted:boolean}> {
+    public async checkPlanes(recoverObscuredPlan?:()=>Promise<void>):Promise<{evaluated:number;selected:number;unverified:number;bulkCheckExecuted:boolean}> {
         await this.openPlanPanel(recoverObscuredPlan);
         await GeneralUtils.randomSleep(1000, 2000);
         
@@ -97,6 +104,7 @@ export class MaintenanceUtils {
         
         let clicked = false;
         let selected = 0;
+        let unverified = 0;
         let didScroll = false; 
 
         // Percorre o painel para garantir que os cards estejam carregados.
@@ -124,7 +132,8 @@ export class MaintenanceUtils {
             try {
                 await cardElement.waitFor({ state: 'attached', timeout: 3000 });
             } catch (e) {
-                console.log(`[Aviso] Aeronave de indice ${i} indisponivel. Continuando para a proxima.`);
+                unverified++;
+                console.warn(`[Preventivo] HOLD: card ${i} indisponivel para verificacao.`);
                 continue;
             }
 
@@ -132,7 +141,11 @@ export class MaintenanceUtils {
             if (!(await cardElement.isVisible())) {
                 await cardElement.scrollIntoViewIfNeeded();
                 await GeneralUtils.randomSleep(300, 600);
-                if (!(await cardElement.isVisible())) continue;
+                if (!(await cardElement.isVisible())) {
+                    unverified++;
+                    console.warn(`[Preventivo] HOLD: card ${i} nao esta visivel apos navegacao.`);
+                    continue;
+                }
             }
 
             // Ambil text isi kartu secara keseluruhan untuk membaca sisa jam terbang
@@ -143,6 +156,7 @@ export class MaintenanceUtils {
             // is not independently verified remaining maintenance time.
             const hoursRemaining=parseMaintenanceHoursToCheck(cardText);
             if(hoursRemaining===null){
+                unverified++;
                 console.warn('[Preventivo] HOLD: Hours to check nao verificado no card '+i+'.');
                 continue;
             }
@@ -185,7 +199,7 @@ export class MaintenanceUtils {
         } else {
             console.log("[Preventivo] Finalizado. Aeronaves acima do limite de horas para revisao.");
         }
-        return {evaluated:cardsCount,selected,bulkCheckExecuted:clicked};
+        return {evaluated:cardsCount,selected,unverified,bulkCheckExecuted:clicked};
     }
 }
 
