@@ -15,14 +15,28 @@ O jogo pode reordenar cartões após pousos, novas decolagens ou manutenção; a
 3. Extrai as identidades usando o callback exato `fleet_details.php?id=...`, registro e routeId.
 4. Classifica `ready`, `inflight` ou `unavailable`; não presume que toda aeronave indisponível está em manutenção.
 5. Reconfere uma segunda amostra da página, inclusive a ordem e o estado de cada cartão.
-6. Bloqueia o planejamento quando há mudança de estado/ordem, IDs duplicados, callbacks desconhecidos, cursor inesperado ou uma janela curta.
+6. Bloqueia identidades inconsistentes, callbacks desconhecidos, cursor inesperado e páginas instáveis. Uma janela curta pode ser observada somente para diagnóstico, nunca considerada inventário integral.
 7. Mantém em memória somente os resultados terminais registrados: confirmados e incertos jamais voltam à lista de candidatos nessa mesma execução.
 
 A API **nunca** retorna autorização de mutação: `mutationAuthorized: false`. `READ_ONLY_CANDIDATES` é apenas uma lista exploratória, não uma permissão para decolar.
 
 ### Ativação observacional
 
-O diagnóstico é ativado automaticamente **somente quando a coleta integral falha**. Pode ser desativado com `DEMAND_FIRST_PAGE_PILOT=false`. Após a falha, o bot faz uma leitura extra limitada a 5 segundos da primeira página e registra `test-results/demand/first-page-pilot.json` e uma linha sanitizada `[FirstPagePilot]`. Mesmo com o diagnóstico ativo, nenhuma decolagem, compra, precificação ou rota passa a ser autorizada pelo piloto. Não é necessário executar manualmente o workflow nem usar credenciais para validar os testes unitários.
+O diagnóstico é ativado automaticamente **somente quando a coleta integral falha**. Pode ser desativado com `DEMAND_FIRST_PAGE_PILOT=false`. Após a falha, o bot executa até **3 leituras independentes** da primeira página (limite de 5 segundos por leitura e respeito ao orçamento restante), sem navegar em `Next`, e registra `test-results/demand/first-page-pilot.json` e uma linha sanitizada `[FirstPagePilot]`. Mesmo com o diagnóstico ativo, nenhuma decolagem, compra, precificação ou rota passa a ser autorizada pelo piloto. Não é necessário executar manualmente o workflow nem usar credenciais para validar os testes unitários.
+
+## Fase 2 — observação progressiva e detecção de chegadas
+
+`demand/rolling-first-page-cycle.ts` implementa um planejador incremental **somente de leitura**. Após cada abertura da primeira janela nativa, ele reconcilia as identidades observadas nesta execução (ID da aeronave, ID da rota e registro), acumula as aeronaves recém-prontas e registra alterações na ordem ou no estado dos cartões sem reutilizar cursores antigos.
+
+O procedimento diferencia uma aeronave que apenas mudou de estado de outra com identidade divergente. **ID/rota/registro conflitantes interrompem a observação.** Como a interface pode deixar de exibir uma aeronave em manutenção, a ausência de um cartão **não** confirma exclusão da frota.
+
+O ciclo encerra quando há duas leituras consecutivas sem novas aeronaves prontas, quando o limite de três janelas é atingido, quando faltam menos de dez segundos para o prazo informado ou quando a coleta perde integridade. Não usa uma página para inferir todas as 142 identidades e não produz um `CollectionResult.complete`.
+
+O resumo em `first-page-pilot.json` agora inclui `rolling.windows`: contagem de cartões, estado, novos candidatos observados, alterações entre páginas, identidades únicas e motivo de término. **Não há dados de conta nem identidades de aeronaves nesse diagnóstico**. O resultado permanece `mutationAuthorized:false`.
+
+Testes adicionais cobrem chegada sem alteração de `Routes(N)`, página reordenada, janela curta por manutenção, duplicação, regressão de identidade e interrupção por orçamento. Um navegador sintético reproduz janelas sucessivas e verifica que nenhum controle de decolagem ou `Next` é acionado.
+
+O operador pode observar esses diagnósticos em uma execução normal que **já apresente erro de inventário**, sem disparar produção manualmente.
 
 ## Condições para uma etapa posterior de despacho gradual
 
