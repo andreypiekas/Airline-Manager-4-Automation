@@ -250,7 +250,7 @@ test('abbreviated account balance blocks supply mutations with redacted format e
   expect(report.entries[0]).toMatchObject({
    kind:'fuel',status:'unavailable',reason:'READ_OR_VALIDATION_FAILED:SUPPLY_BALANCE_FORMAT_UNVERIFIED'
   });
-  expect(report.entries[0].diagnostic.accountShape).toBe('$ #.#M');
+  expect(report.entries[0].diagnostic.accountShape).toBe('$ #.#A');
   expect(JSON.stringify(report)).not.toContain('2.4M');
   expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
  }finally{await rm(dir,{recursive:true,force:true})}
