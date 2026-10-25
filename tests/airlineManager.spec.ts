@@ -186,7 +186,20 @@ test('All Operations', async ({ page }) => {
         .waitFor({ state: 'visible', timeout: 15000 });
 
       try {
-        const checkEvidence=await maintenanceUtils.checkPlanes();
+        // Only the FIRST Plan navigation can be retried. At this point no
+        // maintenance service has been selected, confirmed or submitted.
+        // If any later click is obstructed, keep the existing safe HOLD;
+        // never replay bulk checks/repairs because their outcome may be unknown.
+        const recoverInitialPlan=async()=>{
+          await closeOpenPanel('recuperar navegacao da aba Plan (sem servicos)');
+          await assertNoInteractiveChallenge(page,'maintenance:before-reopen');
+          if(await maintenanceMenu.count()!==1 || !await maintenanceMenu.isVisible())
+            throw new Error('UI_CONTROL_OBSCURED');
+          await GeneralUtils.moveAndClick(page,maintenanceMenu,20000);
+          await page.getByRole('button',{name:' Plan'})
+            .waitFor({state:'visible',timeout:15000});
+        };
+        const checkEvidence=await maintenanceUtils.checkPlanes(recoverInitialPlan);
         await GeneralUtils.randomSleep(1500, 3000);
         const repairEvidence=await maintenanceUtils.repairPlanes();
         await GeneralUtils.randomSleep(1500, 3000);
