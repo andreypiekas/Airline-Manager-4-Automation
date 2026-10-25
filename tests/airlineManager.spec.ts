@@ -12,7 +12,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -405,8 +405,16 @@ test('All Operations', async ({ page }) => {
         })
       );
     }
+    const departureEnabled = !demandConfig.dryRun && moduleEnabled('ENABLE_DEPART');
+    // Ticket pricing is optional, but departures with verified demand must not
+    // lose their 5-minute start window to another full-fleet pricing scan.
+    // In run #966, pricing consumed ~7m after 10 eligible aircraft were found,
+    // leaving <5m and causing zero departures. Preserve a conservative buffer.
+    const pricingBudgetMinimum = departureEnabled && simulation.report.summary.sufficient > 0
+      ? phaseBudgetsMs.ticketPricing + phaseBudgetsMs.departures + OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS
+      : phaseBudgetsMs.ticketPricing;
     if (!demandConfig.dryRun && moduleEnabled('ENABLE_TICKET_PRICING_EXECUTION', false)
-      && phaseAllowed('ticket-pricing',phaseBudgetsMs.ticketPricing)) {
+      && phaseAllowed('ticket-pricing',pricingBudgetMinimum)) {
       pricingExecutionReport = await test.step(
         'Ajustar tarifas por rota',
         async () => await runTicketPricingExecution(page,{
@@ -415,7 +423,6 @@ test('All Operations', async ({ page }) => {
         })
       );
     }
-    const departureEnabled = !demandConfig.dryRun && moduleEnabled('ENABLE_DEPART');
     const departureBudgetAllowed = departureEnabled && phaseAllowed('departures',phaseBudgetsMs.departures);
     if (isSkippedDeparturePhaseFailure(departureEnabled,departureBudgetAllowed,simulation.report.summary.sufficient)) {
       // A live run that found sufficient demand must not finish green when its
