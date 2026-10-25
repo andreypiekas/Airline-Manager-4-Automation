@@ -38,6 +38,38 @@ export function validFreshHistoryRecovery(expected:AircraftSnapshot,fresh:Aircra
     fresh.flightHistory.entries.length>0;
 }
 
+/** Classify why history re-observation cannot safely replace the old one.
+ * Diagnostic codes ONLY; never expose IDs, registration, route or raw game HTML.
+ * This classification cannot authorize a recovery by itself.
+ */
+export function flightHistoryRecoveryRejectionReason(expected:AircraftSnapshot,fresh:AircraftSnapshot):
+  'HISTORY_NOT_OBSERVED'|'IDENTITY_OR_ROUTE_CHANGED'|'FLIGHT_STATE_CHANGED'|
+  'FLIGHT_CYCLE_UNVERIFIED'|'DEMAND_OR_CAPACITY_CHANGED'|'TIMESTAMP_UNVERIFIED'|
+  'OTHER_CONTEXT_UNVERIFIED' {
+  if(fresh.flightHistory?.status!=='observed'||!fresh.flightHistory.entries?.length)
+    return 'HISTORY_NOT_OBSERVED';
+  if(expected.aircraftId!==fresh.aircraftId||expected.registration!==fresh.registration||
+     expected.routeId!==fresh.routeId||expected.from!==fresh.from||expected.to!==fresh.to)
+    return 'IDENTITY_OR_ROUTE_CHANGED';
+  if(expected.state!==fresh.state||!(expected.state==='ready'||expected.state==='inflight'))
+    return 'FLIGHT_STATE_CHANGED';
+  if(!expected.operational||!fresh.operational||
+     !Number.isSafeInteger(expected.operational.cycles)||
+     expected.operational.cycles!==fresh.operational.cycles)
+    return 'FLIGHT_CYCLE_UNVERIFIED';
+  if(!sameCabins(expected.capacity,fresh.capacity)||
+     !sameCabins(expected.dailyTotal,fresh.dailyTotal)||
+     !sameCabins(expected.remaining,fresh.remaining)||
+     (expected.state==='inflight'&&!sameCabins(expected.onboard,fresh.onboard)))
+    return 'DEMAND_OR_CAPACITY_CHANGED';
+  const current=Date.parse(fresh.observedAt),old=Date.parse(expected.observedAt),
+    history=Date.parse(fresh.flightHistory.observedAt);
+  if(!Number.isFinite(current)||!Number.isFinite(old)||current<old||
+     !Number.isFinite(history)||history<old)
+    return 'TIMESTAMP_UNVERIFIED';
+  return 'OTHER_CONTEXT_UNVERIFIED';
+}
+
 export function selectMissingFlightHistory(collection:CollectionResult,max=2):AircraftSnapshot[]{
   if(!Number.isSafeInteger(max)||max<1||max>3)throw new Error('FLIGHT_HISTORY_RECOVERY_CONFIG_INVALID');
   if(!collection.complete||collection.expectedRoutes!==collection.aircraft.length||
@@ -85,6 +117,7 @@ export async function recoverMissingFlightHistories(
         const fresh=await new DemandReader(page,timeout,true).readAircraftDetails(expected);
         if(!validFreshHistoryRecovery(expected,fresh)){
           result.warnings.push('FLIGHT_HISTORY_RECOVERY_CONTEXT_UNVERIFIED');
+          result.warnings.push('FLIGHT_HISTORY_RECOVERY_REASON:'+flightHistoryRecoveryRejectionReason(expected,fresh));
           continue;
         }
         expected.flightHistory=fresh.flightHistory;
