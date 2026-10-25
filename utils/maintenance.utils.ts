@@ -4,6 +4,14 @@ import { assertNoInteractiveChallenge } from "./challenge-guard";
 
 require('dotenv').config();
 
+/** Never derive a maintenance deadline from an unrelated card number. */
+export function parseMaintenanceHoursToCheck(cardText:string):number|null {
+    const matches=Array.from(cardText.matchAll(/\bhours\s+to\s+check\s*:?\s*(\d{1,6})(?![\d.,])/gi));
+    if(matches.length!==1)return null;
+    const hours=Number(matches[0][1]);
+    return Number.isSafeInteger(hours)&&hours>=0?hours:null;
+}
+
 export class MaintenanceUtils {
     page: Page;
     repairWear: string;
@@ -26,9 +34,23 @@ export class MaintenanceUtils {
     }
 
     /** Opens the maintenance planning panel using the normal UI control. */
-    private async openPlanPanel() {
+    public async openPlanPanel(recoverObscuredPlan?:()=>Promise<void>) {
         const planButton = this.page.getByRole('button', { name: ' Plan' });
-        await GeneralUtils.moveAndClick(this.page, planButton, 15000);
+        try {
+            await GeneralUtils.moveAndClick(this.page, planButton, 15000);
+        } catch(error) {
+            // A single recovery is allowed for READ-ONLY menu navigation only.
+            // Never retry card selection, bulk check, repair or a purchase.
+            if(!(error instanceof Error)||error.message!=='UI_CONTROL_OBSCURED'||!recoverObscuredPlan)
+                throw error;
+            console.warn('[Manutencao] Plan encoberto: recuperacao unica de navegacao, sem repetir servicos.');
+            await assertNoInteractiveChallenge(this.page,'maintenance:plan-readonly-recovery');
+            await recoverObscuredPlan();
+            await assertNoInteractiveChallenge(this.page,'maintenance:plan-after-recovery');
+            if(await planButton.count()!==1 || !await planButton.isVisible())
+                throw new Error('UI_CONTROL_OBSCURED');
+            await GeneralUtils.moveAndClick(this.page,planButton,15000);
+        }
     }
 
     /** Selects an option through the native select element. */
@@ -64,8 +86,8 @@ export class MaintenanceUtils {
         return {repairEligible:!noPlaneExists};
     }
 
-    public async checkPlanes():Promise<{evaluated:number;selected:number;bulkCheckExecuted:boolean}> {
-        await this.openPlanPanel();
+    public async checkPlanes(recoverObscuredPlan?:()=>Promise<void>):Promise<{evaluated:number;selected:number;bulkCheckExecuted:boolean}> {
+        await this.openPlanPanel(recoverObscuredPlan);
         await GeneralUtils.randomSleep(1000, 2000);
         
         const bulkCheckButton = this.page.getByRole('button', { name: ' Bulk check' });
@@ -116,36 +138,16 @@ export class MaintenanceUtils {
             // Ambil text isi kartu secara keseluruhan untuk membaca sisa jam terbang
             const cardText = await cardElement.innerText();
             
-            // Deteksi apakah teks jam terbang di dalam kartu ini sudah menyala merah (.text-danger)
-            const hasDangerText = await cardElement.locator('.text-danger').count() > 0;
-            
-            // 🚀 PERBAIKAN REGEX BARU: Menangkap angka jam yang berada di BARIS BARU tepat setelah kalimat "Hours to check"
-            const hourMatch = cardText.match(/hours\s*to\s*check\s*[\r\n\s]*(\d+)/i) || cardText.match(/(\d+)\s*(?=hr|hour|jam)/i);
-            let hoursRemaining = null; 
-            
-            if (hourMatch) {
-                hoursRemaining = parseInt(hourMatch[1], 10);
-            } else {
-                // Jalur cadangan jika teks "Hours to check" berganti bahasa, ambil angka pertama pada kartu
-                const backupMatch = cardText.match(/\d+/);
-                if (backupMatch) hoursRemaining = parseInt(backupMatch[0], 10);
+            // Without an exact Hours to check label the aircraft stays in HOLD.
+            // A number in a registration/flight-hour field or red styling
+            // is not independently verified remaining maintenance time.
+            const hoursRemaining=parseMaintenanceHoursToCheck(cardText);
+            if(hoursRemaining===null){
+                console.warn('[Preventivo] HOLD: Hours to check nao verificado no card '+i+'.');
+                continue;
             }
-
-            // --- 📌 STRUKTUR LOGIKA PRIORITAS ---
-            let harusDiCheck = false;
-            let alasan = "";
-
-            if (hoursRemaining !== null) {
-                // PRIORITAS UTAMA: Jika nilai angka teks berhasil dibaca, jadikan acuan mutlak (Hijau/Merah bernilai sama)
-                if (hoursRemaining <= this.hoursCheck) {
-                    harusDiCheck = true;
-                    alasan = `Restam ${hoursRemaining} horas (limite de ${this.hoursCheck} horas) [Leitura do painel]`;
-                }
-            } else if (hasDangerText) {
-                // PRIORITAS CADANGAN: Hanya jika teks angka gagal terbaca sama sekali, gunakan warna merah sebagai fallback
-                harusDiCheck = true;
-                alasan = "Nao foi possivel ler as horas, mas foi identificado um alerta vermelho.";
-            }
+            const harusDiCheck=hoursRemaining<=this.hoursCheck;
+            const alasan=`Restam ${hoursRemaining} horas (limite de ${this.hoursCheck} horas) [Leitura verificada]`;
 
             // Eksekusi klik jika memenuhi syarat evaluasi di atas
             if (harusDiCheck) {

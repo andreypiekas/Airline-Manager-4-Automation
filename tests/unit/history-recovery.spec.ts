@@ -1,6 +1,6 @@
 import { test,expect } from '@playwright/test';
 import type { AircraftSnapshot,CollectionResult } from '../../demand/types';
-import { validFreshHistoryRecovery,selectMissingFlightHistory,recoverMissingFlightHistories } from '../../demand/history-recovery';
+import { validFreshHistoryRecovery,flightHistoryRecoveryRejectionReason,selectMissingFlightHistory,recoverMissingFlightHistories } from '../../demand/history-recovery';
 
 const stamp=new Date().toISOString();
 const aircraft=(id='101'):AircraftSnapshot=>({
@@ -60,4 +60,22 @@ test('expired retry budget cannot initiate navigation',async({page})=>{
   expect(r).toMatchObject({attempted:0,recovered:0,candidates:1,
     warnings:['FLIGHT_HISTORY_RECOVERY_BUDGET_INSUFFICIENT'],mutationAuthorized:false});
   expect(c.aircraft[0].flightHistory?.status).toBe('unavailable');
+});
+
+test('recovery diagnostics identify reason without authorizing an unverified context',()=>{
+  const base=aircraft(),good=observed(base);
+  const cases:[AircraftSnapshot,string][]=[
+    [{...good,flightHistory:{...good.flightHistory!,status:'unavailable',entries:[]}},'HISTORY_NOT_OBSERVED'],
+    [{...good,aircraftId:'999'},'IDENTITY_OR_ROUTE_CHANGED'],
+    [{...good,state:'ready'},'FLIGHT_STATE_CHANGED'],
+    [{...good,operational:{...good.operational!,cycles:21}},'FLIGHT_CYCLE_UNVERIFIED'],
+    [{...good,remaining:{...good.remaining!,Y:good.remaining!.Y-1}},'DEMAND_OR_CAPACITY_CHANGED'],
+    [{...good,observedAt:new Date(Date.parse(base.observedAt)-1000).toISOString()},'TIMESTAMP_UNVERIFIED'],
+  ];
+  for(const [fresh,reason] of cases){
+    expect(validFreshHistoryRecovery(base,fresh)).toBe(false);
+    expect(flightHistoryRecoveryRejectionReason(base,fresh)).toBe(reason);
+  }
+  expect(validFreshHistoryRecovery(base,good)).toBe(true);
+  expect(flightHistoryRecoveryRejectionReason(base,good)).toBe('OTHER_CONTEXT_UNVERIFIED');
 });
