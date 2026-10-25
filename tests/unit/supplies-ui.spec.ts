@@ -2,7 +2,7 @@ import {test,expect,Page} from '@playwright/test';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SupplyPort,parseSupplyText,parseSupplyQuote,purchaseCallback} from '../../supplies/port';
+import {SupplyPort,parseSupplyText,parseSupplyQuote,parseAccountBalance,purchaseCallback} from '../../supplies/port';
 import {planPurchase,supplyConfig} from '../../supplies/policy';
 import {runSupplies} from '../../supplies/run';
 const env={ENABLE_DEMAND_MANAGER:'true',DEMAND_FAIL_SAFE:'true',DEMAND_POOL_SCOPE:'airport-pair',DEMAND_EXECUTION_ACK:'individual-return-legs-v1',GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'andreypiekas/Airline-Manager-4-Automation',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',MAX_FUEL_PRICE:'550',MAX_CO2_PRICE:'120'};
@@ -254,4 +254,44 @@ test('abbreviated account balance blocks supply mutations with redacted format e
   expect(JSON.stringify(report)).not.toContain('2.4M');
   expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
  }finally{await rm(dir,{recursive:true,force:true})}
+});
+
+test('negative account cash is verified and skips BOTH commodities without any purchase',async({page})=>{
+ await fixture(page);
+ await page.evaluate("cash='-1,234'");
+ const {dir,run}=await execute(page,false);
+ try{
+  const report=await run();
+  expect(report.halted).toBe(false);
+  expect(report.entries.map(e=>({kind:e.kind,status:e.status,reason:e.reason}))).toEqual([
+   {kind:'fuel',status:'skipped',reason:'NEGATIVE_CASH_BALANCE_NO_PURCHASE'},
+   {kind:'co2',status:'skipped',reason:'NEGATIVE_CASH_BALANCE_NO_PURCHASE'}
+  ]);
+  expect(report.entries.map(e=>e.before.balance)).toEqual([-1234,-1234]);
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
+  const persisted=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
+  expect(persisted.halted).toBe(false);
+  expect(persisted.entries).toHaveLength(2);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+
+test('ambiguous negative cash formatting stays blocked before purchase',async({page})=>{
+ await fixture(page);
+ await page.evaluate("cash='-1,2'");
+ const {dir,run}=await execute(page,false);
+ try{
+  await expect(run()).rejects.toThrow('SUPPLY_BALANCE_FORMAT_UNVERIFIED');
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(0);
+  const report=JSON.parse(await readFile(join(dir,'supply-report.json'),'utf8'));
+  expect(report.halted).toBe(true);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+
+test('negative cash parser is strict and never changes the price/quote parser',()=>{
+ expect(parseAccountBalance('-1,234')).toBe(-1234);
+ expect(parseAccountBalance('1,234')).toBe(1234);
+ expect(()=>parseAccountBalance('-1,2')).toThrow('SUPPLY_NUMBER_INVALID');
+ expect(()=>parseAccountBalance('-1.25')).toThrow('SUPPLY_NUMBER_INVALID');
+ expect(()=>parseAccountBalance('-$ 1,2M')).toThrow('SUPPLY_NUMBER_INVALID');
+ expect(()=>parseSupplyQuote('TOTAL PRICE\\n$ 1,234\\nAMOUNT TO PURCHASE',500,1000)).toThrow();
 });
