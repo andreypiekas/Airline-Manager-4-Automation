@@ -40,7 +40,10 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
         status:window.status,routeTotal:window.routeTotal,visible:window.visible,
         ready:window.ready,mutationAuthorized:false
       },null,2)+'\n');
-    } catch {
+    } catch (error) {
+      // The diagnostic must never hide a CAPTCHA/challenge from the main
+      // production safety gate. Other read failures are passive only.
+      if (error instanceof Error && error.message === 'INTERACTIVE_CHALLENGE_DETECTED_STOP') throw error;
       console.warn('[FirstPagePilot] ' + JSON.stringify({
         status:'UNAVAILABLE',mutationAuthorized:false
       }));
