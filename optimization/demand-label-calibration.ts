@@ -61,15 +61,19 @@ async function readOpenDemandQuote(page:Page,expected:{registration:string;from:
  * Create route and never turns the label into remaining demand by assumption.
  */
 export async function calibrateDemandLabelOnCurrentRoutes(
-  page:Page,collection:CollectionResult,airports:AirportCatalog|null,timeout=10000,maxSamples=3
+  page:Page,collection:CollectionResult,airports:AirportCatalog|null,timeout=10000,maxSamples=3,
+  onlyAircraftIds?:ReadonlySet<string>
 ):Promise<DemandLabelCalibrationReport>{
   const report:DemandLabelCalibrationReport={
     status:'unavailable',observedAt:new Date().toISOString(),samples:[],classification:'mixed_or_unknown',
     comparisonReady:false,mutationAuthorized:false,uiRestored:true,warnings:[]
   };
   if(!Number.isSafeInteger(timeout)||timeout<1||timeout>30000||!Number.isSafeInteger(maxSamples)||maxSamples<1||maxSamples>10||
-    !collection.complete||!demandCalibrationAirportCatalogSupported(airports))return report;
-  const eligible=collection.aircraft.filter(a=>a.state==='ready'&&!a.issue&&validCabins(a.remaining)&&validCabins(a.dailyTotal)&&
+    !collection.complete||!demandCalibrationAirportCatalogSupported(airports)||
+    (onlyAircraftIds!==undefined&&(!onlyAircraftIds.size||onlyAircraftIds.size>maxSamples||
+       [...onlyAircraftIds].some(id=>!/^[1-9]\d*$/.test(id)))))return report;
+  const eligible=collection.aircraft.filter(a=>(!onlyAircraftIds||onlyAircraftIds.has(a.aircraftId))&&
+    a.state==='ready'&&!a.issue&&validCabins(a.remaining)&&validCabins(a.dailyTotal)&&
     /^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId)&&/^[A-Z0-9]{3}$/.test(a.from)&&/^[A-Z0-9]{3}$/.test(a.to)&&a.from!==a.to);
   for(const expected of eligible.slice(0,maxSamples)){
     try{
@@ -110,7 +114,8 @@ export async function calibrateDemandLabelOnCurrentRoutes(
       report.samples.push(sample);
       const back=page.locator('#newRouteInfo').getByRole('button',{name:/Back$/});
       if(await back.count()===1&&await back.isVisible())await back.click({timeout});
-    }catch{
+    }catch(error){
+      if(error instanceof Error&&error.message.includes('INTERACTIVE_CHALLENGE_DETECTED_STOP'))throw error;
       report.warnings.push('CURRENT_ROUTE_DEMAND_LABEL_SAMPLE_UNAVAILABLE:'+expected.aircraftId);
     }finally{
       try{await openFleetList(page,timeout);}catch{report.uiRestored=false;report.warnings.push('DEMAND_LABEL_LIST_RESTORE_FAILED');break;}
