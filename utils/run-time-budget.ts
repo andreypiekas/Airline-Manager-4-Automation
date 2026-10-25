@@ -5,6 +5,29 @@ export const LIVE_RUN_TIMEOUT_MS=1_440_000; // 24 minutes
 export const LIVE_RUN_FINALIZATION_RESERVE_MS=120_000;
 export const MUTATION_COMPLETION_RESERVE_MS=240_000;
 export const MUTATION_PHASE_START_MINIMUM_MS=300_000;
+// Extra time for optional pricing to finish before the mandatory departure window.
+// This is not a reduction of the existing 5-minute departure start gate.
+export const OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS=120_000;
+
+/** Reserve the downstream departure gate before optional full-fleet pricing.
+ * If demand evidence or budget values are invalid, refuse the optional phase.
+ * This does not authorize a departure; all normal gates still apply later.
+ */
+export function pricingBudgetMinimumBeforeDepartures(
+  pricingMinimumMs:number,
+  departureMinimumMs:number,
+  departureHeadroomMs:number,
+  departureEnabled:boolean,
+  sufficientDemand:number,
+):number {
+  const durations=[pricingMinimumMs,departureMinimumMs,departureHeadroomMs];
+  if(!durations.every(n=>Number.isSafeInteger(n)&&n>=0))return Number.NaN;
+  if(!departureEnabled)return pricingMinimumMs;
+  if(!Number.isSafeInteger(sufficientDemand)||sufficientDemand<0)return Number.NaN;
+  if(sufficientDemand===0)return pricingMinimumMs;
+  const total=pricingMinimumMs+departureMinimumMs+departureHeadroomMs;
+  return Number.isSafeInteger(total)?total:Number.NaN;
+}
 
 export type RunPhaseBudgetReason = 'TIME_BUDGET_AVAILABLE' | 'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_PHASE';
 
