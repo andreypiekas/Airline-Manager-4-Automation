@@ -82,6 +82,12 @@ export async function runSupplies(page:Page,dryRun:boolean,env:NodeJS.ProcessEnv
    await port.open(kind);entry.before=await port.snapshot(kind);
    if(kind==='fuel')report.fuelPriceWindow=fuelPriceWindow(new Date(),calendar,entry.before.pricePer1000,config.maxPrice.fuel,effectiveConfig.maxPrice.fuel);
    await save();
+   // A strictly parsed negative account balance cannot fund a purchase.
+   // Do not append it to the positive-balance journal or clear quarantines.
+   if(entry.before.balance<0){
+    entry.status='skipped';entry.reason='NEGATIVE_CASH_BALANCE_NO_PURCHASE';
+    await save();continue;
+   }
    if(!dryRun&&optimization.returnJournal){
     await appendSupplyObservation(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'',kind,entry.before);
     if(blockedSupplyKinds.has(kind)){
