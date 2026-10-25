@@ -18,6 +18,9 @@ import { readDemandConfig } from './config';
 import { DemandConfig, CollectionResult } from './types';
 import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
+import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { verifiedFirstPagePriorityKeys } from './rolling-first-page-priority';
+import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { optimizationConfig } from '../optimization/report';
 import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
@@ -134,10 +137,36 @@ export async function runDemandExecution(
   if(!['true','false'].includes(campaignGateRequiredRaw)||!['true','false'].includes(campaignGateVerifiedRaw))throw Error('CAMPAIGN_GATE_INVALID');
   const campaignGateRequired=campaignGateRequiredRaw==='true';
   const campaignGateVerified=campaignGateVerifiedRaw==='true';
+  // On a previously COMPLETE same-run inventory, prefer currently visible
+  // first-page ready targets. The page is only a scheduling hint: after this,
+  // the original port.collect/prepare/depart/confirm safety gates are unchanged.
+  let firstPageReadyPriorityKeys:ReadonlySet<string>=new Set<string>();
+  const completeEarlier=prerequisites.verifiedFleetSnapshot?.complete===true;
+  const readyEarlier=prerequisites.verifiedFleetSnapshot?.aircraft.some(a=>a.state==='ready')===true;
+  if(!settings.dryRun&&completeEarlier&&readyEarlier&&env.DEMAND_FIRST_PAGE_PRIORITY!=='false'&&
+     (settings.mutationDeadlineEpochMs===undefined ||
+      Date.now()+MUTATION_COMPLETION_RESERVE_MS+30_000<settings.mutationDeadlineEpochMs)){
+    try{
+      const window=await inspectFirstPageReadOnly(page,3500);
+      firstPageReadyPriorityKeys=verifiedFirstPagePriorityKeys(
+        prerequisites.verifiedFleetSnapshot,window
+      );
+      console.log('[DepartureFirstPagePriority] '+JSON.stringify({
+        status:window.status,observed:window.visible,
+        matchedReady:firstPageReadyPriorityKeys.size,
+        mutationAuthorized:false
+      }));
+    }catch(error){
+      if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+      console.warn('[DepartureFirstPagePriority] '+JSON.stringify({
+        status:'UNAVAILABLE',matchedReady:0,mutationAuthorized:false
+      }));
+    }
+  }
   const departurePort=new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot);
   const report=await new IndividualDepartureExecutor(
     departurePort,config,{...settings,
-    blockedDepartureKeys,prioritizedDepartureKeys,fuelHoldingLbsAtRunStart,
+    blockedDepartureKeys,prioritizedDepartureKeys,firstPageReadyPriorityKeys,fuelHoldingLbsAtRunStart,
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
     currentRouteFuelEvidence:prerequisites.currentRouteFuelEvidence},save,adaptive).run();

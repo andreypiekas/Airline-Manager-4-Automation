@@ -3,6 +3,7 @@ import { DemandManager } from './manager';
 import type { AdaptiveThreshold } from './adaptive-threshold';
 import { estimatedGrossTicketRevenue } from './revenue';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
+import { orderVerifiedDepartureCandidates } from './rolling-first-page-priority';
 
 export interface CurrentRouteFuelEvidence {
   aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -24,6 +25,8 @@ export interface ExecutionSettings {
   blockedDepartureKeys?: ReadonlySet<string>;
   /** Scheduling hint from durable journal; never a departure authorization. */
   prioritizedDepartureKeys?: ReadonlySet<string>;
+  /** Scheduling hint from a freshly matched first native Fleet page; no departure permission. */
+  firstPageReadyPriorityKeys?: ReadonlySet<string>;
   /** Verified fuel holding observed in this same run. Used only to block unsafe clicks. */
   fuelHoldingLbsAtRunStart?: number;
   /** False means required marketing campaigns were not freshly confirmed in this run. */
@@ -161,11 +164,8 @@ export class IndividualDepartureExecutor {
     // inventory. Exact aircraft/route IDs are required and every safety gate
     // below still runs against freshly observed game state.
     const waiting=this.settings.prioritizedDepartureKeys??new Set<string>();
-    const ordered=initial.aircraft.filter(a=>a.state!=='inflight');
-    if(initial.complete&&waiting.size){
-      ordered.sort((a,b)=>Number(waiting.has(b.aircraftId+':'+b.routeId))-
-        Number(waiting.has(a.aircraftId+':'+a.routeId)));
-    }
+    const firstPageReady=this.settings.firstPageReadyPriorityKeys??new Set<string>();
+    const ordered=orderVerifiedDepartureCandidates(initial,waiting,firstPageReady);
     // One complete fleet snapshot establishes global identity/pool integrity. Each
     // target is then re-read individually immediately before a possible mutation.
     for(const expected of ordered) {
