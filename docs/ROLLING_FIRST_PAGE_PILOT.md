@@ -22,7 +22,7 @@ A API **nunca** retorna autorização de mutação: `mutationAuthorized: false`.
 
 ### Ativação observacional
 
-O sinalizador `DEMAND_FIRST_PAGE_PILOT=true` é opt-in, sem valor padrão; quando uma coleta integral falhar, o bot escreve `test-results/demand/first-page-pilot.json` e uma linha sanitizada `[FirstPagePilot]`. **Não** há alteração do fluxo de produção sem esse sinalizador; mesmo com ele ativo, nenhuma decolagem, compra, precificação ou rota passa a ser autorizada pelo piloto. Não é necessário executar manualmente o workflow nem usar credenciais para validar testes unitários.
+O diagnóstico é ativado automaticamente **somente quando a coleta integral falha**. Pode ser desativado com `DEMAND_FIRST_PAGE_PILOT=false`. Após a falha, o bot faz uma leitura extra limitada a 5 segundos da primeira página e registra `test-results/demand/first-page-pilot.json` e uma linha sanitizada `[FirstPagePilot]`. Mesmo com o diagnóstico ativo, nenhuma decolagem, compra, precificação ou rota passa a ser autorizada pelo piloto. Não é necessário executar manualmente o workflow nem usar credenciais para validar os testes unitários.
 
 ## Condições para uma etapa posterior de despacho gradual
 
