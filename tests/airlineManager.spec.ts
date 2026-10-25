@@ -12,7 +12,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, pricingBudgetMinimumBeforeDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -410,9 +410,11 @@ test('All Operations', async ({ page }) => {
     // lose their 5-minute start window to another full-fleet pricing scan.
     // In run #966, pricing consumed ~7m after 10 eligible aircraft were found,
     // leaving <5m and causing zero departures. Preserve a conservative buffer.
-    const pricingBudgetMinimum = departureEnabled && simulation.report.summary.sufficient > 0
-      ? phaseBudgetsMs.ticketPricing + phaseBudgetsMs.departures + OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS
-      : phaseBudgetsMs.ticketPricing;
+    const pricingBudgetMinimum = pricingBudgetMinimumBeforeDepartures(
+      phaseBudgetsMs.ticketPricing, phaseBudgetsMs.departures,
+      OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, departureEnabled,
+      simulation.report.summary.sufficient
+    );
     if (!demandConfig.dryRun && moduleEnabled('ENABLE_TICKET_PRICING_EXECUTION', false)
       && phaseAllowed('ticket-pricing',pricingBudgetMinimum)) {
       pricingExecutionReport = await test.step(
