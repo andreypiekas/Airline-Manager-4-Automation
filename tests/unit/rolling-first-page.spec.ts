@@ -73,8 +73,9 @@ test('maintenance-style short first page never becomes a complete or actionable 
   const observation=await inspectFirstPageReadOnly(page,2000);
   expect(observation.status).toBe('SHORT_PAGE');
   const plan=new FirstPageProgress().plan(observation);
-  expect(plan.status).toBe('WAIT_FOR_STABLE_PAGE');
-  expect(plan.candidates).toEqual([]);
+  expect(plan.status).toBe('READ_ONLY_CANDIDATES');
+  expect(plan.candidates).toHaveLength(1);
+  expect(plan.mutationAuthorized).toBe(false);
 });
 
 test('duplicate aircraft identity, duplicate route or unknown details callback fail closed',async({page})=>{
