@@ -89,7 +89,8 @@ export class SupplyPort {
    // UI changes without persisting the user's actual balance.
    const account=this.page.locator('#headerAccount');
    const accountShape=await account.count()===1
-    ?(await account.innerText()).replace(/\d+/g,'#').replace(/\s+/g,' ').trim().slice(0,80):null;
+    ?(await account.innerText()).replace(/\d+/g,'#').replace(/[A-Za-zÀ-ÿ]+/g,'A')
+     .replace(/\s+/g,' ').replace(/[^#A$.,+\\-\\s]/g,'?').trim().slice(0,80):null;
    return {kind,rows,panelText,accountShape,mutationAuthorized:false as false};
   }catch{return null;}
  }
