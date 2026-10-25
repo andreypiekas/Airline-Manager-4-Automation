@@ -5,17 +5,19 @@ import { readDemandConfig } from '../../demand/config';
 import { flightCountdownObservation } from '../../optimization/flight-timing';
 import { departureControlShape } from '../../demand/departure-control-evidence';
 import { hasIncompleteInitialDepartureCollection,hasUnverifiedFuelDeparture,hasCampaignVerificationBlock } from '../../demand/execute-run';
+import { MUTATION_COMPLETION_RESERVE_MS } from '../../utils/run-time-budget';
 
 const snapshot=(change:Partial<AircraftSnapshot>={}):AircraftSnapshot=>({aircraftId:'1',registration:'TEST',routeId:'10',routeLabel:'AAA - GRU',from:'AAA',to:'GRU',state:'ready',capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},dailyTotal:{Y:1000,J:100,F:100},observedAt:new Date().toISOString(),...change});
 const collection=(a:AircraftSnapshot[]=[snapshot()],complete=true):CollectionResult=>({aircraft:a,complete,expectedRoutes:a.length,warnings:[]});
-function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number|'all';prepareFail?:boolean|string;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>}={}) {
-  let reads=0,clicks=0;const saved:ExecutionReport[]=[];
+function setup(options:{initial?:CollectionResult;fresh?:CollectionResult;prepared?:AircraftSnapshot;confirmed?:AircraftSnapshot|null;dryRun?:boolean;limit?:number|'all';prepareFail?:boolean|string;clickFail?:boolean;collectFail?:boolean;saveFail?:boolean;mutationDeadlineEpochMs?:number;blockedDepartureKeys?:ReadonlySet<string>;fuelHoldingLbsAtRunStart?:number;campaignVerified?:boolean;postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;currentRouteFuelEvidence?:ReadonlyMap<string,{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}>;fuelQuoteReader?:(a:AircraftSnapshot)=>Promise<{aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string}|null>}={}) {
+  let reads=0,clicks=0,quoteReads=0;const saved:ExecutionReport[]=[];
   const port:DeparturePort={collect:async()=>{reads++;if(options.collectFail)throw Error('loading');return options.initial??collection([snapshot()]);},
+    readCurrentRouteFuelQuote:options.fuelQuoteReader?async expected=>{quoteReads++;return options.fuelQuoteReader!(expected);}:undefined,
     prepare:async a=>{if(options.prepareFail)throw Error(typeof options.prepareFail==='string'?options.prepareFail:'unverified');return options.prepared??snapshot(a);},
     depart:async()=>{clicks++;if(options.clickFail)throw Error('timeout');},
     confirm:async a=>options.confirmed===null?null:options.confirmed??snapshot({...a,state:'inflight',onboard:{Y:88,J:0,F:0},timing:flightCountdownObservation(a.aircraftId,a.routeId,'01:00:00',new Date().toISOString())})};
   const executor=new IndividualDepartureExecutor(port,readDemandConfig({}),{dryRun:options.dryRun??false,maxDepartures:options.limit??1,mutationDeadlineEpochMs:options.mutationDeadlineEpochMs,blockedDepartureKeys:options.blockedDepartureKeys,fuelHoldingLbsAtRunStart:options.fuelHoldingLbsAtRunStart,campaignVerified:options.campaignVerified,postReroutePricingBlockedAircraftIds:options.postReroutePricingBlockedAircraftIds,currentRouteFuelEvidence:options.currentRouteFuelEvidence},async r=>{if(options.saveFail&&r.entries.some(e=>e.status==='attempting'))throw Error('disk');saved.push(JSON.parse(JSON.stringify(r)));});
-  return {executor,saved,clicks:()=>clicks,reads:()=>reads};
+  return {executor,saved,clicks:()=>clicks,reads:()=>reads,quoteReads:()=>quoteReads};
 }
 test('persist intent before exactly one native click and confirm onboard separately from demand coverage',async()=>{
  const s=setup();const r=await s.executor.run();expect(s.clicks()).toBe(1);expect(s.saved.some(r=>r.entries[0]?.status==='attempting')).toBe(true);
@@ -377,4 +379,105 @@ test('required campaign unverified is a reportable production block, never a gre
   expect(hasCampaignVerificationBlock({entries:[{status:'held',reason:'DEMAND_INSUFFICIENT'}] as any})).toBe(false);
   expect(hasCampaignVerificationBlock({entries:[{status:'departed',reason:'CAMPAIGN_NOT_VERIFIED'}] as any})).toBe(false);
   expect(hasCampaignVerificationBlock({entries:[]})).toBe(false);
+});
+
+
+test('run #963: expired planning quote is refreshed read-only just before a cold route departs',async()=>{
+ const aircraft=snapshot(),prior=new Map([[aircraft.aircraftId,{
+   aircraftId:aircraft.aircraftId,routeId:aircraft.routeId,from:aircraft.from,to:aircraft.to,
+   fuelLbs:130223,observedAt:new Date(Date.now()-6*60_000).toISOString()
+ }]]);
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,fuelHoldingLbsAtRunStart:8_155_634,
+   currentRouteFuelEvidence:prior,fuelQuoteReader:async expected=>({
+     aircraftId:expected.aircraftId,routeId:expected.routeId,from:expected.from,to:expected.to,
+     fuelLbs:130223,observedAt:new Date().toISOString()
+   })});
+ const result=await s.executor.run();
+ expect(s.quoteReads()).toBe(1);
+ expect(s.clicks()).toBe(1);
+ expect(result.entries[0]).toMatchObject({status:'departed',resourceEvidence:{
+   verifiedRouteFuelLbs:130223,fuelEvidenceSource:'current-route-quote',
+   matchingHistorySamples:0,trackingComplete:true
+ }});
+});
+
+test('run #963: 11th uncatalogued planning sample can obtain independent fuel evidence on demand',async()=>{
+ const aircraft=snapshot({registration:'PP-141-3',aircraftId:'24265126',routeId:'36562681',from:'PIO',to:'LAX'});
+ const s=setup({initial:collection([aircraft]),prepared:aircraft,fuelHoldingLbsAtRunStart:7_470_074,
+   fuelQuoteReader:async a=>({...a,fuelLbs:131495,observedAt:new Date().toISOString()})});
+ const result=await s.executor.run();
+ expect(s.quoteReads()).toBe(1);
+ expect(s.clicks()).toBe(1);
+ expect(result.entries[0]).toMatchObject({status:'departed',resourceEvidence:{
+   verifiedRouteFuelLbs:131495,matchingHistorySamples:0,fuelEvidenceSource:'current-route-quote'
+ }});
+});
+
+test('wrong identity and stale just-in-time quotes cannot authorize fuel or departure',async()=>{
+ for(const bad of [
+   (a:AircraftSnapshot)=>({...a,aircraftId:'999',fuelLbs:12345,observedAt:new Date().toISOString()}),
+   (a:AircraftSnapshot)=>({...a,routeId:'999',fuelLbs:12345,observedAt:new Date().toISOString()}),
+   (a:AircraftSnapshot)=>({...a,from:'XXX',fuelLbs:12345,observedAt:new Date().toISOString()}),
+   (a:AircraftSnapshot)=>({...a,fuelLbs:0,observedAt:new Date().toISOString()}),
+   (a:AircraftSnapshot)=>({...a,fuelLbs:12345,observedAt:new Date(Date.now()-6*60_000).toISOString()})
+ ]){
+   const a=snapshot(),s=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,
+     fuelQuoteReader:async()=>bad(a)});
+   const result=await s.executor.run();
+   expect(s.quoteReads()).toBe(1);
+   expect(s.clicks()).toBe(0);
+   expect(result.entries[0]).toMatchObject({status:'held',reason:'FUEL_REQUIREMENT_UNVERIFIED'});
+ }
+});
+
+test('unavailable live quote stays held without a speculative click',async()=>{
+ const a=snapshot(),s=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,
+   fuelQuoteReader:async()=>null});
+ const r=await s.executor.run();
+ expect(s.quoteReads()).toBe(1);expect(s.clicks()).toBe(0);
+ expect(r.entries[0].reason).toBe('FUEL_REQUIREMENT_UNVERIFIED');
+});
+
+test('valid historical evidence and valid planning quote never trigger redundant fuel probes',async()=>{
+ const a=snapshot();
+ const h={status:'observed' as const,observedAt:new Date().toISOString(),
+  source:'inspected-aircraft-flight-history' as const,complete:false as const,
+  comparisonReady:false as const,mutationAuthorized:false as const,entries:[
+    {relativeTime:'2 hours ago',from:'AAA',to:'GRU',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:50,J:0,F:0},fuelLbs:15000,revenue:1000},
+    {relativeTime:'3 hours ago',from:'GRU',to:'AAA',registrationLabel:'TEST',co2Quotas:100,onboard:{Y:50,J:0,F:0},fuelLbs:15001,revenue:1000}
+  ]};
+ const withHistory=snapshot({flightHistory:h});
+ const historied=setup({initial:collection([withHistory]),prepared:withHistory,fuelHoldingLbsAtRunStart:100000,
+   fuelQuoteReader:async()=>{throw Error('must-not-probe');}});
+ const hr=await historied.executor.run();
+ expect(historied.quoteReads()).toBe(0);expect(hr.summary.departed).toBe(1);
+ const quote=new Map([[a.aircraftId,{aircraftId:a.aircraftId,routeId:a.routeId,from:a.from,to:a.to,
+  fuelLbs:16000,observedAt:new Date().toISOString()}]]);
+ const withQuote=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,currentRouteFuelEvidence:quote,
+   fuelQuoteReader:async()=>{throw Error('must-not-probe');}});
+ const qr=await withQuote.executor.run();
+ expect(withQuote.quoteReads()).toBe(0);expect(qr.summary.departed).toBe(1);
+});
+
+test('failure restoring quote UI halts before any mutable departure click',async()=>{
+ const a=snapshot();const s=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,
+   fuelQuoteReader:async()=>{throw Error('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED')}});
+ await expect(s.executor.run()).rejects.toThrow('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED');
+ expect(s.clicks()).toBe(0);
+});
+
+test('captcha while refreshing an expiring quote halts before any click',async()=>{
+ const a=snapshot();const s=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,
+   fuelQuoteReader:async()=>{throw Error('INTERACTIVE_CHALLENGE_DETECTED_STOP')}});
+ await expect(s.executor.run()).rejects.toThrow('INTERACTIVE_CHALLENGE_DETECTED_STOP');
+ expect(s.clicks()).toBe(0);
+});
+
+test('insufficient remaining deadline never starts a late quote scan',async()=>{
+ const a=snapshot();const s=setup({initial:collection([a]),prepared:a,fuelHoldingLbsAtRunStart:100000,
+   mutationDeadlineEpochMs:Date.now()+MUTATION_COMPLETION_RESERVE_MS+25_000,
+   fuelQuoteReader:async()=>{throw Error('must-not-run')}});
+ const r=await s.executor.run();
+ expect(s.quoteReads()).toBe(0);expect(s.clicks()).toBe(0);
+ expect(r.entries[0].reason).toMatch(/RUN_TIME_BUDGET_EXHAUSTED|FUEL_REQUIREMENT_UNVERIFIED/);
 });
