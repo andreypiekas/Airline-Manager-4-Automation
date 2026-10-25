@@ -5,6 +5,9 @@ export const LIVE_RUN_TIMEOUT_MS=1_440_000; // 24 minutes
 export const LIVE_RUN_FINALIZATION_RESERVE_MS=120_000;
 export const MUTATION_COMPLETION_RESERVE_MS=240_000;
 export const MUTATION_PHASE_START_MINIMUM_MS=300_000;
+// Extra time for optional pricing to finish before the mandatory departure window.
+// This is not a reduction of the existing 5-minute departure start gate.
+export const OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS=120_000;
 
 export type RunPhaseBudgetReason = 'TIME_BUDGET_AVAILABLE' | 'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_PHASE';
 
