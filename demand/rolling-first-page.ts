@@ -153,7 +153,9 @@ export class FirstPageProgress {
     status:'READ_ONLY_CANDIDATES'|'WAIT_FOR_STABLE_PAGE'|'NO_NEW_READY';
     candidates: FirstPageAircraft[];mutationAuthorized:false
   } {
-    if (observation.status !== 'STABLE' || observation.mutationAuthorized !== false)
+    // A stable short native page can still identify candidates for read-only
+    // analysis; it must NEVER be treated as complete Fleet proof or a click gate.
+    if (!['STABLE','SHORT_PAGE'].includes(observation.status) || observation.mutationAuthorized !== false)
       return {status:'WAIT_FOR_STABLE_PAGE',candidates:[],mutationAuthorized:false};
     const candidates = observation.aircraft.filter(a=>a.state==='ready' &&
       !this.confirmedAircraft.has(a.aircraftId) && !this.confirmedRoutes.has(a.routeId) &&
