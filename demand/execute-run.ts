@@ -20,6 +20,7 @@ import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
 import { inspectFirstPageReadOnly } from './rolling-first-page';
 import { verifiedFirstPagePriorityKeys } from './rolling-first-page-priority';
+import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { optimizationConfig } from '../optimization/report';
 import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
@@ -144,7 +145,7 @@ export async function runDemandExecution(
   const readyEarlier=prerequisites.verifiedFleetSnapshot?.aircraft.some(a=>a.state==='ready')===true;
   if(!settings.dryRun&&completeEarlier&&readyEarlier&&env.DEMAND_FIRST_PAGE_PRIORITY!=='false'&&
      (settings.mutationDeadlineEpochMs===undefined ||
-      Date.now()+12_000<settings.mutationDeadlineEpochMs)){
+      Date.now()+MUTATION_COMPLETION_RESERVE_MS+30_000<settings.mutationDeadlineEpochMs)){
     try{
       const window=await inspectFirstPageReadOnly(page,3500);
       firstPageReadyPriorityKeys=verifiedFirstPagePriorityKeys(
