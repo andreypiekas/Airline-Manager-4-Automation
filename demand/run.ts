@@ -11,6 +11,7 @@ import { readDemandConfig } from './config';
 import { DemandManager } from './manager';
 import { collectFleetWithFreshRetry } from './reader';
 import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { observeRollingFirstPage } from './rolling-first-page-cycle';
 import { recoverMissingFlightHistories } from './history-recovery';
 import { writeDemandReport } from './report';
 import { DemandConfig, DemandReport } from './types';
@@ -24,25 +25,47 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
   const optimization = {...configuredOptimization, airlineBases: ownedBases.effectiveBases};
   const research = researchConfig();
   const collection = await collectFleetWithFreshRetry(page, 10000, true, options.collectionRetryDeadlineEpochMs);
-  // Passive diagnostic only, enabled on incomplete collections unless explicitly disabled.
-  // A first-page window is NEVER a substitute for a
-  // complete Fleet collection and cannot authorize departures, pricing or reroutes.
+  // Progressive first-page diagnostic runs ONLY after a failed full
+  // inventory. It never turns a partial collection into authorization.
   if (!collection.complete && process.env.DEMAND_FIRST_PAGE_PILOT !== 'false') {
     try {
-      const window = await inspectFirstPageReadOnly(page, 5000);
+      const rolling = await observeRollingFirstPage(
+        () => inspectFirstPageReadOnly(page, 5000),
+        {
+          maxWindows:3,
+          maxConsecutiveWithoutNewReady:2,
+          deadlineEpochMs:options.collectionRetryDeadlineEpochMs,
+          // A bounded pause permits natural arrivals to alter the native page.
+          // Never use a stale Fleet cursor: every iteration reopens page one.
+          pause:() => page.waitForTimeout(350)
+        }
+      );
+      const last = rolling.windows[rolling.windows.length-1];
       console.warn('[FirstPagePilot] ' + JSON.stringify({
-        status:window.status,routeTotal:window.routeTotal,
-        visible:window.visible,ready:window.ready,mutationAuthorized:false
+        status:last?.status ?? 'TIME_BUDGET',
+        routeTotal:last?.routeTotal ?? null,
+        visible:last?.visible ?? 0,
+        ready:last?.ready ?? 0,
+        snapshots:rolling.windows.length,
+        uniqueObserved:rolling.totalKnownAircraft,
+        newlyReady:rolling.totalNewReady,
+        stopReason:rolling.stopReason,
+        mutationAuthorized:false
       }));
       await mkdir('test-results/demand',{recursive:true});
       await writeFile('test-results/demand/first-page-pilot.json',JSON.stringify({
-        schemaVersion:1,mode:'read-only',generatedAt:new Date().toISOString(),
-        status:window.status,routeTotal:window.routeTotal,visible:window.visible,
-        ready:window.ready,mutationAuthorized:false
+        schemaVersion:1,
+        mode:'read-only',
+        generatedAt:new Date().toISOString(),
+        status:last?.status ?? 'TIME_BUDGET',
+        routeTotal:last?.routeTotal ?? null,
+        visible:last?.visible ?? 0,
+        ready:last?.ready ?? 0,
+        mutationAuthorized:false,
+        rolling
       },null,2)+'\n');
     } catch (error) {
-      // The diagnostic must never hide a CAPTCHA/challenge from the main
-      // production safety gate. Other read failures are passive only.
+      // A passive observation is never allowed to swallow a CAPTCHA/challenge.
       if (error instanceof Error && error.message === 'INTERACTIVE_CHALLENGE_DETECTED_STOP') throw error;
       console.warn('[FirstPagePilot] ' + JSON.stringify({
         status:'UNAVAILABLE',mutationAuthorized:false
