@@ -12,6 +12,15 @@ export function parseAmount(text:string):number {
  if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(s))throw Error('SUPPLY_NUMBER_INVALID');
  const n=Number(s.replace(/,/g,''));if(!Number.isFinite(n)||n<0||n>Number.MAX_SAFE_INTEGER)throw Error('SUPPLY_NUMBER_INVALID');return n;
 }
+/** A negative cash balance is a verified no-purchase condition, not a malformed quote.
+ * Keep the existing strict positive parser and reject ambiguous negative formats. */
+export function parseAccountBalance(text:string):number {
+ const raw=text.trim();
+ if(!raw.startsWith('-'))return parseAmount(raw);
+ const magnitude=parseAmount(raw.slice(1));
+ if(!Number.isSafeInteger(magnitude)||magnitude<=0)throw Error('SUPPLY_NUMBER_INVALID');
+ return -magnitude;
+}
 export function parseSignedInteger(text:string):number {
  const s=text.trim();
  if(!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(s))throw Error('SUPPLY_NUMBER_INVALID');
@@ -120,7 +129,7 @@ export class SupplyPort {
   // A displayed account balance can change formatting independently of the
   // supply panel. Never infer or round an abbreviated amount before purchase.
   let balance:number;
-  try{balance=parseAmount(await account.innerText());}
+  try{balance=parseAccountBalance(await account.innerText());}
   catch{throw new SupplyPreMutationError('SUPPLY_BALANCE_FORMAT_UNVERIFIED');}
   return parseSupplyText(await panel.innerText(),kind,balance);
  }
