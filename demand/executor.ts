@@ -4,8 +4,13 @@ import type { AdaptiveThreshold } from './adaptive-threshold';
 import { estimatedGrossTicketRevenue } from './revenue';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 
+export interface CurrentRouteFuelEvidence {
+  aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
+}
 export interface DeparturePort {
   collect(): Promise<CollectionResult>;
+  /** Optional bounded, read-only exact-current-route quote; no departure or reroute mutation. */
+  readCurrentRouteFuelQuote?(expected:AircraftSnapshot):Promise<CurrentRouteFuelEvidence|null>;
   /** Fresh identity/layout/demand AND a strictly verified native departure control. */
   prepare(expected: AircraftSnapshot): Promise<AircraftSnapshot>;
   depart(expected: AircraftSnapshot): Promise<void>;
@@ -26,9 +31,7 @@ export interface ExecutionSettings {
   /** Aircraft rerouted in this run remain held until pricing on the new route is freshly verified. */
   postReroutePricingBlockedAircraftIds?: ReadonlySet<string>;
   /** Fresh read-only current-route quote evidence collected earlier in this same run. */
-  currentRouteFuelEvidence?: ReadonlyMap<string,{
-    aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
-  }>;
+  currentRouteFuelEvidence?: ReadonlyMap<string,CurrentRouteFuelEvidence>;
 }
 export interface ExecutionEntry {
   aircraftId: string; registration: string; routeId: string; from: string; to: string;
@@ -131,6 +134,10 @@ export class IndividualDepartureExecutor {
       await this.save(report);
     };
     await persist();
+    // Earlier planning quotes are only hints. Re-read a cold route immediately
+    // before its individual departure if history is insufficient and the quote
+    // is missing or stale. Never increase the accepted age or infer fuel.
+    const fuelQuoteEvidence=new Map(this.settings.currentRouteFuelEvidence||[]);
     let fuelCommitted=0;
     let fuelTrackingComplete=this.settings.fuelHoldingLbsAtRunStart===undefined?false:
       Number.isSafeInteger(this.settings.fuelHoldingLbsAtRunStart)&&this.settings.fuelHoldingLbsAtRunStart>=0;
@@ -185,6 +192,29 @@ export class IndividualDepartureExecutor {
       // Hub/base resolution is required for route review/reroute, not for dispatch.
       // Any ready aircraft may proceed from any airport when the existing route,
       // native Depart control, fresh demand and all safety/resource gates are verified.
+      if(!this.settings.dryRun&&this.settings.fuelHoldingLbsAtRunStart!==undefined&&
+        !verifiedHistoricalFuelRequirement(expected)&&
+        !verifiedCurrentRouteFuelRequirement(expected,fuelQuoteEvidence,this.demand.maxAgeSeconds)&&
+        this.port.readCurrentRouteFuelQuote&&
+        (this.settings.mutationDeadlineEpochMs===undefined||
+         Date.now()<this.settings.mutationDeadlineEpochMs-MUTATION_COMPLETION_RESERVE_MS-30_000)){
+        try{
+          const evidence=await this.port.readCurrentRouteFuelQuote(expected);
+          const verified=evidence&&evidence.aircraftId===expected.aircraftId&&
+            evidence.routeId===expected.routeId&&evidence.from===expected.from&&evidence.to===expected.to&&
+            Number.isSafeInteger(evidence.fuelLbs)&&evidence.fuelLbs>0&&
+            verifiedCurrentRouteFuelRequirement(expected,new Map([[expected.aircraftId,evidence]]),this.demand.maxAgeSeconds);
+          if(verified){
+            fuelQuoteEvidence.set(expected.aircraftId,evidence!);
+            console.log('[DepartureFuelQuote] '+JSON.stringify({status:'VERIFIED_CURRENT_ROUTE_FRESH',source:'native-read-only'}));
+          }else console.warn('[DepartureFuelQuote] '+JSON.stringify({status:'UNAVAILABLE_REMAINS_HOLD'}));
+        }catch(error){
+          if(error instanceof Error&&
+             (error.message.includes('INTERACTIVE_CHALLENGE_DETECTED_STOP')||
+              error.message==='DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED'))throw error;
+          console.warn('[DepartureFuelQuote] '+JSON.stringify({status:'READ_FAILED_REMAINS_HOLD'}));
+        }
+      }
       let fresh: AircraftSnapshot;
       try {fresh=await this.port.prepare(expected);}catch(error){
         entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
@@ -213,7 +243,7 @@ export class IndividualDepartureExecutor {
       entry.reason=decision.reason;
       const historicalFuelEvidence=verifiedHistoricalFuelRequirement(fresh);
       const quoteFuelEvidence=verifiedCurrentRouteFuelRequirement(
-        fresh,this.settings.currentRouteFuelEvidence,this.demand.maxAgeSeconds
+        fresh,fuelQuoteEvidence,this.demand.maxAgeSeconds
       );
       // When both independent sources are present, debit the larger observed
       // requirement. Never let an earlier lower history mask a larger fresh quote.
