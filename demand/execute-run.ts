@@ -51,7 +51,12 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
   const rawDeadline=(env.DEMAND_EXECUTION_MUTATION_DEADLINE_EPOCH_MS||'').trim();
   const mutationDeadlineEpochMs=rawDeadline?Number(rawDeadline):undefined;
   if(mutationDeadlineEpochMs!==undefined&&(!Number.isSafeInteger(mutationDeadlineEpochMs)||mutationDeadlineEpochMs<=0))throw Error('DEMAND_EXECUTION_DEADLINE_INVALID');
-  return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs};
+  const rawRolling=(env.DEMAND_ROLLING_INDIVIDUAL_DISPATCH||'false').trim().toLowerCase();
+  if(!['true','false'].includes(rawRolling))throw Error('ROLLING_EXECUTION_FLAG_INVALID');
+  const rollingIndividualMode=rawRolling==='true';
+  if(rollingIndividualMode&&(config.dryRun||env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'))
+    throw Error('ROLLING_EXECUTION_CONTEXT_INVALID');
+  return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs,rollingIndividualMode};
 }
 export interface DemandExecutionPrerequisites {
   /** Fully verified Fleet inventory already collected in the same production run. */
@@ -72,6 +77,8 @@ export async function runDemandExecution(
   prerequisites:DemandExecutionPrerequisites={}
 ){
   const settings=executionEnvironment(config,env),optimization=optimizationConfig(env);
+  if(settings.rollingIndividualMode&&!optimization.returnJournal)
+    throw Error('ROLLING_PERSISTENT_JOURNAL_REQUIRED');
   const blockedDepartureKeys=optimization.returnJournal?await readUnresolvedDepartureKeys(optimization.returnJournal.directory,optimization.returnJournal.scope):new Set<string>();
   const prioritizedDepartureKeys=!settings.dryRun&&optimization.returnJournal
     ?await readPendingDeferredDispatchKeys(optimization.returnJournal.directory,optimization.returnJournal.scope)
@@ -165,7 +172,9 @@ export async function runDemandExecution(
       }));
     }
   }
-  const departurePort=new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,prerequisites.verifiedFleetSnapshot);
+  const departurePort=new PlaywrightDeparturePort(page,15000,settings.mutationDeadlineEpochMs,
+    settings.rollingIndividualMode?undefined:prerequisites.verifiedFleetSnapshot,
+    settings.rollingIndividualMode);
   const report=await new IndividualDepartureExecutor(
     departurePort,config,{...settings,
     blockedDepartureKeys,prioritizedDepartureKeys,firstPageReadyPriorityKeys,fuelHoldingLbsAtRunStart,
@@ -173,6 +182,11 @@ export async function runDemandExecution(
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
     currentRouteFuelEvidence:prerequisites.currentRouteFuelEvidence},save,adaptive).run();
   console.log('[IndividualDepartures] '+JSON.stringify(report.summary));
+  if(settings.rollingIndividualMode)console.warn('[RollingDispatch] '+JSON.stringify({
+    coverage:'FIRST_PAGE_ONLY_GLOBAL_INCOMPLETE',...report.summary,
+    validatedTargetChecks:true,
+    mutationAuthorizedByGlobalSnapshot:false
+  }));
   const navigation=departurePort.navigationMetrics();
   console.log('[DepartureNavigation] '+JSON.stringify(navigation));
   await writeFile(join(directory,'departure-navigation.json'),JSON.stringify({
