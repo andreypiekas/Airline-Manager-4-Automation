@@ -54,7 +54,8 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
   const rawRolling=(env.DEMAND_ROLLING_INDIVIDUAL_DISPATCH||'false').trim().toLowerCase();
   if(!['true','false'].includes(rawRolling))throw Error('ROLLING_EXECUTION_FLAG_INVALID');
   const rollingIndividualMode=rawRolling==='true';
-  if(rollingIndividualMode&&(config.dryRun||env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'))
+  if(rollingIndividualMode&&(config.dryRun||env.AUTOMATION_MODE==='semi-automatic'||
+     env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'))
     throw Error('ROLLING_EXECUTION_CONTEXT_INVALID');
   return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs,rollingIndividualMode};
 }
