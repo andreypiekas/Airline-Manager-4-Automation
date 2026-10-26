@@ -14,6 +14,7 @@ export interface IndividualPreflight {
   mode:'read-only-individual';
   mutationAuthorized:false;
   window:'STABLE'|'SHORT_PAGE'|'UNVERIFIED'|'TIME_BUDGET';
+  routeTotal:number|null;
   inspected:number;
   verified:number;
   readyCandidates:number;
@@ -34,7 +35,7 @@ export async function inspectIndividualFirstPage(
     throw Error('INDIVIDUAL_PREFLIGHT_SETTINGS_INVALID');
   const report:IndividualPreflight={
     schemaVersion:1,mode:'read-only-individual',mutationAuthorized:false,
-    window:'UNVERIFIED',inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],holds:[]
+    window:'UNVERIFIED',routeTotal:null,inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],holds:[]
   };
   const budget=()=>deadline===undefined||Date.now()+Math.max(5000,timeout*2)<deadline;
   if(!budget()){report.window='TIME_BUDGET';return report;}
@@ -43,6 +44,7 @@ export async function inspectIndividualFirstPage(
     report.holds.push({code:'WINDOW_UNVERIFIED'});return report;
   }
   report.window=first.status as 'STABLE'|'SHORT_PAGE';
+  report.routeTotal=first.routeTotal;
   const candidates=first.aircraft.filter(a=>a.state==='ready');
   report.readyCandidates=candidates.length;
   for(const candidate of candidates.slice(0,limit)){
