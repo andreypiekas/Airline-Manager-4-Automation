@@ -35,7 +35,7 @@ export async function inspectFleetSortEvidence(page: Page): Promise<FleetSortEvi
         .find(a=>(a.textContent||'').trim().toLowerCase()==='next');
       const nextRaw=next?.getAttribute('onclick')||'';
       const nextMatch=/^Ajax\('routes\.php\?start=\d+&sort=([^']*)','routeAction',this\);$/.exec(nextRaw.replace(/\s/g,''));
-      const nextSort=next
+      const nextSort: 'EMPTY'|'NONEMPTY'|'UNVERIFIED'|'ABSENT'=next
         ? nextMatch ? (nextMatch[1]?'NONEMPTY':'EMPTY') : 'UNVERIFIED'
         : 'ABSENT';
       const supportedOption=(value:string)=>/^[A-Za-z0-9_-]{1,32}$/.test(value)?value:'REDACTED';
