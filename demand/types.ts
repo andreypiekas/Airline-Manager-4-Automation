@@ -60,6 +60,10 @@ export interface DemandDecision extends AircraftSnapshot {
   departureAuthorized: false;
 }
 export interface CollectionResult {
+  /** A native individual window is never a complete global Fleet inventory. */
+  observationScope?: 'native-individual-first-page';
+  /** The number of individually verified ready candidates on that window. */
+  windowReadyCandidates?: number;
   aircraft: AircraftSnapshot[];
   complete: boolean;
   expectedRoutes: number | null;

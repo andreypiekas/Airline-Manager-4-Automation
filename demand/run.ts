@@ -26,6 +26,28 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
   const optimization = {...configuredOptimization, airlineBases: ownedBases.effectiveBases};
   const research = researchConfig();
   const collection = await collectFleetWithFreshRetry(page, 10000, true, options.collectionRetryDeadlineEpochMs);
+  // Avoid spending the remaining mutation window on global history,
+  // research and pricing when native Fleet has already proved incomplete.
+  // A separate individual executor must re-read every eligible target;
+  // none of the partial global identities authorize any click.
+  const off=(raw:string|undefined)=>['false','0','off','no'].includes((raw||'').trim().toLowerCase());
+  if(!collection.complete&&!config.dryRun&&
+     process.env.AUTOMATION_MODE!=='semi-automatic'&&!off(process.env.ENABLE_DEPART)&&
+     !off(process.env.ENABLE_ROLLING_INDIVIDUAL_FALLBACK)){
+    await mkdir('test-results/demand',{recursive:true});
+    await writeFile('test-results/demand/global-fleet-fallback.json',JSON.stringify({
+      schemaVersion:1,mode:'native-individual-fallback',
+      globalComplete:false,observed:collection.aircraft.length,
+      expected:collection.expectedRoutes,
+      globalMutationsAuthorized:false,individualTargetChecksRequired:true,
+      generatedAt:new Date().toISOString()
+    },null,2)+'\\n');
+    console.warn('[DemandCollection] '+JSON.stringify({
+      observed:collection.aircraft.length,expected:collection.expectedRoutes,
+      action:'SAFE_INDIVIDUAL_FALLBACK',globalComplete:false
+    }));
+    throw Error('FLEET_INCOMPLETE_INDIVIDUAL_FALLBACK');
+  }
   // Progressive first-page diagnostic runs ONLY after a failed full
   // inventory. It never turns a partial collection into authorization.
   if (!collection.complete && process.env.DEMAND_FIRST_PAGE_PILOT !== 'false') {

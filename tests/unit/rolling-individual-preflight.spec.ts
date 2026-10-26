@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { inspectIndividualFirstPage } from '../../demand/rolling-individual-preflight';
+import { PlaywrightDeparturePort } from '../../demand/departure-port';
 import { DemandReader } from '../../demand/reader';
 
 type Plane={route:number;aircraft:number;registration:string;ready:boolean};
@@ -117,4 +118,39 @@ test('single current ready aircraft can be fully read and handler-verified witho
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(1);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
   expect(await page.locator('#routeAction').isVisible()).toBe(true);
+});
+
+test('native rolling departure port collects and prepares exact ready target without global Fleet assertion',async({page})=>{
+  await fixture(page,[[plane(1,true)]],1);
+  await page.evaluate(()=>{
+    const w=window as any;
+    w.Ajax=(url:string)=>{
+      if(url!=='fleet_details.php?id=2001')throw new Error('UNEXPECTED_NETWORK_ACTION');
+      w.detailsOpened++;
+      const details=document.getElementById('detailsAction')!;
+      details.style.display='block';
+      details.innerHTML='<div id="route-name"><span class="glyphicons-chevron-left" onclick="document.getElementById(\'detailsAction\').style.display=\'none\';document.getElementById(\'routeAction\').style.display=\'block\'">Back</span></div>'+
+        '<span id="ff-name">TEST-1</span>'+
+        '<button id="routeViewDepart" onclick="$(\'#routeAction\').hide();hideFlightInfo();$(\'#routeViewDepart\').hide();Ajax(\'route_depart.php?id=1001&ref=list&costIndex=10\',\'routeAction\',this);">Depart</button>'+
+        '<button id="routeViewGround_unground">Ground</button>'+
+        '<div class="col-5"><span class="l-text">BBB</span></div><div class="col-5"><span class="l-text">AAA</span></div>'+
+        '<div id="seat-layout">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?0:100)+'</div>').join('')+
+          '<button onclick="ticketPriceSuggest(1,2,3,this,4);">Auto</button><input id="eTicket" value="100"/><input id="bTicket" value="50"/><input id="fTicket" value="25"/></div>'+
+        '<div id="list-demand">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?'0/0':'90/1000')+'</div>').join('')+'</div>';
+    };
+  });
+
+  const port=new PlaywrightDeparturePort(page,3000,undefined,undefined,true);
+  const inventory=await port.collect();
+  expect(inventory).toMatchObject({
+    complete:false,observationScope:'native-individual-first-page',
+    expectedRoutes:1,windowReadyCandidates:1
+  });
+  expect(inventory.aircraft).toHaveLength(1);
+  const checked=await port.prepare(inventory.aircraft[0]);
+  expect(checked).toMatchObject({
+    aircraftId:'2001',routeId:'1001',registration:'TEST-1',state:'ready'
+  });
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
