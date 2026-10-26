@@ -33,7 +33,8 @@ const tailPerKey = <T>(items: readonly T[], limit: number, keyOf: (item: T) => s
  * their consumers need only recent evidence; losing older observations merely
  * falls back to conservative/default behavior.
  */
-export function compactReturnJournalForTransport(journal: any, limits: typeof TRANSPORT_HISTORY_LIMITS = TRANSPORT_HISTORY_LIMITS): any {
+type TransportHistoryLimits = { [K in keyof typeof TRANSPORT_HISTORY_LIMITS]: number };
+export function compactReturnJournalForTransport(journal: any, limits: TransportHistoryLimits = TRANSPORT_HISTORY_LIMITS): any {
   const compacted = { ...journal };
 
   compacted.entries = tailPerKey(
