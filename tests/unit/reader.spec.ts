@@ -866,3 +866,41 @@ test('multiple aircraft callbacks on a card cannot select an arbitrary identity'
  await fixture(page);await page.locator('#routeMainList101 a').evaluate(e=>e.after(e.cloneNode(true)));
  const r=await new DemandReader(page,400,true).collect();expect(r.aircraft[0].state).toBe('unavailable');expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
+
+test('rolling target: one verified live card yields current demand without complete fleet collection',async({page})=>{
+  await fixture(page);
+  const result=await new DemandReader(page,500).readReadyCandidateOnVisiblePage({
+    aircraftId:'1101',routeId:'101',registration:'TEST-101'
+  });
+  expect(result).toMatchObject({
+    aircraftId:'1101',routeId:'101',registration:'TEST-101',
+    state:'ready',capacity:{Y:100,J:0,F:0},
+    remaining:{Y:90,J:0,F:0},dailyTotal:{Y:1000,J:200,F:200}
+  });
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('rolling target: mismatched registration or aircraft identity is rejected without clicking',async({page})=>{
+  await fixture(page);
+  const reader=new DemandReader(page,500);
+  await expect(reader.readReadyCandidateOnVisiblePage({
+    aircraftId:'1101',routeId:'101',registration:'CHANGED'
+  })).rejects.toThrow('ROLLING_TARGET_MOVED_OR_CHANGED');
+  await expect(reader.readReadyCandidateOnVisiblePage({
+    aircraftId:'1102',routeId:'101',registration:'TEST-101'
+  })).rejects.toThrow('ROLLING_TARGET_MOVED_OR_CHANGED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('rolling target: duplicated native card and nonready card fail closed',async({page})=>{
+  await fixture(page);
+  const reader=new DemandReader(page,500);
+  await expect(reader.readReadyCandidateOnVisiblePage({
+    aircraftId:'1102',routeId:'102',registration:'TEST-102'
+  })).rejects.toThrow('ROLLING_TARGET_NOT_READY');
+  await page.locator('#routeMainList101').evaluate(e=>e.after(e.cloneNode(true)));
+  await expect(reader.readReadyCandidateOnVisiblePage({
+    aircraftId:'1101',routeId:'101',registration:'TEST-101'
+  })).rejects.toThrow('ROLLING_WINDOW_IDENTITY_UNVERIFIED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
