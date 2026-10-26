@@ -404,6 +404,7 @@ test('All Operations', async ({ page }) => {
         error.message==='[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.'
       );
       if(!incomplete||demandConfig.dryRun||
+         process.env.AUTOMATION_MODE==='semi-automatic'||
          !moduleEnabled('ENABLE_DEPART')||
          !moduleEnabled('ENABLE_ROLLING_INDIVIDUAL_FALLBACK')||
          !phaseAllowed('rolling-individual-departures',phaseBudgetsMs.departures))
