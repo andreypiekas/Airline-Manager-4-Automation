@@ -62,7 +62,8 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
   if(rollingIndividualMode&&(config.dryRun||env.AUTOMATION_MODE==='semi-automatic'||
      env.DEMAND_EXECUTION_ACK!=='individual-return-legs-v1'))
     throw Error('ROLLING_EXECUTION_CONTEXT_INVALID');
-  return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs,rollingIndividualMode};
+  return {dryRun:config.dryRun,maxDepartures,mutationDeadlineEpochMs,
+    ...(rollingIndividualMode?{rollingIndividualMode:true as const}:{})};
 }
 export interface DemandExecutionPrerequisites {
   /** Fully verified Fleet inventory already collected in the same production run. */
