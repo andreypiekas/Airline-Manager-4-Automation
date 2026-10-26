@@ -93,7 +93,7 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
       await writeFile('test-results/demand/individual-preflight.json',
         JSON.stringify({...summary,validatedTargetKeys:pilot.verifiedAircraft.map(a=>({
           aircraftId:a.aircraftId,routeId:a.routeId,
-          registration:a.registration,observationAgeSeconds:0
+          registration:a.registration,observedAt:a.observedAt
         }))},null,2)+'\\n');
     }catch(error){
       if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
