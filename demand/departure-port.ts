@@ -5,6 +5,8 @@ import { loadReference, type AirportCatalog } from '../optimization/reference-da
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
+import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { inspectIndividualFirstPage } from './rolling-individual-preflight';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
 /** Complete handler grammar observed in Actions 36917592989/36918147380 on 2026-10-01.
@@ -67,12 +69,39 @@ export class PlaywrightDeparturePort implements DeparturePort {
   navigationMetrics(){return {...this.metrics};}
   constructor(private readonly page:Page,private readonly timeout=15000,
     private readonly collectionRetryDeadlineEpochMs?:number,
-    private readonly verifiedEarlierFleet?:CollectionResult){}
+    private readonly verifiedEarlierFleet?:CollectionResult,
+    private readonly rollingIndividualMode=false){}
   async collect(){
     this.prepared=null;
     this.lastCompleteFleet=null;
     const collectStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:collect');
+    if(this.rollingIndividualMode){
+      const pilot=await inspectIndividualFirstPage(this.page,{
+        timeout:Math.min(this.timeout,5000),
+        maxCandidates:8,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
+      });
+      const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
+        pilot.routeTotal!==null && pilot.routeTotal>0 &&
+        pilot.readyCandidates===pilot.verified &&
+        pilot.holds.length===0 &&
+        pilot.verifiedAircraft.every(a=>a.state==='ready'&&!a.issue&&
+          !!a.capacity&&!!a.remaining&&!!a.dailyTotal);
+      console.log('[RollingDispatchInventory] '+JSON.stringify({
+        status:verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
+        inspected:pilot.inspected,ready:pilot.readyCandidates,verified:pilot.verified,
+        heading:pilot.routeTotal,globalComplete:false,
+        mutationAuthorizedByWindowAlone:false
+      }));
+      this.metrics.dispatchCollectMs=Date.now()-collectStarted;
+      return {
+        aircraft:verifiedWindow?pilot.verifiedAircraft:[],
+        complete:false,expectedRoutes:pilot.routeTotal,
+        observationScope:verifiedWindow?'native-individual-first-page' as const:undefined,
+        windowReadyCandidates:pilot.readyCandidates,
+        warnings:verifiedWindow?[]:['ROLLING_WINDOW_UNVERIFIED']
+      };
+    }
     await openFleetList(this.page,this.timeout);
     // Read only the freshly rendered Fleet count. The earlier complete inventory
     // already established one-to-one identities; the next attempted aircraft
@@ -160,20 +189,35 @@ export class PlaywrightDeparturePort implements DeparturePort {
     // Reuse an already-displayed native page whenever the requested route is
     // visible and the live Routes(N) count remains unchanged. Only the target
     // details will authorize its subsequent one-shot departure.
-    const samePage=this.verifiedRouteCount!==null &&
-      await reuseCurrentFleetPageForTarget(this.page,expected,this.verifiedRouteCount,this.timeout);
-    if(samePage)this.metrics.pageReuses++;
-    else {
-      this.metrics.fullListNavigations++;
-      await openFleetList(this.page,this.timeout);
-      await findFleetRoute(this.page,expected,this.timeout);
-      if(this.verifiedRouteCount!==null){
-        const heading=(await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout})).trim();
-        const count=/^Routes\s*\((\d+)\)$/.exec(heading);
-        if(!count||Number(count[1])!==this.verifiedRouteCount)throw new Error('DEPARTURE_FLEET_COUNT_CHANGED');
+    let fresh:AircraftSnapshot;
+    if(this.rollingIndividualMode){
+      // The native page is reloaded, rather than replaying a stale offset.
+      // An arrival may move the target; that is a HOLD for this aircraft.
+      const window=await inspectFirstPageReadOnly(this.page,Math.min(this.timeout,5000));
+      if(!['STABLE','SHORT_PAGE'].includes(window.status)||
+        window.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
+          a.routeId===expected.routeId&&a.registration===expected.registration&&
+          a.state==='ready').length!==1)
+        throw Error('ROLLING_TARGET_MOVED_OR_CHANGED');
+      fresh=await new DemandReader(this.page,this.timeout,true)
+        .readReadyCandidateOnVisiblePage(expected);
+      this.metrics.pageReuses++;
+    }else{
+      const samePage=this.verifiedRouteCount!==null &&
+        await reuseCurrentFleetPageForTarget(this.page,expected,this.verifiedRouteCount,this.timeout);
+      if(samePage)this.metrics.pageReuses++;
+      else {
+        this.metrics.fullListNavigations++;
+        await openFleetList(this.page,this.timeout);
+        await findFleetRoute(this.page,expected,this.timeout);
+        if(this.verifiedRouteCount!==null){
+          const heading=(await this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/}).innerText({timeout:this.timeout})).trim();
+          const count=/^Routes\s*\((\d+)\)$/.exec(heading);
+          if(!count||Number(count[1])!==this.verifiedRouteCount)throw new Error('DEPARTURE_FLEET_COUNT_CHANGED');
+        }
       }
+      fresh=await new DemandReader(this.page,this.timeout,true).readReadyAircraftDetails(expected);
     }
-    const fresh=await new DemandReader(this.page,this.timeout,true).readReadyAircraftDetails(expected);
     const control=this.page.locator('#detailsAction #routeViewDepart');
     const handler=await control.getAttribute('onclick')||'';
     if(await control.count()!==1||!await control.isVisible()||!await control.isEnabled()||!verifiedDepartureHandler(handler,fresh.routeId))throw Error('DEPARTURE_HANDLER_UNVERIFIED');
