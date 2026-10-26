@@ -27,7 +27,7 @@ async function fixture(page:Page,frames:Plane[][],total=132){
       });
       const pager=document.createElement('ul');pager.className='pagination';const next=document.createElement('a');
       next.textContent='Next';next.setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
-      pager.append(next);container.append(pager);
+      if(total>20){pager.append(next);container.append(pager);}
       document.getElementById('routeAction')!.replaceChildren(container);
       document.getElementById('detailsAction')!.style.display='none';
     };
