@@ -399,8 +399,10 @@ test('All Operations', async ({ page }) => {
       // per-aircraft validation path for native first-page ready targets.
       // No fabricated CollectionResult.complete, route optimization or
       // global pricing based on a partial inventory is ever attempted.
-      const incomplete=error instanceof Error&&
-        error.message==='[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.';
+      const incomplete=error instanceof Error&&(
+        error.message==='FLEET_INCOMPLETE_INDIVIDUAL_FALLBACK'||
+        error.message==='[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.'
+      );
       if(!incomplete||demandConfig.dryRun||
          !moduleEnabled('ENABLE_DEPART')||
          !moduleEnabled('ENABLE_ROLLING_INDIVIDUAL_FALLBACK')||
