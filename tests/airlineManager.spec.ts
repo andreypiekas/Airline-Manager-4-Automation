@@ -425,7 +425,21 @@ test('All Operations', async ({ page }) => {
         status:'COMPLETED_PARTIAL_FIRST_PAGE',
         ...dispatch.summary,globalComplete:false
       }));
-      return; // No global operations may consume a partial inventory.
+      // Post-flight stock replenishment remains independently guarded by the
+      // existing verified departure receipts, price limits and time budget.
+      // This phase never relies on the incomplete global Fleet inventory.
+      const postGate=postDispatchSupplyDecision(dispatch);
+      const postBudget=phaseAllowed('rolling-post-dispatch-supplies',phaseBudgetsMs.supplies);
+      console.log('[PostDispatchSupplies] '+JSON.stringify({
+        mode:'rolling',eligible:postGate.allowed,reason:postGate.reason,
+        budgetAllowed:postBudget,globalComplete:false
+      }));
+      if(postGate.allowed&&postBudget&&moduleEnabled('ENABLE_FUEL')){
+        await runSupplies(page,false,process.env,'test-results/demand',undefined,{
+          phase:'post',mutationDeadlineEpochMs:phaseDeadlineEpochMs
+        });
+      }
+      return; // No global route/pricing operations may use a partial inventory.
     }
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;
