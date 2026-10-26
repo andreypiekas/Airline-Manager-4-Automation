@@ -11,6 +11,7 @@ import { readDemandConfig } from './config';
 import { DemandManager } from './manager';
 import { collectFleetWithFreshRetry } from './reader';
 import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { inspectIndividualFirstPage } from './rolling-individual-preflight';
 import { observeRollingFirstPage } from './rolling-first-page-cycle';
 import { recoverMissingFlightHistories } from './history-recovery';
 import { writeDemandReport } from './report';
@@ -69,6 +70,35 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
       if (error instanceof Error && error.message === 'INTERACTIVE_CHALLENGE_DETECTED_STOP') throw error;
       console.warn('[FirstPagePilot] ' + JSON.stringify({
         status:'UNAVAILABLE',mutationAuthorized:false
+      }));
+    }
+  }
+  // A failed global Fleet inventory must not block read-only investigation
+  // of individual ready targets. This bounded pilot NEVER authorizes Depart;
+  // a future executor will need separate fresh Fuel, campaign, demand-pool,
+  // terminal checkpoint, response and countdown/onboard confirmation gates.
+  if(!collection.complete && process.env.DEMAND_INDIVIDUAL_PREFLIGHT!=='false'){
+    try{
+      const pilot=await inspectIndividualFirstPage(page,{
+        timeout:3500,maxCandidates:2,
+        deadlineEpochMs:options.collectionRetryDeadlineEpochMs
+      });
+      const summary={
+        schemaVersion:1,mode:pilot.mode,window:pilot.window,
+        readyCandidates:pilot.readyCandidates,inspected:pilot.inspected,
+        verified:pilot.verified,holds:pilot.holds,mutationAuthorized:false
+      };
+      console.warn('[IndividualPreflight] '+JSON.stringify(summary));
+      await mkdir('test-results/demand',{recursive:true});
+      await writeFile('test-results/demand/individual-preflight.json',
+        JSON.stringify({...summary,validatedTargetKeys:pilot.verifiedAircraft.map(a=>({
+          aircraftId:a.aircraftId,routeId:a.routeId,
+          registration:a.registration,observedAt:a.observedAt
+        }))},null,2)+'\\n');
+    }catch(error){
+      if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+      console.warn('[IndividualPreflight] '+JSON.stringify({
+        schemaVersion:1,mode:'read-only-individual',status:'UNAVAILABLE',mutationAuthorized:false
       }));
     }
   }
