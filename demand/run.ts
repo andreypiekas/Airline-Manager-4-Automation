@@ -31,7 +31,8 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
   // A separate individual executor must re-read every eligible target;
   // none of the partial global identities authorize any click.
   const off=(raw:string|undefined)=>['false','0','off','no'].includes((raw||'').trim().toLowerCase());
-  if(!collection.complete&&!config.dryRun&&!off(process.env.ENABLE_DEPART)&&
+  if(!collection.complete&&!config.dryRun&&
+     process.env.AUTOMATION_MODE!=='semi-automatic'&&!off(process.env.ENABLE_DEPART)&&
      !off(process.env.ENABLE_ROLLING_INDIVIDUAL_FALLBACK)){
     await mkdir('test-results/demand',{recursive:true});
     await writeFile('test-results/demand/global-fleet-fallback.json',JSON.stringify({
