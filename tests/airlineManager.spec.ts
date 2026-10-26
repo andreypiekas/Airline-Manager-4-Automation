@@ -481,7 +481,8 @@ test('All Operations', async ({ page }) => {
         postReroutePricingBlockedAircraftIds,currentRouteFuelEvidence,
         // Route mutation invalidates the earlier inventory. Otherwise reuse
         // its already-verified identities, and re-read every target fresh.
-        verifiedFleetSnapshot:reroutedAircraftIds.size===0?simulation.collection:undefined
+        verifiedFleetSnapshot:reroutedAircraftIds.size===0?simulation.collection:undefined,
+        plannedSufficientDemandCount:simulation.report.summary.sufficient
       });
       const postSupplyGate=postDispatchSupplyDecision(dispatchReport);
       const postSupplyBudget=phaseAllowed('post-dispatch-supplies',phaseBudgetsMs.supplies);
