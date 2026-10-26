@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { DemandReader, collectFleetWithFreshRetry } from '../../demand/reader';
+import { inspectIndividualFirstPage } from '../../demand/rolling-individual-preflight';
 import { FleetUtils } from '../../utils/fleet.utils';
 import { PlaywrightDeparturePort } from '../../demand/departure-port';
 import { runDemandSimulation } from '../../demand/run';
@@ -902,5 +903,42 @@ test('rolling target: duplicated native card and nonready card fail closed',asyn
   await expect(reader.readReadyCandidateOnVisiblePage({
     aircraftId:'1101',routeId:'101',registration:'TEST-101'
   })).rejects.toThrow('ROLLING_WINDOW_IDENTITY_UNVERIFIED');
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('rolling preflight: independently verifies one native departure control, never clicks it',async({page})=>{
+  await fixture(page);
+  await page.evaluate(()=>{
+    const w=window as any;
+    const original=w.Ajax;
+    w.Ajax=(url:string,...args:any[])=>{
+      original(url,...args);
+      if(url.startsWith('fleet_details.php?id=')){
+        const depart=document.querySelector('#routeViewDepart');
+        const id=url.match(/id=(\\d+)/)?.[1];
+        if(depart&&id)depart.setAttribute('onclick',
+          "$('#routeAction').hide();hideFlightInfo();$('#routeViewDepart').hide();Ajax('route_depart.php?id="+
+          (Number(id)-1000)+"&ref=list&costIndex=100','detailsAction',this);");
+      }
+    };
+  });
+  const report=await inspectIndividualFirstPage(page,{timeout:800,maxCandidates:1});
+  expect(report).toMatchObject({
+    mode:'read-only-individual',mutationAuthorized:false,window:'STABLE',
+    inspected:1,verified:1,readyCandidates:1
+  });
+  expect(report.verifiedAircraft[0]).toMatchObject({
+    aircraftId:'1101',routeId:'101',state:'ready',remaining:{Y:90,J:0,F:0}
+  });
+  expect(await page.locator('#routeAction').isVisible()).toBe(true);
+  expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
+});
+
+test('rolling preflight: unverified departure handler is held without a click',async({page})=>{
+  await fixture(page);
+  const report=await inspectIndividualFirstPage(page,{timeout:800,maxCandidates:1});
+  expect(report.verified).toBe(0);
+  expect(report.holds).toContainEqual({code:'TARGET_HANDLER_UNVERIFIED'});
+  expect(report.mutationAuthorized).toBe(false);
   expect(await page.evaluate(()=>(window as any).mutations)).toBe(0);
 });
