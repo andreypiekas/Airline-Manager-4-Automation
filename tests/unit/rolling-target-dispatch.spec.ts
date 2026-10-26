@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {IndividualDepartureExecutor,type DeparturePort,type ExecutionReport} from '../../demand/executor';
 import {readDemandConfig} from '../../demand/config';
-import {executionEnvironment} from '../../demand/execute-run';
+import {executionEnvironment,hasRollingFuelHoldingUnavailable} from '../../demand/execute-run';
 import {flightCountdownObservation} from '../../optimization/flight-timing';
 import type {AircraftSnapshot,CollectionResult} from '../../demand/types';
 
@@ -71,6 +71,14 @@ test('missing or mismatched live individual provenance cannot allow any click',a
    expect(last?.entries.every(e=>e.status==='held')).toBe(true);
  }
 });
+test('a missing fuel holding is an explicit operational failure condition',async()=>{
+ const r=await run({fuel:undefined});
+ const report=r.report??r.transitions.at(-1);
+ expect(r.clicks).toBe(0);
+ expect(report?.entries[0]?.reason).toBe('FUEL_HOLDING_UNVERIFIED_IN_ROLLING_MODE');
+ expect(hasRollingFuelHoldingUnavailable(report!)).toBe(true);
+});
+
 test('rolling mode holds when fuel balance or exact fuel requirement is unverified',async()=>{
  for(const opts of [{fuel:undefined},{fuel:25000,quote:false},{fuel:10000}]){
    const r=await run(opts);
