@@ -39,7 +39,7 @@ async function run(options:{
       sample.aircraftId,{aircraftId:sample.aircraftId,routeId:sample.routeId,
         from:sample.from,to:sample.to,fuelLbs:12000,observedAt:new Date().toISOString()}
     ]])
-  },async r=>transitions.push(JSON.parse(JSON.stringify(r)))).run().catch(e=>{
+  },async r=>{transitions.push(JSON.parse(JSON.stringify(r)));}).run().catch(e=>{
     if(e instanceof Error&&e.message==='ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES')return null;
     throw e;
   });
