@@ -577,11 +577,19 @@ export class DemandReader {
       from:codes[0],to:codes[1],state:'unavailable',
       capacity:null,remaining:null,dailyTotal:null,observedAt:new Date().toISOString()
     };
-    await this.readDetails({
-      routeId:item.routeId,aircraftId:item.aircraftId,registration:item.registration,
-      routeLabel:item.routeLabel,from:item.from,to:item.to,
-      ready:true,inflight:false,pax:true,onboardText:''
-    },item);
+    try{
+      await this.readDetails({
+        routeId:item.routeId,aircraftId:item.aircraftId,registration:item.registration,
+        routeLabel:item.routeLabel,from:item.from,to:item.to,
+        ready:true,inflight:false,pax:true,onboardText:''
+      },item);
+    }catch(error){
+      if(detailFailureCode(error)==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+      console.warn('[RollingIndividualDetails] '+JSON.stringify({
+        status:'HOLD_READ_ONLY',code:detailFailureCode(error),mutationAuthorized:false
+      }));
+      throw Error('ROLLING_TARGET_DETAILS_UNVERIFIED');
+    }
     if(item.issue||item.state!=='ready'||item.registration!==expected.registration||
        !item.capacity||!item.remaining||!item.dailyTotal||
        !/^[A-Z0-9]{3}$/.test(item.from)||!/^[A-Z0-9]{3}$/.test(item.to)||
