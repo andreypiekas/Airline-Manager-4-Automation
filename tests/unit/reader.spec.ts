@@ -915,7 +915,7 @@ test('rolling preflight: independently verifies one native departure control, ne
       original(url,...args);
       if(url.startsWith('fleet_details.php?id=')){
         const depart=document.querySelector('#routeViewDepart');
-        const id=url.match(/id=(\\d+)/)?.[1];
+        const id=url.match(/id=(\d+)/)?.[1];
         if(depart&&id)depart.setAttribute('onclick',
           "$('#routeAction').hide();hideFlightInfo();$('#routeViewDepart').hide();Ajax('route_depart.php?id="+
           (Number(id)-1000)+"&ref=list&costIndex=100','detailsAction',this);");
