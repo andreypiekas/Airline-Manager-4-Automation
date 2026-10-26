@@ -149,19 +149,20 @@ export class IndividualDepartureExecutor {
     if(this.settings.fuelHoldingLbsAtRunStart!==undefined&&!fuelTrackingComplete)throw new Error('EXECUTION_FUEL_BUDGET_INVALID');
     let initial: CollectionResult;
     try { initial=await this.port.collect(); } catch { report.halted=true;await persist();throw new Error('EXECUTION_INITIAL_COLLECTION_FAILED'); }
-    const rollingWindowVerified=this.settings.rollingIndividualMode===true &&
-      initial.complete===false && initial.observationScope==='native-individual-first-page' &&
-      initial.expectedRoutes!==null && Number.isSafeInteger(initial.expectedRoutes) &&
-      initial.expectedRoutes>=initial.aircraft.length &&
-      initial.windowReadyCandidates!==undefined &&
-      initial.windowReadyCandidates>=initial.aircraft.length &&
-      initial.aircraft.length<=20 &&
-      initial.aircraft.every(a=>a.state==='ready'&&!a.issue&&
+    const verifiedRollingWindow=(candidate:CollectionResult)=>this.settings.rollingIndividualMode===true &&
+      candidate.complete===false && candidate.observationScope==='native-individual-first-page' &&
+      candidate.expectedRoutes!==null && Number.isSafeInteger(candidate.expectedRoutes) &&
+      candidate.expectedRoutes>=candidate.aircraft.length &&
+      candidate.windowReadyCandidates!==undefined &&
+      candidate.windowReadyCandidates>=candidate.aircraft.length &&
+      candidate.aircraft.length<=20 &&
+      candidate.aircraft.every(a=>a.state==='ready'&&!a.issue&&
         /^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId)&&
         !!a.registration.trim() && !!a.capacity && !!a.remaining && !!a.dailyTotal &&
         validDemandCabins(a.capacity)&&validDemandCabins(a.remaining)&&
         validDemandCabins(a.dailyTotal)&&
         ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
+    let rollingWindowVerified=verifiedRollingWindow(initial);
     if(this.settings.rollingIndividualMode){
       console.log('[RollingDispatchCoverage] '+JSON.stringify({
         scope:'FIRST_NATIVE_PAGE_ONLY',globalComplete:false,
@@ -173,15 +174,22 @@ export class IndividualDepartureExecutor {
     }
     const aircraftCounts=new Map<string,number>(),routeCounts=new Map<string,number>();
     const poolRemaining=new Map<string,Cabins>(),poolTotals=new Map<string,Cabins>(),inconsistentPools=new Set<string>();
-    for(const a of initial.aircraft){
-      aircraftCounts.set(a.aircraftId,(aircraftCounts.get(a.aircraftId)||0)+1);
-      routeCounts.set(a.routeId,(routeCounts.get(a.routeId)||0)+1);
-      if(a.state!=='ready'||!validDemandCabins(a.remaining)||!validDemandCabins(a.dailyTotal))continue;
-      const key=demandPoolKey(a,this.demand.poolScope),current=poolRemaining.get(key),total=poolTotals.get(key);
-      if(total&&(['Y','J','F'] as const).some(k=>total[k]!==a.dailyTotal![k]))inconsistentPools.add(key);
-      poolTotals.set(key,{...a.dailyTotal});
-      poolRemaining.set(key,current?minCabins(current,a.remaining):{...a.remaining});
-    }
+    // Each native page has its own identity uniqueness check. Demand reservations
+    // persist across page refreshes; a later arrival must never restore a pool
+    // that an earlier confirmed flight already consumed.
+    const ingestVerifiedWindow=(collection:CollectionResult)=>{
+      aircraftCounts.clear();routeCounts.clear();
+      for(const a of collection.aircraft){
+        aircraftCounts.set(a.aircraftId,(aircraftCounts.get(a.aircraftId)||0)+1);
+        routeCounts.set(a.routeId,(routeCounts.get(a.routeId)||0)+1);
+        if(a.state!=='ready'||!validDemandCabins(a.remaining)||!validDemandCabins(a.dailyTotal))continue;
+        const key=demandPoolKey(a,this.demand.poolScope),current=poolRemaining.get(key),total=poolTotals.get(key);
+        if(total&&(['Y','J','F'] as const).some(k=>total[k]!==a.dailyTotal![k]))inconsistentPools.add(key);
+        poolTotals.set(key,{...a.dailyTotal});
+        poolRemaining.set(key,current?minCabins(current,a.remaining):{...a.remaining});
+      }
+    };
+    ingestVerifiedWindow(initial);
 
     // A prior run may have stopped before evaluating these aircraft. Put them
     // first *only after* this run has collected and checked a fresh fleet
@@ -189,10 +197,18 @@ export class IndividualDepartureExecutor {
     // below still runs against freshly observed game state.
     const waiting=this.settings.prioritizedDepartureKeys??new Set<string>();
     const firstPageReady=this.settings.firstPageReadyPriorityKeys??new Set<string>();
-    const ordered=orderVerifiedDepartureCandidates(initial,waiting,firstPageReady);
-    // One complete fleet snapshot establishes global identity/pool integrity. Each
-    // target is then re-read individually immediately before a possible mutation.
+    let ordered=orderVerifiedDepartureCandidates(initial,waiting,firstPageReady);
+    const seenWindowTargets=new Set<string>();
+    let rollingPass=0;
+    // Only the individually verified target authorizes its departure. In rolling
+    // mode, after confirmed flights new ready planes can occupy page one;
+    // rescan in the SAME executor to preserve attempt, fuel and demand journals.
+    while(true){
+    const departedBeforePass=report.entries.filter(e=>e.status==='departed').length;
     for(const expected of ordered) {
+      const targetKey=expected.aircraftId+':'+expected.routeId;
+      if(seenWindowTargets.has(targetKey))continue;
+      seenWindowTargets.add(targetKey);
       const entry: ExecutionEntry={aircraftId:expected.aircraftId,registration:expected.registration,routeId:expected.routeId,
         from:expected.from,to:expected.to,status:'held',reason:'DATA_UNAVAILABLE',demand:null,actualOnboard:null};
       report.entries.push(entry);
@@ -351,6 +367,41 @@ export class IndividualDepartureExecutor {
         entry.status='outcome_unknown';entry.reason='NO_RETRY_AFTER_CLICK_ATTEMPT:'+code(error);report.halted=true;
       }
       await persist();
+    }
+    if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=3 ||
+       report.entries.filter(e=>e.status==='departed').length===departedBeforePass ||
+       (this.settings.maxDepartures!=='all'&&
+        this.attemptedAircraft.size>=this.settings.maxDepartures))break;
+    // Bounded only after real confirmed departures, with enough time left for
+    // native refresh, intent persistence and eventual countdown confirmation.
+    if(this.settings.mutationDeadlineEpochMs!==undefined&&
+       Date.now()+MUTATION_COMPLETION_RESERVE_MS+30_000>=this.settings.mutationDeadlineEpochMs)break;
+    let nextWindow:CollectionResult;
+    try{nextWindow=await this.port.collect();}
+    catch{
+      report.halted=true;await persist();
+      throw Error('ROLLING_NEXT_WINDOW_COLLECTION_FAILED');
+    }
+    if(!verifiedRollingWindow(nextWindow)){
+      console.warn('[RollingFirstPageCycle] '+JSON.stringify({
+        status:'HOLD_NEXT_WINDOW_UNVERIFIED',pass:rollingPass+1,
+        globalComplete:false,mutationAuthorized:false
+      }));
+      break;
+    }
+    const nextOrdered=orderVerifiedDepartureCandidates(nextWindow,waiting,firstPageReady)
+      .filter(a=>!seenWindowTargets.has(a.aircraftId+':'+a.routeId) &&
+        !this.attemptedAircraft.has(a.aircraftId) &&
+        !this.attemptedRoutes.has(a.routeId));
+    if(nextOrdered.length===0)break;
+    initial=nextWindow;rollingWindowVerified=true;
+    ingestVerifiedWindow(nextWindow);
+    ordered=nextOrdered;rollingPass++;
+    console.log('[RollingFirstPageCycle] '+JSON.stringify({
+      status:'NEW_VERIFIED_CANDIDATES',pass:rollingPass,
+      targets:nextOrdered.length,globalComplete:false,
+      mutationAuthorizedByInventoryAlone:false
+    }));
     }
     // A limited first-page observation never establishes fleet-wide idleness.
     // Fail visibly rather than returning a misleading green 0-departure run
