@@ -523,14 +523,14 @@ export class DemandReader {
   async readReadyCandidateOnVisiblePage(
     expected:{aircraftId:string;routeId:string;registration:string}
   ):Promise<AircraftSnapshot>{
-    if(!/^[1-9]\\d*$/.test(expected.aircraftId)||
-       !/^[1-9]\\d*$/.test(expected.routeId)||
+    if(!/^[1-9]\d*$/.test(expected.aircraftId)||
+       !/^[1-9]\d*$/.test(expected.routeId)||
        !expected.registration.trim())throw Error('ROLLING_TARGET_IDENTITY_INVALID');
     await assertNoInteractiveChallenge(this.page,'rolling-target:before');
-    const heading=this.page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/});
+    const heading=this.page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
     if(await heading.count()!==1)throw Error('ROLLING_FLEET_COUNT_UNVERIFIED');
     const totalRaw=(await heading.innerText({timeout:this.timeout})).trim();
-    const match=/^Routes\\s*\\((\\d+)\\)$/.exec(totalRaw);
+    const match=/^Routes\s*\((\d+)\)$/.exec(totalRaw);
     if(!match||!Number.isSafeInteger(Number(match[1]))||Number(match[1])<=0)
       throw Error('ROLLING_FLEET_COUNT_UNVERIFIED');
     const root=this.page.locator('#routesContainer');
@@ -539,16 +539,16 @@ export class DemandReader {
       es.filter(e=>!!e.getClientRects().length).map(e=>({
         routeId:e.id.replace(/^routeMainList/,''),
         aircraftIds:Array.from(e.querySelectorAll('a')).map(a=>
-          (a.getAttribute('onclick')||'').replace(/\\s/g,'')
-            .match(/^playSound\\('neutral_click'\\);Ajax\\('fleet_details\\.php\\?id=([1-9]\\d*)','detailsAction'\\);if\\(intro==0\\)\\{\\$\\('#routeAction'\\)\\.hide\\(\\);\\}$/)?.[1]).filter(Boolean),
+          (a.getAttribute('onclick')||'').replace(/\s/g,'')
+            .match(/^playSound\('neutral_click'\);Ajax\('fleet_details\.php\?id=([1-9]\d*)','detailsAction'\);if\(intro==0\)\{\$\('#routeAction'\)\.hide\(\);\}$/)?.[1]).filter(Boolean),
         registrationNodes:Array.from(e.querySelectorAll('[id^="acRegList"]')).map(n=>({
           id:n.id,text:n.textContent?.trim()||''
         })),
         routeLabels:Array.from(e.querySelectorAll('span.s-text')).map(n=>n.textContent?.trim()||'')
-          .filter(x=>/^[A-Z0-9]{3}\\s*-\\s*[A-Z0-9]{3}$/.test(x)),
+          .filter(x=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(x)),
         pax:e.classList.contains('classPAX'),
         ready:e.classList.contains('listDepartable'),
-        inflight:/Onboard\\s*:/.test((e as HTMLElement).innerText),
+        inflight:/Onboard\s*:/.test((e as HTMLElement).innerText),
         depart:(()=>{
           const b=e.querySelector('#listDepart'+e.id.replace(/^routeMainList/,''));
           return !!b&&!!b.getClientRects().length&&!(b as HTMLButtonElement).disabled;
@@ -559,7 +559,7 @@ export class DemandReader {
        cards.some(c=>c.aircraftIds.length!==1||c.registrationNodes.length!==1||
          c.registrationNodes[0].id!=='acRegList'+c.aircraftIds[0]||
          !c.registrationNodes[0].text||
-         !/^[1-9]\\d*$/.test(c.routeId))||
+         !/^[1-9]\d*$/.test(c.routeId))||
        new Set(cards.map(c=>c.aircraftIds[0])).size!==cards.length)
       throw Error('ROLLING_WINDOW_IDENTITY_UNVERIFIED');
     const matches=cards.filter(c=>c.routeId===expected.routeId&&
@@ -569,7 +569,7 @@ export class DemandReader {
     const card=matches[0];
     if(!card.pax||!card.ready||card.inflight||!card.depart||
        card.routeLabels.length!==1)throw Error('ROLLING_TARGET_NOT_READY');
-    const codes=card.routeLabels[0].split(/\\s*-\\s*/);
+    const codes=card.routeLabels[0].split(/\s*-\s*/);
     if(codes.length!==2||codes[0]===codes[1])throw Error('ROLLING_TARGET_ROUTE_UNVERIFIED');
     const item:AircraftSnapshot={
       aircraftId:expected.aircraftId,routeId:expected.routeId,
