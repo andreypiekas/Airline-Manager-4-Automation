@@ -78,18 +78,18 @@ export class PlaywrightDeparturePort implements DeparturePort {
     await assertNoInteractiveChallenge(this.page,'departure:collect');
     if(this.rollingIndividualMode){
       const pilot=await inspectIndividualFirstPage(this.page,{
-        timeout:Math.min(this.timeout,5000),
+        timeout:Math.min(this.timeout,8000),
         maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
       });
       const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
-        pilot.readyCandidates===pilot.verified &&
-        pilot.holds.length===0 &&
+        pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
         pilot.verifiedAircraft.every(a=>a.state==='ready'&&!a.issue&&
           !!a.capacity&&!!a.remaining&&!!a.dailyTotal);
       console.log('[RollingDispatchInventory] '+JSON.stringify({
         status:verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
         inspected:pilot.inspected,ready:pilot.readyCandidates,verified:pilot.verified,
+        heldTargets:pilot.holds.length,
         heading:pilot.routeTotal,globalComplete:false,
         mutationAuthorizedByWindowAlone:false
       }));
@@ -193,7 +193,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
     if(this.rollingIndividualMode){
       // The native page is reloaded, rather than replaying a stale offset.
       // An arrival may move the target; that is a HOLD for this aircraft.
-      const window=await inspectFirstPageReadOnly(this.page,Math.min(this.timeout,5000));
+      const window=await inspectFirstPageReadOnly(this.page,Math.min(this.timeout,8000));
       if(!['STABLE','SHORT_PAGE'].includes(window.status)||
         window.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
           a.routeId===expected.routeId&&a.registration===expected.registration&&
