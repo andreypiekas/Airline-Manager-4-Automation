@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {IndividualDepartureExecutor,type DeparturePort,type ExecutionReport} from '../../demand/executor';
 import {readDemandConfig} from '../../demand/config';
+import {executionEnvironment} from '../../demand/execute-run';
 import {flightCountdownObservation} from '../../optimization/flight-timing';
 import type {AircraftSnapshot,CollectionResult} from '../../demand/types';
 
@@ -107,4 +108,15 @@ test('one changed candidate does not veto a separate, fully verified aircraft',a
  expect(r.report?.summary.departed).toBe(1);
  expect(r.clicks).toBe(1);
  expect(a.complete).toBe(false);
+});
+
+test('semi-automatic mode cannot enable real rolling dispatcher',()=>{
+ const config={...readDemandConfig({}),dryRun:false};
+ expect(()=>executionEnvironment(config,{
+   GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'andreypiekas/Airline-Manager-4-Automation',
+   GITHUB_RUN_ID:'1035',GITHUB_RUN_ATTEMPT:'1',
+   DEMAND_EXECUTION_ACK:'individual-return-legs-v1',
+   DEMAND_ROLLING_INDIVIDUAL_DISPATCH:'true',
+   AUTOMATION_MODE:'semi-automatic'
+ })).toThrow('ROLLING_EXECUTION_CONTEXT_INVALID');
 });
