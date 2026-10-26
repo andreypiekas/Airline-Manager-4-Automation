@@ -7,7 +7,7 @@ const safe=s=>String(s??'').replace(/[|\r\n<>]/g,' ');
 function build(dir='test-results/demand',logPath='test-results/bot.log',journalPath='.am4-state/github/return-journal.json'){
   const demand=read(dir,'demand-report.json'),fleet=read(dir,'fleet-observations.json'),execution=read(dir,'execution-report.json'),
     routeExecution=read(dir,'route-execution.json'),routeResearch=read(dir,'route-research.json'),candidateData=read(dir,'candidate-data.json'),supplies=read(dir,'supply-report.json'),postSupplies=read(dir,'supply-post-report.json'),pricing=read(dir,'pricing-execution.json'),modules=read(dir,'operational-modules.json'),
-    uiHealth=read(dir,'ui-health.json'),challenge=read(dir,'challenge-detected.json'),semi=read(dir,'semi-automatic-summary.json'),runBudget=read(dir,'run-time-budget.json'),ownedBases=read(dir,'owned-airline-bases.json');
+    uiHealth=read(dir,'ui-health.json'),challenge=read(dir,'challenge-detected.json'),semi=read(dir,'semi-automatic-summary.json'),runBudget=read(dir,'run-time-budget.json'),ownedBases=read(dir,'owned-airline-bases.json'),globalFallback=read(dir,'global-fleet-fallback.json');
   const log=(()=>{try{return fs.readFileSync(logPath,'utf8')}catch{return ''}})();
   const journal=readPath(journalPath),events=Array.isArray(journal?.events)?journal.events:[];
   const resolvedUncertainDepartureIds=new Set(events.filter(x=>x?.type==='departure-uncertain-resolved').map(x=>x.uncertainEventId));
@@ -22,6 +22,13 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     if(latestUncertain&&latestVerified<=latestUncertain)uncertainSupplyKinds.add(kind);
   }
   const aircraft=Array.isArray(fleet?.aircraft)?fleet.aircraft:[];
+  const partialGlobal=globalFallback?.globalComplete===false&&Number.isSafeInteger(globalFallback.observed)&&
+    Number.isSafeInteger(globalFallback.expected)&&globalFallback.observed>=0&&
+    globalFallback.expected>0&&globalFallback.observed<=globalFallback.expected;
+  // Verified individual entries are a bounded first-page sample, never a complete fleet.
+  const individualVerified=partialGlobal?(execution?.entries||[]).filter(e=>
+    e?.demand?.state==='ready'&&e?.demand?.aircraftId===e?.aircraftId&&
+    e?.demand?.routeId===e?.routeId&&typeof e?.registration==='string'&&!!e.registration).length:0;
   const currentAircraftRouteKeys=new Set(aircraft.map(a=>a.aircraftId+':'+a.routeId));
   const activeUncertainDepartureKeys=new Set([...uncertainDepartureKeys].filter(k=>currentAircraftRouteKeys.has(k)));
   const execBy=new Map((execution?.entries||[]).map(x=>[x.aircraftId,x]));
@@ -67,7 +74,9 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     bases:{status:ownedBases?.status??'not_observed',effective:Array.isArray(ownedBases?.effectiveBases)?ownedBases.effectiveBases:[],source:ownedBases?.source??null,reason:ownedBases?.reason??null},
     demand:{collectionComplete:demand?.collectionComplete??null,evaluated:demand?.summary?.evaluated??null,sufficient:demand?.summary?.sufficient??null,
       insufficient:demand?.summary?.insufficient??null,unavailable:demand?.summary?.unavailable??null,notReady:demand?.summary?.notReady??null},
-    fleet:{seen:demand?.summary?.fleetSeen??aircraft.length,ready:aircraft.filter(a=>a.state==='ready').length,
+    fleet:{seen:demand?.summary?.fleetSeen??(partialGlobal?globalFallback.observed:aircraft.length),
+      expected:partialGlobal?globalFallback.expected:null,collectionComplete:demand?.collectionComplete??(partialGlobal?false:null),
+      individualVerified,ready:aircraft.filter(a=>a.state==='ready').length,
       inflight:aircraft.filter(a=>a.state==='inflight').length,unavailable:aircraft.filter(a=>a.state==='unavailable').length},
     departures:{evaluated:execution?.summary?.evaluated??null,departed:execution?.summary?.departed??null,held:execution?.summary?.held??null,unknown:execution?.summary?.unknown??null,
       fuelHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length,
@@ -134,6 +143,10 @@ function markdown(d,states){
  if(d.uiHealth.status!=='healthy'&&d.uiHealth.status!=='not_observed')alerts.push(`UI health: ${d.uiHealth.status}`);
  if(d.challenge?.detected)alerts.push('CAPTCHA/challenge detectado — execução interrompida sem tentativa de contorno');
  if((d.departures.timeBudgetHeld||0)>0)alerts.push(`${d.departures.timeBudgetHeld} aeronave(s) adiadas pelo orçamento de tempo; reavaliar na próxima execução`);
+ if(d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)&&d.fleet.expected>0)
+   alerts.push(`coleta global incompleta: ${fmt(d.fleet.seen)}/${fmt(d.fleet.expected)}; ${fmt(d.fleet.individualVerified)} alvo(s) verificado(s) individualmente (cobertura parcial)`);
+ if((d.departures.fuelHeld||0)>0)
+   alerts.push(`${d.departures.fuelHeld} aeronave(s) retidas por Fuel insuficiente${fuel?.reason==='PRICE_ABOVE_LIMIT'&&Number.isSafeInteger(fuel.pricePer1000)&&Number.isSafeInteger(fuel.effectiveMax)?`; preço live ${fmt(fuel.pricePer1000)}/1k acima do teto ${fmt(fuel.effectiveMax)}/1k`:''}`);
  if(d.maintenance?.preventiveACheckRepairs==='held_safe')alerts.push(`manutenção em HOLD seguro: ${d.maintenance.holdReason||'motivo não informado'}`);
  if(d.campaign?.status==='unverified'||d.campaign?.allRequiredVerified===false)alerts.push('campanhas exigidas não confirmadas — decolagens bloqueadas');
  const lines=['# Airline Manager 4 — relatório operacional','',
@@ -142,7 +155,7 @@ function markdown(d,states){
   '## Resumo executivo','',
   '| Área | Resultado | Evidência resumida |','| --- | --- | --- |',
   `| Bases | **${d.bases?.effective?.length??0}** ativas | ${d.bases?.effective?.length?d.bases.effective.map(safe).join(', '):'n/d'} · fonte ${safe(d.bases?.status||'n/d')} |`,
-  `| Frota (coleta antes das decolagens) | **${fmt(d.fleet.seen)}** vistas | ${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis |`,
+  `| Frota (coleta antes das decolagens) | **${fmt(d.fleet.seen)}** vistas${d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)?` de ${fmt(d.fleet.expected)} (parcial)`:''} | ${d.fleet.collectionComplete===false?`${fmt(d.fleet.individualVerified)} verificadas individualmente · estado global não confirmado`:`${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis`} |`,
   `| Demanda | **${fmt(d.demand.sufficient)}/${fmt(d.demand.evaluated)}** suficientes | insuficientes ${fmt(d.demand.insufficient)} · indisponíveis ${fmt(d.demand.unavailable)} · coleta ${d.demand.collectionComplete===true?'completa':d.demand.collectionComplete===false?'incompleta':'n/d'} |`,
   `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}) · incertas ${fmt(d.departures.unknown)} |`,
   `| Pricing | **${fmt(d.pricing.adjusted)}** ajustadas | ${fmt(d.pricing.unchanged)} no alvo · incertas ${fmt(d.pricing.unknown)}${d.pricing.phaseHoldReason?` · fase: ${safe(d.pricing.phaseHoldReason)}`:''} |`,
@@ -168,6 +181,7 @@ function markdown(d,states){
   `| DADOS_INDISPONIVEIS | ${s.DADOS_INDISPONIVEIS} |`,`| QUARENTENA_DECOLAGEM | ${s.QUARENTENA_DECOLAGEM} |`,`| ORIGEM_OPERACIONAL_INDEFINIDA | ${s.ORIGEM_OPERACIONAL_INDEFINIDA} |`,
   `| PRECISA_REVISAR_ROTA | ${s.PRECISA_REVISAR_ROTA} |`,`| PRECISA_REVISAR_PRECO | ${s.PRECISA_REVISAR_PRECO} |`,
   `| MANUTENCAO | ${s.MANUTENCAO} |`,`| PRONTA_PARA_DECOLAR | ${s.PRONTA_PARA_DECOLAR} |`,'',
+  d.fleet.collectionComplete===false&&d.fleet.individualVerified>0?'Estados da frota global indisponíveis; consulte os resultados individuais no relatório de decolagens.':'',
   '### Aeronaves que exigem atenção','',
   attention.length?'| Aeronave | Estado | Motivo |\n| --- | --- | --- |\n'+attention.map(x=>`| ${safe(x.registration)} | ${x.state} | ${safe(x.reason)} |`).join('\n'):'Nenhuma aeronave fora do estado NORMAL neste run.','',
   '## Relatórios detalhados','',
@@ -236,6 +250,24 @@ function selfTest(){
  assert.deepEqual(states.find(x=>x.aircraftId==='9'),{aircraftId:'9',registration:'I',state:'ORIGEM_OPERACIONAL_INDEFINIDA',reason:'ORIGIN_NOT_REGISTERED',observedFleetState:'inflight'});
  assert.deepEqual(states.find(x=>x.aircraftId==='10'),{aircraftId:'10',registration:'J',state:'DADOS_INDISPONIVEIS',reason:'DETAILS_UNVERIFIED',observedFleetState:'unavailable'});
  assert.deepEqual(states.find(x=>x.aircraftId==='11'),{aircraftId:'11',registration:'K',state:'NORMAL',reason:'INFLIGHT_OBSERVED',observedFleetState:'inflight'});
+ // Regression: an incomplete global fleet must not erase individually verified
+ // Fuel holds or pretend that zero global snapshots means zero observed routes.
+ fs.rmSync(path.join(dir,'fleet-observations.json'));
+ fs.writeFileSync(path.join(dir,'demand-report.json'),'{}');
+ fs.writeFileSync(path.join(dir,'global-fleet-fallback.json'),JSON.stringify({globalComplete:false,observed:39,expected:154}));
+ fs.writeFileSync(path.join(dir,'execution-report.json'),JSON.stringify({summary:{evaluated:2,departed:0,held:2,unknown:0},entries:[
+  {aircraftId:'21',routeId:'121',registration:'R21',status:'held',reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY',demand:{aircraftId:'21',routeId:'121',state:'ready'}},
+  {aircraftId:'22',routeId:'122',registration:'R22',status:'held',reason:'DEMAND_BELOW_THRESHOLD',demand:{aircraftId:'22',routeId:'122',state:'ready',decision:'hold_insufficient'}}]}));
+ fs.writeFileSync(path.join(dir,'supply-report.json'),JSON.stringify({entries:[{kind:'fuel',status:'skipped',reason:'PRICE_ABOVE_LIMIT',before:{pricePer1000:740}}],adaptive:{fuel:{effectiveMax:550}}}));
+ const partial=build(dir,path.join(dir,'missing.log'),path.join(dir,'journal.json')).dashboard;
+ assert.equal(partial.fleet.seen,39);assert.equal(partial.fleet.expected,154);
+ assert.equal(partial.fleet.collectionComplete,false);assert.equal(partial.fleet.individualVerified,2);
+ assert.equal(partial.departures.fuelHeld,1);
+ const partialMd=markdown(partial,[]);
+ assert.ok(partialMd.includes('39** vistas de 154 (parcial)'));
+ assert.ok(partialMd.includes('coleta global incompleta: 39/154; 2 alvo(s) verificado(s) individualmente'));
+ assert.ok(partialMd.includes('1 aeronave(s) retidas por Fuel insuficiente; preço live 740/1k acima do teto 550/1k'));
+ assert.ok(partialMd.includes('Estados da frota global indisponíveis'));
  fs.rmSync(dir,{recursive:true,force:true});console.log('company-dashboard self-test ok');
 }
 if(require.main===module){
