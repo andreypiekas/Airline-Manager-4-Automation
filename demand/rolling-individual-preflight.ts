@@ -39,7 +39,16 @@ export async function inspectIndividualFirstPage(
   };
   const budget=()=>deadline===undefined||Date.now()+Math.max(5000,timeout*2)<deadline;
   if(!budget()){report.window='TIME_BUDGET';return report;}
-  const first=await inspectFirstPageReadOnly(page,timeout);
+  let first=await inspectFirstPageReadOnly(page,timeout);
+  // A transient missing Routes(N) heading in the native first page must not
+  // permanently prevent inspection. Retry the verified Fleet menu exactly once;
+  // no candidate is trusted until a complete fresh observation passes.
+  if(first.status==='UI_UNVERIFIED'&&budget()){
+    console.warn('[RollingPreflightRecovery] '+JSON.stringify({
+      status:'RETRY_FIRST_PAGE_UI',mutationAuthorized:false
+    }));
+    first=await inspectFirstPageReadOnly(page,timeout);
+  }
   if(!['STABLE','SHORT_PAGE'].includes(first.status)){
     report.holds.push({code:'WINDOW_UNVERIFIED'});return report;
   }
