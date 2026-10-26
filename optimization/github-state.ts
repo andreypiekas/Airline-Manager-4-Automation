@@ -33,25 +33,25 @@ const tailPerKey = <T>(items: readonly T[], limit: number, keyOf: (item: T) => s
  * their consumers need only recent evidence; losing older observations merely
  * falls back to conservative/default behavior.
  */
-export function compactReturnJournalForTransport(journal: any): any {
+export function compactReturnJournalForTransport(journal: any, limits: typeof TRANSPORT_HISTORY_LIMITS = TRANSPORT_HISTORY_LIMITS): any {
   const compacted = { ...journal };
 
   compacted.entries = tailPerKey(
     Array.isArray(journal.entries) ? journal.entries : [],
-    TRANSPORT_HISTORY_LIMITS.reviewEntriesPerAircraftOrigin,
+    limits.reviewEntriesPerAircraftOrigin,
     (e: any) => String(e?.aircraftId || '') + ':' + String(e?.origin || '')
   );
 
   if (Array.isArray(journal.events)) {
     const departures = tailPerKey(
       journal.events.filter((e: any) => e?.type === 'departure'),
-      TRANSPORT_HISTORY_LIMITS.departuresPerAircraft,
+      limits.departuresPerAircraft,
       (e: any) => String(e?.aircraftId || '')
     );
     const departureIds = new Set(departures.map((e: any) => e.eventId));
     const anchors = tailPerKey(
       journal.events.filter((e: any) => e?.type === 'flight-history-anchor'),
-      TRANSPORT_HISTORY_LIMITS.flightHistoryAnchorsPerAircraft,
+      limits.flightHistoryAnchorsPerAircraft,
       (e: any) => String(e?.aircraftId || '')
     );
     const arrivals = journal.events.filter(
@@ -78,18 +78,40 @@ export function compactReturnJournalForTransport(journal: any): any {
 
   if (Array.isArray(journal.supplyObservations)) compacted.supplyObservations = tailPerKey(
     journal.supplyObservations,
-    TRANSPORT_HISTORY_LIMITS.supplyObservationsPerKind,
+    limits.supplyObservationsPerKind,
     (e: any) => String(e?.kind || '')
   );
   if (Array.isArray(journal.holdObservations)) compacted.holdObservations = tailPerKey(
     journal.holdObservations,
-    TRANSPORT_HISTORY_LIMITS.holdObservationsPerAircraft,
+    limits.holdObservationsPerAircraft,
     (e: any) => String(e?.aircraftId || '')
   );
   if (Array.isArray(journal.uiHealthObservations)) compacted.uiHealthObservations =
-    journal.uiHealthObservations.slice(-TRANSPORT_HISTORY_LIMITS.uiHealthObservations);
+    journal.uiHealthObservations.slice(-limits.uiHealthObservations);
 
   return compacted;
+}
+/**
+ * Preserve the usual six-cycle advisory history while it fits. When a large
+ * fleet reaches the GitHub Contents transport ceiling, progressively discard
+ * ONLY old advisory observations. Never remove uncertain mutations or their
+ * resolutions, and never claim an oversized safety journal was persisted.
+ */
+export function compactReturnJournalToBudget(journal: any): any {
+  const profiles = [
+    TRANSPORT_HISTORY_LIMITS,
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 5 },
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 4 },
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 3, flightHistoryAnchorsPerAircraft: 2, reviewEntriesPerAircraftOrigin: 3, holdObservationsPerAircraft: 8, supplyObservationsPerKind: 32, uiHealthObservations: 32 },
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 2, flightHistoryAnchorsPerAircraft: 1, reviewEntriesPerAircraftOrigin: 2, holdObservationsPerAircraft: 4, supplyObservationsPerKind: 16, uiHealthObservations: 16 },
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 1, flightHistoryAnchorsPerAircraft: 1, reviewEntriesPerAircraftOrigin: 1, holdObservationsPerAircraft: 2, supplyObservationsPerKind: 8, uiHealthObservations: 8 },
+    { ...TRANSPORT_HISTORY_LIMITS, departuresPerAircraft: 0, flightHistoryAnchorsPerAircraft: 0, reviewEntriesPerAircraftOrigin: 0, holdObservationsPerAircraft: 0, supplyObservationsPerKind: 0, uiHealthObservations: 0 }
+  ];
+  for (const profile of profiles) {
+    const compacted = compactReturnJournalForTransport(journal, profile);
+    if (Buffer.byteLength(JSON.stringify(compacted) + '\n') <= MAX_BYTES) return compacted;
+  }
+  throw new Error('STATE_TOO_LARGE');
 }
 export interface StateOptions { repository: string; scope: string; directory: string; token: string }
 type Fetcher = typeof fetch;
@@ -207,7 +229,7 @@ export class GitHubReturnState {
     if (!prefix(original.entries,current.entries)||!prefix(original.events,current.events)||!prefix(original.supplyObservations,current.supplyObservations)||!prefix(original.holdObservations,current.holdObservations)||!prefix(original.uiHealthObservations,current.uiHealthObservations)) throw new Error('STATE_NOT_APPEND_ONLY');
     const originalEvents=original.events||[],currentEvents=current.events||[];
     if(currentEvents.length<originalEvents.length||originalEvents.some((e,i)=>canonical(e)!==canonical(currentEvents[i])))throw new Error('STATE_NOT_APPEND_ONLY');
-    const compacted = this.parse(canonical(compactReturnJournalForTransport(current)));
+    const compacted = this.parse(canonical(compactReturnJournalToBudget(current)));
     if (canonical(original) === canonical(current) && canonical(compacted) === canonical(current)) return 'unchanged';
     const content = JSON.stringify(compacted) + '\n';
     if (Buffer.byteLength(content) > MAX_BYTES) throw new Error('STATE_TOO_LARGE');
@@ -220,7 +242,7 @@ export class GitHubReturnState {
       // One bounded reconciliation retry is safe because both sides must still be strict append-only extensions of the restored baseline.
       const remote=await this.readRemoteState();
       const merged=this.mergeAppendOnly(original,current,remote.data);
-      const compactedMerged=this.parse(canonical(compactReturnJournalForTransport(merged)));
+      const compactedMerged=this.parse(canonical(compactReturnJournalToBudget(merged)));
       const mergedContent=JSON.stringify(compactedMerged)+'\n';
       if(Buffer.byteLength(mergedContent)>MAX_BYTES)throw new Error('STATE_TOO_LARGE');
       await this.api('PUT',{branch:BRANCH,sha:remote.sha,message:'chore: reconcile compacted return journal [skip ci]',content:Buffer.from(mergedContent).toString('base64')});
