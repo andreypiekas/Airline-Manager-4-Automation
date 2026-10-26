@@ -102,7 +102,7 @@ test('single current ready aircraft can be fully read and handler-verified witho
         '<button id="routeViewGround_unground">Ground</button>'+
         '<div class="col-5"><span class="l-text">BBB</span></div><div class="col-5"><span class="l-text">AAA</span></div>'+
         '<div id="seat-layout">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?0:100)+'</div>').join('')+
-          '<button onclick="ticketPriceSuggest(1,2,3,this,4);">Auto</button></div>'+
+          '<button onclick="ticketPriceSuggest(1,2,3,this,4);">Auto</button><input id="eTicket" value="100"/><input id="bTicket" value="50"/><input id="fTicket" value="25"/></div>'+
         '<div id="list-demand">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?'0/0':'90/1000')+'</div>').join('')+'</div>';
     };
   });
