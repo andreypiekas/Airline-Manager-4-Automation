@@ -100,6 +100,24 @@ export function hasDepartureBudgetStarvation(entries:ReadonlyArray<{status:strin
   ));
 }
 
+/** A previously verified ready/demand-qualified fleet may become stale before dispatch.
+ * If a fresh full rescan loses ALL ready targets, zero evaluated is not a
+ * verified no-demand cycle. Preserve every identity gate and fail operationally.
+ * This is reporting only: it never authorizes a departure or merges snapshots.
+ */
+export function hasUnreconciledReadyFleetDrift(
+  previouslySufficient:number|undefined,
+  previouslyReady:number|undefined,
+  fullFleetScans:number,
+  evaluated:number,
+  departed:number
+):boolean {
+  return Number.isSafeInteger(previouslySufficient)&&previouslySufficient!>0 &&
+    Number.isSafeInteger(previouslyReady)&&previouslyReady!>0 &&
+    Number.isSafeInteger(fullFleetScans)&&fullFleetScans>0 &&
+    evaluated===0&&departed===0;
+}
+
 /** A skipped production departure phase with observed sufficient demand is operationally incomplete. */
 export function isSkippedDeparturePhaseFailure(enabled:boolean,allowed:boolean,sufficientDemand:number):boolean {
   return enabled && !allowed && Number.isSafeInteger(sufficientDemand) && sufficientDemand > 0;
