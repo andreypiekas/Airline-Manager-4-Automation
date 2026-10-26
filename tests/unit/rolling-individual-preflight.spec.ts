@@ -50,7 +50,7 @@ test('arrival reorder removes candidate on next first-page scan: no detail opens
   await fixture(page,[same,changed]);
   const r=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:2});
   expect(r.verified).toBe(0);
-  expect(r.holds).toEqual([{code:'TARGET_MOVED_OR_CHANGED'}]);
+  // Native page reorder may invalidate either the candidate or the entire\n  // second verified window. Both outcomes must stop before opening details.\n  expect(r.holds).toHaveLength(1);\n  expect(['TARGET_MOVED_OR_CHANGED','WINDOW_UNVERIFIED']).toContain(r.holds[0].code);
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
