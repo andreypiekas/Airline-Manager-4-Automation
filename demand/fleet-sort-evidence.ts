@@ -41,7 +41,7 @@ export async function inspectFleetSortEvidence(page: Page): Promise<FleetSortEvi
       const nextSort: 'EMPTY'|'NONEMPTY'|'UNVERIFIED'|'ABSENT'=next
         ? nextMatch ? (nextMatch[1]?'NONEMPTY':'EMPTY') : 'UNVERIFIED'
         : 'ABSENT';
-      const supportedOption=(value:string)=>/^[A-Za-z0-9_-]{1,32}$/.test(value)?value:'REDACTED';
+      const supportedOption=(value:string)=>/^(?:reg(?:istration)?|aircraft(?:_id)?|route(?:_id)?|id|name|model|status|arrival|departure|time|remaining|hours|origin|destination|range|fuel|price|date|asc|desc|sort)$/i.test(value)?value:'REDACTED';
       const controls=Array.from(root.querySelectorAll<HTMLElement>(
         'select,button,a,input[type="search"],input[type="text"]'
       )).filter(el=>!el.closest('[id^="routeMainList"]') && !el.closest('.pagination'));
