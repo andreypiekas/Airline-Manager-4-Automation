@@ -165,6 +165,60 @@ test('high-volume state saves below 900 KB without dropping uncertain mutations'
     (e:any)=>saved.events.some((d:any)=>d.eventId===e.departureEventId))).toBe(true);
 });
 
+test('large 180-aircraft journal adapts advisory history below the transport cap without losing uncertain events',async()=>{
+  const remote=server(),client=new GitHubReturnState(options(),remote.request);
+  await client.restore();
+  const now='2026-01-01T00:00:00.000Z',later='2026-01-01T01:00:00.000Z';
+  const data:any={...empty(),events:[],supplyObservations:[],holdObservations:[],uiHealthObservations:[]};
+  for(let i=0;i<180;i++){
+    const aircraftId=String(i),registration='AC-'+i;
+    for(let k=0;k<8;k++){
+      const eventId='dep_'+i+'_'+k;
+      data.events.push({eventId,type:'departure',aircraftId,registration,routeId:'10',
+        from:'AAA',to:'BBB',observedAt:now,result:'departed',
+        demand:{availableBefore:{Y:100,J:0,F:0},possiblePassengers:{Y:90,J:0,F:0},occupancyPercentage:90},
+        actualOnboard:{Y:90,J:0,F:0}});
+      if(k<6)data.events.push({eventId:'arr_'+i+'_'+k,type:'arrival-observed',
+        departureEventId:eventId,aircraftId,registration,routeId:'10',from:'AAA',to:'BBB',
+        departedAt:now,observedAt:later,result:'arrived_observed'});
+    }
+    for(let k=0;k<3;k++)data.events.push({eventId:'hist_'+i+'_'+k,type:'flight-history-anchor',
+      aircraftId,registration,observedAt:now,cycles:k,rows:[{relativeTime:'1 hour ago',
+        from:'AAA',to:'BBB',co2Quotas:1,onboard:{Y:1,J:0,F:0},fuelLbs:2,revenue:3}]});
+    for(let k=0;k<10;k++)data.holdObservations.push({eventId:'hold_'+i+'_'+k,
+      type:'demand-hold',aircraftId,routeId:'10',observedAt:now,
+      occupancyPercentage:10,reason:'hold_insufficient'});
+  }
+  const uncertain={eventId:'uncertain_must_survive',type:'departure-uncertain',
+    aircraftId:'1',registration:'AC-1',routeId:'10',from:'AAA',to:'BBB',
+    observedAt:now,result:'outcome_unknown',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:TEST',sourceRunId:'1051'};
+  data.events.push(uncertain);
+  expect(Buffer.byteLength(JSON.stringify(compactReturnJournalForTransport(data))+'\\n')).toBeGreaterThan(900000);
+  await writeFile(join(options().directory,'return-journal.json'),JSON.stringify(data));
+  await expect(client.save()).resolves.toBe('saved');
+  const saved=remote.data as any;
+  expect(Buffer.byteLength(JSON.stringify(saved)+'\\n')).toBeLessThanOrEqual(900000);
+  expect(saved.events).toContainEqual(uncertain);
+  expect(saved.events.filter((e:any)=>e.type==='departure').length).toBeLessThan(180*6);
+  expect(saved.events.filter((e:any)=>e.type==='departure').length).toBeGreaterThan(0);
+  expect(saved.events.filter((e:any)=>e.type==='arrival-observed').every(
+    (e:any)=>saved.events.some((d:any)=>d.eventId===e.departureEventId))).toBe(true);
+});
+
+test('safety-only journal above the cap fails closed without a remote write',async()=>{
+  const remote=server(),client=new GitHubReturnState(options(),remote.request);
+  await client.restore();
+  const now='2026-01-01T00:00:00.000Z';
+  const data:any={...empty(),events:Array.from({length:6000},(_,i)=>({
+    eventId:'unc_'+i,type:'departure-uncertain',aircraftId:String(i),
+    registration:'AC-'+i,routeId:'10',from:'AAA',to:'BBB',observedAt:now,
+    result:'outcome_unknown',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:TEST',sourceRunId:'1051'
+  }))};
+  await writeFile(join(options().directory,'return-journal.json'),JSON.stringify(data));
+  await expect(client.save()).rejects.toThrow('STATE_TOO_LARGE');
+  expect(remote.calls.filter(c=>c.method==='PUT')).toHaveLength(0);
+});
+
 test('saved history cannot be removed or edited',async()=>{
   const remote=server(),first=new GitHubReturnState(options(),remote.request);await first.restore();await append(options().directory);await first.save();
   const client=new GitHubReturnState(options('runner-2'),remote.request);await client.restore();await writeFile(join(options('runner-2').directory,'return-journal.json'),JSON.stringify(empty()));
