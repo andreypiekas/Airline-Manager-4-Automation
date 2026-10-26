@@ -45,6 +45,38 @@ test('inflight-only window is safe with no scans of other pages or any departure
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
   expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
 });
+test('transient missing native Routes heading gets one fresh UI retry without departure',async({page})=>{
+  await fixture(page,[[plane(1,false)],[plane(1,false)]],1);
+  await page.evaluate(()=>{
+    const w=window as any,open=w.menuFleet;
+    w.menuFleet=()=>{
+      open();
+      if(w.opens===1)document.querySelector('#routesContainer button')?.remove();
+    };
+  });
+  const r=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:1});
+  expect(r).toMatchObject({window:'STABLE',routeTotal:1,inspected:0,verified:0,readyCandidates:0,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+test('persistently missing Routes heading fails closed after one UI retry',async({page})=>{
+  await fixture(page,[[plane(1,true)]],1);
+  await page.evaluate(()=>{
+    const w=window as any,open=w.menuFleet;
+    w.menuFleet=()=>{
+      open();
+      document.querySelector('#routesContainer button')?.remove();
+    };
+  });
+  const r=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:1});
+  expect(r).toMatchObject({window:'UNVERIFIED',routeTotal:null,verified:0,mutationAuthorized:false});
+  expect(r.holds).toEqual([{code:'WINDOW_UNVERIFIED'}]);
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
 test('arrival reorder removes candidate on next first-page scan: no detail opens',async({page})=>{
   const same=[plane(1,true),plane(2,false)];
   const changed=[plane(3,true),plane(2,false)];
