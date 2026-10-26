@@ -12,6 +12,7 @@ import { readFlightHistoryEvidence } from '../optimization/flight-history';
 import { routePageLimit, openFleetList, findFleetRoute } from './navigation';
 import { GeneralUtils } from '../utils/general.utils';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
+import { inspectFleetSortEvidence } from './fleet-sort-evidence';
 
 interface RouteCard {
   routeId: string; aircraftId: string; registration: string; routeLabel: string;
@@ -144,6 +145,14 @@ export class DemandReader {
         stage='PAGE_ROWS';
         const rows = this.page.locator('#routesContainer [id^="routeMainList"]');
         if (result.expectedRoutes > 0) await rows.first().waitFor({ state: 'visible', timeout: this.timeout });
+        if (pageIndex===0) {
+          // The game may vary the native order between requests. Observe
+          // native sort/search controls once, without clicking or persisting
+          // aircraft IDs. This evidence may allow a later verified stable
+          // ordering, but NEVER changes dispatch authorization here.
+          const evidence=await inspectFleetSortEvidence(this.page);
+          console.log('[FleetSortEvidence] '+JSON.stringify(evidence));
+        }
         if(pageIndex===0 && result.expectedRoutes>nativePageSize){
           const initialNext=this.page.locator('#routesContainer .pagination').getByRole('link',{name:'Next',exact:true});
           const isNativeFirst=await initialNext.count()===1 &&
