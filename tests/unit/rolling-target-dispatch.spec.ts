@@ -60,7 +60,7 @@ test('same 1/132 collection is blocked unless individual mode explicitly enabled
 test('missing or mismatched live individual provenance cannot allow any click',async()=>{
  for(const inventory of [
    {...window(),observationScope:undefined},
-   {...window(),windowReadyCandidates:2},
+   {...window(),windowReadyCandidates:0},
    {...window(),aircraft:[{...ready(),aircraftId:'invalid'}]},
    {...window(),aircraft:[{...ready(),issue:'UNVERIFIED'}]}
  ] as CollectionResult[]){
@@ -96,4 +96,14 @@ test('duplicate route identity across individual evidence is held before any cli
  const r=await run({inventory:window([same,second]),fuel:25000});
  expect(r.clicks).toBe(0);
  expect(r.report?.entries.every(e=>e.reason==='INITIAL_IDENTITY_OR_ROUTE_DUPLICATE')).toBe(true);
+});
+
+test('one changed candidate does not veto a separate, fully verified aircraft',async()=>{
+ const a=window();
+ // The other ready aircraft was rejected safely during read-only preflight.
+ a.windowReadyCandidates=2;
+ const r=await run({inventory:a,fuel:25000});
+ expect(r.report?.summary.departed).toBe(1);
+ expect(r.clicks).toBe(1);
+ expect(a.complete).toBe(false);
 });
