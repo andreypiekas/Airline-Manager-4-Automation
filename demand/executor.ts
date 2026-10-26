@@ -153,7 +153,8 @@ export class IndividualDepartureExecutor {
       initial.complete===false && initial.observationScope==='native-individual-first-page' &&
       initial.expectedRoutes!==null && Number.isSafeInteger(initial.expectedRoutes) &&
       initial.expectedRoutes>=initial.aircraft.length &&
-      initial.windowReadyCandidates===initial.aircraft.length &&
+      initial.windowReadyCandidates!==undefined &&
+      initial.windowReadyCandidates>=initial.aircraft.length &&
       initial.aircraft.length<=20 &&
       initial.aircraft.every(a=>a.state==='ready'&&!a.issue&&
         /^[1-9]\\d*$/.test(a.aircraftId)&&/^[1-9]\\d*$/.test(a.routeId)&&
