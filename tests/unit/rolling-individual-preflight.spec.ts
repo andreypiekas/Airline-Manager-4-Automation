@@ -82,3 +82,34 @@ test('target with an ambiguous route card cannot be promoted to a valid individu
   expect(r.verified).toBe(0);
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
 });
+
+test('single current ready aircraft can be fully read and handler-verified without Depart click',async({page})=>{
+  await fixture(page,[[plane(1,true)]],1);
+  await page.evaluate(()=>{
+    const w=window as any;
+    w.Ajax=(url:string)=>{
+      if(url!=='fleet_details.php?id=2001')throw new Error('UNEXPECTED_NETWORK_ACTION');
+      w.detailsOpened++;
+      const details=document.getElementById('detailsAction')!;
+      details.style.display='block';
+      details.innerHTML='<div id="route-name"><span class="glyphicons-chevron-left" onclick="document.getElementById(\'detailsAction\').style.display=\'none\';document.getElementById(\'routeAction\').style.display=\'block\'">Back</span></div>'+
+        '<span id="ff-name">TEST-1</span>'+
+        '<button id="routeViewDepart" onclick="$(\'#routeAction\').hide();hideFlightInfo();$(\'#routeViewDepart\').hide();Ajax(\'route_depart.php?id=1001&ref=list&costIndex=10\',\'routeAction\',this);">Depart</button>'+
+        '<button id="routeViewGround_unground">Ground</button>'+
+        '<div class="col-5"><span class="l-text">BBB</span></div><div class="col-5"><span class="l-text">AAA</span></div>'+
+        '<div id="seat-layout">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?0:100)+'</div>').join('')+
+          '<button onclick="ticketPriceSuggest(1,2,3,this,4);">Auto</button></div>'+
+        '<div id="list-demand">'+['economy','business','first'].map((c,i)=>'<div><img src="assets/'+c+'_seat.png">'+(i?'0/0':'90/1000')+'</div>').join('')+'</div>';
+    };
+  });
+  const report=await inspectIndividualFirstPage(page,{timeout:3000,maxCandidates:1});
+  expect(report.mutationAuthorized).toBe(false);
+  expect(report.verified).toBe(1);
+  expect(report.verifiedAircraft[0]).toMatchObject({
+    aircraftId:'2001',routeId:'1001',registration:'TEST-1',
+    state:'ready',capacity:{Y:100,J:0,F:0}
+  });
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+  expect(await page.locator('#routeAction').isVisible()).toBe(true);
+});
