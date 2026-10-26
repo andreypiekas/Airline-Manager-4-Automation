@@ -388,7 +388,42 @@ test('All Operations', async ({ page }) => {
     if (!fleetOpened) {
       throw new Error('[Demand] Fleet/Routes nao abriu apos recuperacao da interface.');
     }
-    const simulation = await runDemandSimulationDetailed(page, demandConfig, {}, {collectionRetryDeadlineEpochMs:phaseDeadlineEpochMs});
+    let simulation: Awaited<ReturnType<typeof runDemandSimulationDetailed>>;
+    try {
+      simulation=await runDemandSimulationDetailed(
+        page,demandConfig,{}, {collectionRetryDeadlineEpochMs:phaseDeadlineEpochMs}
+      );
+    }catch(error){
+      // When arrivals reorder native page offsets, Fleet 131/132 can fail
+      // indefinitely. Keep the global collector failed: use a SEPARATE
+      // per-aircraft validation path for native first-page ready targets.
+      // No fabricated CollectionResult.complete, route optimization or
+      // global pricing based on a partial inventory is ever attempted.
+      const incomplete=error instanceof Error&&
+        error.message==='[Demand] Coleta incompleta. Relatorio salvo; nenhuma decolagem autorizada.';
+      if(!incomplete||demandConfig.dryRun||
+         !moduleEnabled('ENABLE_DEPART')||
+         !moduleEnabled('ENABLE_ROLLING_INDIVIDUAL_FALLBACK')||
+         !phaseAllowed('rolling-individual-departures',phaseBudgetsMs.departures))
+        throw error;
+      console.warn('[RollingDispatchFallback] '+JSON.stringify({
+        status:'START_AFTER_GLOBAL_COLLECTION_INCOMPLETE',
+        source:'NATIVE_INDIVIDUAL_FIRST_PAGE',
+        globalComplete:false,manualProductionTrigger:false
+      }));
+      const dispatch=await runDemandExecution(page,demandConfig,{
+        ...process.env,
+        DEMAND_ROLLING_INDIVIDUAL_DISPATCH:'true',
+        CAMPAIGN_GATE_REQUIRED:campaignRequired?'true':'false',
+        CAMPAIGN_GATE_VERIFIED:campaignVerifiedForDeparture?'true':'false',
+        DEMAND_EXECUTION_MUTATION_DEADLINE_EPOCH_MS:String(departureMutationDeadlineEpochMs)
+      },'test-results/demand');
+      console.warn('[RollingDispatchFallback] '+JSON.stringify({
+        status:'COMPLETED_PARTIAL_FIRST_PAGE',
+        ...dispatch.summary,globalComplete:false
+      }));
+      return; // No global operations may consume a partial inventory.
+    }
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;
     if (process.env.AUTOMATION_MODE === 'semi-automatic') {
