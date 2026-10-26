@@ -106,6 +106,7 @@ test('single current ready aircraft can be fully read and handler-verified witho
     };
   });
   const report=await inspectIndividualFirstPage(page,{timeout:3000,maxCandidates:1});
+  console.warn('[IndividualOfflinePreflight] '+JSON.stringify({window:report.window,inspected:report.inspected,ready:report.readyCandidates,verified:report.verified,holds:report.holds,detailsOpened:await page.evaluate(()=>(window as any).detailsOpened)}));
   expect(report.mutationAuthorized).toBe(false);
   expect(report.verified).toBe(1);
   expect(report.verifiedAircraft[0]).toMatchObject({
