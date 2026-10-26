@@ -157,7 +157,7 @@ export class IndividualDepartureExecutor {
       initial.windowReadyCandidates>=initial.aircraft.length &&
       initial.aircraft.length<=20 &&
       initial.aircraft.every(a=>a.state==='ready'&&!a.issue&&
-        /^[1-9]\\d*$/.test(a.aircraftId)&&/^[1-9]\\d*$/.test(a.routeId)&&
+        /^[1-9]\d*$/.test(a.aircraftId)&&/^[1-9]\d*$/.test(a.routeId)&&
         !!a.registration.trim() && !!a.capacity && !!a.remaining && !!a.dailyTotal &&
         validDemandCabins(a.capacity)&&validDemandCabins(a.remaining)&&
         validDemandCabins(a.dailyTotal)&&
