@@ -79,7 +79,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
     if(this.rollingIndividualMode){
       const pilot=await inspectIndividualFirstPage(this.page,{
         timeout:Math.min(this.timeout,5000),
-        maxCandidates:8,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
+        maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
       });
       const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
