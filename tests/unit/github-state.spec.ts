@@ -193,11 +193,11 @@ test('large 180-aircraft journal adapts advisory history below the transport cap
     aircraftId:'1',registration:'AC-1',routeId:'10',from:'AAA',to:'BBB',
     observedAt:now,result:'outcome_unknown',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:TEST',sourceRunId:'1051'};
   data.events.push(uncertain);
-  expect(Buffer.byteLength(JSON.stringify(compactReturnJournalForTransport(data))+'\\n')).toBeGreaterThan(900000);
+  expect(Buffer.byteLength(JSON.stringify(compactReturnJournalForTransport(data))+'\n')).toBeGreaterThan(900000);
   await writeFile(join(options().directory,'return-journal.json'),JSON.stringify(data));
   await expect(client.save()).resolves.toBe('saved');
   const saved=remote.data as any;
-  expect(Buffer.byteLength(JSON.stringify(saved)+'\\n')).toBeLessThanOrEqual(900000);
+  expect(Buffer.byteLength(JSON.stringify(saved)+'\n')).toBeLessThanOrEqual(900000);
   expect(saved.events).toContainEqual(uncertain);
   expect(saved.events.filter((e:any)=>e.type==='departure').length).toBeLessThan(180*6);
   expect(saved.events.filter((e:any)=>e.type==='departure').length).toBeGreaterThan(0);
