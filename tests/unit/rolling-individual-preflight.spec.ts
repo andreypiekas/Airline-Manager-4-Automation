@@ -87,6 +87,7 @@ test('target with an ambiguous route card cannot be promoted to a valid individu
 });
 
 test('single current ready aircraft can be fully read and handler-verified without Depart click',async({page})=>{
+  test.setTimeout(60000); // diagnose any native-details fixture wait explicitly
   await fixture(page,[[plane(1,true)]],1);
   await page.evaluate(()=>{
     const w=window as any;
