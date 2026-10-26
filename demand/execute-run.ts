@@ -6,6 +6,11 @@ export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):
  * solely because the fuel requirement could not be independently established.
  * Retain the safe HOLD and all persisted checkpoints; report an operational failure.
  */
+export function hasRollingFuelHoldingUnavailable(report:ExecutionReport):boolean {
+  return report.entries.some(e=>e.status==='held'&&
+    e.reason==='FUEL_HOLDING_UNVERIFIED_IN_ROLLING_MODE');
+}
+
 export function hasUnverifiedFuelDeparture(report:ExecutionReport):boolean {
   return report.entries.some(e=>e.status==='held'&&e.reason==='FUEL_REQUIREMENT_UNVERIFIED'&&
     e.demand?.decision==='would_depart');
@@ -239,6 +244,14 @@ export async function runDemandExecution(
       message:'Relatorio persistido; acoes confirmadas nao serao repetidas nesta run.'
     }));
     throw Error('DEMAND_EXECUTION_INCOMPLETE_TIME_BUDGET');
+  }
+  if(settings.rollingIndividualMode&&hasRollingFuelHoldingUnavailable(report)){
+    console.error('[RollingDispatch] '+JSON.stringify({
+      status:'INCOMPLETE_FUEL_HOLDING_UNVERIFIED',
+      held:report.entries.filter(e=>e.reason==='FUEL_HOLDING_UNVERIFIED_IN_ROLLING_MODE').length,
+      globalComplete:false
+    }));
+    throw Error('ROLLING_INDIVIDUAL_FUEL_HOLDING_UNVERIFIED');
   }
   if(!settings.dryRun&&hasUnverifiedFuelDeparture(report)){
     const heldByFuel=report.entries.filter(e=>e.status==='held'&&
