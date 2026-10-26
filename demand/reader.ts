@@ -510,6 +510,86 @@ export class DemandReader {
     return result;
   }
 
+  /**
+   * Build a fresh identity-and-demand observation for ONE ready aircraft on
+   * the currently rendered native Fleet page. This does NOT assert that all
+   * Routes(N) were collected: arrivals/maintenance may reorder other pages.
+   *
+   * Every field used for later departure comes from the same live card and
+   * its own native details; no historical aircraft, guessed route ID, global
+   * partial inventory, or cached demand is promoted to dispatch authority.
+   * This is a read-only preflight, not a permission to click Depart.
+   */
+  async readReadyCandidateOnVisiblePage(
+    expected:{aircraftId:string;routeId:string;registration:string}
+  ):Promise<AircraftSnapshot>{
+    if(!/^[1-9]\\d*$/.test(expected.aircraftId)||
+       !/^[1-9]\\d*$/.test(expected.routeId)||
+       !expected.registration.trim())throw Error('ROLLING_TARGET_IDENTITY_INVALID');
+    await assertNoInteractiveChallenge(this.page,'rolling-target:before');
+    const heading=this.page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/});
+    if(await heading.count()!==1)throw Error('ROLLING_FLEET_COUNT_UNVERIFIED');
+    const totalRaw=(await heading.innerText({timeout:this.timeout})).trim();
+    const match=/^Routes\\s*\\((\\d+)\\)$/.exec(totalRaw);
+    if(!match||!Number.isSafeInteger(Number(match[1]))||Number(match[1])<=0)
+      throw Error('ROLLING_FLEET_COUNT_UNVERIFIED');
+    const root=this.page.locator('#routesContainer');
+    if(await root.count()!==1||!await root.isVisible())throw Error('ROLLING_FLEET_LIST_UNAVAILABLE');
+    const cards=await root.locator('[id^="routeMainList"]').evaluateAll(es=>
+      es.filter(e=>!!e.getClientRects().length).map(e=>({
+        routeId:e.id.replace(/^routeMainList/,''),
+        aircraftIds:Array.from(e.querySelectorAll('a')).map(a=>
+          (a.getAttribute('onclick')||'').replace(/\\s/g,'')
+            .match(/^playSound\\('neutral_click'\\);Ajax\\('fleet_details\\.php\\?id=([1-9]\\d*)','detailsAction'\\);if\\(intro==0\\)\\{\\$\\('#routeAction'\\)\\.hide\\(\\);\\}$/)?.[1]).filter(Boolean),
+        registrationNodes:Array.from(e.querySelectorAll('[id^="acRegList"]')).map(n=>({
+          id:n.id,text:n.textContent?.trim()||''
+        })),
+        routeLabels:Array.from(e.querySelectorAll('span.s-text')).map(n=>n.textContent?.trim()||'')
+          .filter(x=>/^[A-Z0-9]{3}\\s*-\\s*[A-Z0-9]{3}$/.test(x)),
+        pax:e.classList.contains('classPAX'),
+        ready:e.classList.contains('listDepartable'),
+        inflight:/Onboard\\s*:/.test((e as HTMLElement).innerText),
+        depart:(()=>{
+          const b=e.querySelector('#listDepart'+e.id.replace(/^routeMainList/,''));
+          return !!b&&!!b.getClientRects().length&&!(b as HTMLButtonElement).disabled;
+        })()
+      })));
+    if(!cards.length||cards.length>20||
+       new Set(cards.map(c=>c.routeId)).size!==cards.length||
+       cards.some(c=>c.aircraftIds.length!==1||c.registrationNodes.length!==1||
+         c.registrationNodes[0].id!=='acRegList'+c.aircraftIds[0]||
+         !c.registrationNodes[0].text||
+         !/^[1-9]\\d*$/.test(c.routeId))||
+       new Set(cards.map(c=>c.aircraftIds[0])).size!==cards.length)
+      throw Error('ROLLING_WINDOW_IDENTITY_UNVERIFIED');
+    const matches=cards.filter(c=>c.routeId===expected.routeId&&
+      c.aircraftIds[0]===expected.aircraftId&&
+      c.registrationNodes[0].text===expected.registration);
+    if(matches.length!==1)throw Error('ROLLING_TARGET_MOVED_OR_CHANGED');
+    const card=matches[0];
+    if(!card.pax||!card.ready||card.inflight||!card.depart||
+       card.routeLabels.length!==1)throw Error('ROLLING_TARGET_NOT_READY');
+    const codes=card.routeLabels[0].split(/\\s*-\\s*/);
+    if(codes.length!==2||codes[0]===codes[1])throw Error('ROLLING_TARGET_ROUTE_UNVERIFIED');
+    const item:AircraftSnapshot={
+      aircraftId:expected.aircraftId,routeId:expected.routeId,
+      registration:expected.registration,routeLabel:card.routeLabels[0],
+      from:codes[0],to:codes[1],state:'unavailable',
+      capacity:null,remaining:null,dailyTotal:null,observedAt:new Date().toISOString()
+    };
+    await this.readDetails({
+      routeId:item.routeId,aircraftId:item.aircraftId,registration:item.registration,
+      routeLabel:item.routeLabel,from:item.from,to:item.to,
+      ready:true,inflight:false,pax:true,onboardText:''
+    },item);
+    if(item.issue||item.state!=='ready'||item.registration!==expected.registration||
+       !item.capacity||!item.remaining||!item.dailyTotal||
+       !/^[A-Z0-9]{3}$/.test(item.from)||!/^[A-Z0-9]{3}$/.test(item.to)||
+       [item.from,item.to].sort().join(':')!==[codes[0],codes[1]].sort().join(':'))
+      throw Error('ROLLING_TARGET_DETAILS_UNVERIFIED');
+    return item;
+  }
+
   /** Re-read one known aircraft from the currently visible route page.
    * Used for fresh pre-departure evidence and targeted post-click confirmation.
    */
