@@ -25,6 +25,9 @@ export async function inspectFleetSortEvidence(page: Page): Promise<FleetSortEvi
     nativeNextSort:'UNVERIFIED',candidates:[],mutationAuthorized:false
   };
   try {
+    // Locator.evaluate waits for an absent element until the global test
+    // timeout. Detect a missing root immediately, without even polling.
+    if(await page.locator('#routeAction').count()!==1)return empty;
     // One passive DOM read. No click, no JavaScript injection, no fetch,
     // no session credentials, no user text, no raw route/aircraft identity.
     const observed = await page.locator('#routeAction').evaluate(root=>{
