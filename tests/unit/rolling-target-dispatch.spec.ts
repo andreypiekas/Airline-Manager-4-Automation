@@ -66,7 +66,8 @@ test('missing or mismatched live individual provenance cannot allow any click',a
  ] as CollectionResult[]){
    const r=await run({inventory,fuel:25000});
    expect(r.clicks).toBe(0);
-   expect(r.report?.entries.every(e=>e.status==='held')).toBe(true);
+   const last=r.report??r.transitions.at(-1);
+   expect(last?.entries.every(e=>e.status==='held')).toBe(true);
  }
 });
 test('rolling mode holds when fuel balance or exact fuel requirement is unverified',async()=>{
