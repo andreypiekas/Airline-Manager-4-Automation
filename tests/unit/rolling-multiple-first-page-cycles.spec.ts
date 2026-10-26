@@ -90,3 +90,38 @@ test('only confirmed flights may cause a new rolling pass',async()=>{
   expect(r.clicks).toBe(0);
   expect(r.collects).toBe(1);
 });
+
+test('demand pool reservations cannot be reset by a later page-one arrival',async()=>{
+  const a=aircraft('2001','GRU','XAP'),b=aircraft('2002','XAP','GRU');
+  const r=await execute({windows:[native([a]),native([b])],fuel:30000});
+  expect(r.clicks).toBe(1);
+  expect(r.report.summary).toMatchObject({departed:1,unknown:0});
+  expect(r.report.entries[1]?.status).toBe('held');
+  expect(r.collects).toBe(2);
+});
+test('a failed subsequent read does not erase the confirmed departure checkpoint',async()=>{
+  const a=aircraft('2001');
+  const completed:ExecutionReport[]=[];
+  let reads=0,clicks=0;
+  const port:DeparturePort={
+    collect:async()=>{
+      reads++;
+      if(reads>1)throw Error('SYNTHETIC_NEXT_WINDOW_FAILURE');
+      return native([a]);
+    },
+    prepare:async x=>({...x,observedAt:new Date().toISOString()}),
+    depart:async()=>{clicks++;},
+    confirm:async x=>({...x,state:'inflight',onboard:{Y:80,J:0,F:0},
+      timing:flightCountdownObservation(x.aircraftId,x.routeId,'01:00:00',new Date().toISOString())})
+  };
+  await expect(new IndividualDepartureExecutor(port,readDemandConfig({}),{
+    rollingIndividualMode:true,dryRun:false,maxDepartures:8,
+    campaignVerified:true,fuelHoldingLbsAtRunStart:24000,
+    currentRouteFuelEvidence:new Map([[a.aircraftId,quote(a)]])
+  },async result=>{completed.push(JSON.parse(JSON.stringify(result)));}).run())
+    .rejects.toThrow('ROLLING_NEXT_WINDOW_COLLECTION_FAILED');
+  expect(clicks).toBe(1);
+  expect(reads).toBe(2);
+  expect(completed.at(-1)?.entries[0]?.status).toBe('departed');
+  expect(completed.at(-1)?.halted).toBe(true);
+});
