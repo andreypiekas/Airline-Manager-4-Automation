@@ -20,6 +20,8 @@ export interface DeparturePort {
 export interface ExecutionSettings {
   dryRun: boolean;
   maxDepartures: number | 'all';
+  /** True only for fresh, target-by-target Fleet validation. No global-complete claim. */
+  rollingIndividualMode?: boolean;
   /** Absolute deadline after which no new departure mutation may start. */
   mutationDeadlineEpochMs?: number;
   blockedDepartureKeys?: ReadonlySet<string>;
@@ -147,6 +149,27 @@ export class IndividualDepartureExecutor {
     if(this.settings.fuelHoldingLbsAtRunStart!==undefined&&!fuelTrackingComplete)throw new Error('EXECUTION_FUEL_BUDGET_INVALID');
     let initial: CollectionResult;
     try { initial=await this.port.collect(); } catch { report.halted=true;await persist();throw new Error('EXECUTION_INITIAL_COLLECTION_FAILED'); }
+    const rollingWindowVerified=this.settings.rollingIndividualMode===true &&
+      initial.complete===false && initial.observationScope==='native-individual-first-page' &&
+      initial.expectedRoutes!==null && Number.isSafeInteger(initial.expectedRoutes) &&
+      initial.expectedRoutes>=initial.aircraft.length &&
+      initial.windowReadyCandidates===initial.aircraft.length &&
+      initial.aircraft.length<=8 &&
+      initial.aircraft.every(a=>a.state==='ready'&&!a.issue&&
+        /^[1-9]\\d*$/.test(a.aircraftId)&&/^[1-9]\\d*$/.test(a.routeId)&&
+        !!a.registration.trim() && !!a.capacity && !!a.remaining && !!a.dailyTotal &&
+        validDemandCabins(a.capacity)&&validDemandCabins(a.remaining)&&
+        validDemandCabins(a.dailyTotal)&&
+        ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
+    if(this.settings.rollingIndividualMode){
+      console.log('[RollingDispatchCoverage] '+JSON.stringify({
+        scope:'FIRST_NATIVE_PAGE_ONLY',globalComplete:false,
+        individualVerified:rollingWindowVerified,
+        targets:initial.aircraft.length,
+        remainingUnassessed:initial.expectedRoutes===null?null:
+          Math.max(0,initial.expectedRoutes-initial.aircraft.length)
+      }));
+    }
     const aircraftCounts=new Map<string,number>(),routeCounts=new Map<string,number>();
     const poolRemaining=new Map<string,Cabins>(),poolTotals=new Map<string,Cabins>(),inconsistentPools=new Set<string>();
     for(const a of initial.aircraft){
@@ -180,7 +203,7 @@ export class IndividualDepartureExecutor {
       if(this.attemptedAircraft.has(expected.aircraftId)||this.attemptedRoutes.has(expected.routeId)){entry.reason='ALREADY_ATTEMPTED';continue;}
       if(this.settings.blockedDepartureKeys?.has(expected.aircraftId+':'+expected.routeId)){entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK';continue;}
       if(this.settings.maxDepartures!=='all' && this.attemptedAircraft.size>=this.settings.maxDepartures){entry.reason='EXECUTION_LIMIT';continue;}
-      if(!initial.complete){entry.reason='INITIAL_COLLECTION_INCOMPLETE';continue;}
+      if(!initial.complete&&!rollingWindowVerified){entry.reason='INITIAL_COLLECTION_INCOMPLETE';continue;}
       if((aircraftCounts.get(expected.aircraftId)||0)!==1||(routeCounts.get(expected.routeId)||0)!==1){
         entry.reason='INITIAL_IDENTITY_OR_ROUTE_DUPLICATE';continue;
       }
@@ -192,6 +215,11 @@ export class IndividualDepartureExecutor {
       // Hub/base resolution is required for route review/reroute, not for dispatch.
       // Any ready aircraft may proceed from any airport when the existing route,
       // native Depart control, fresh demand and all safety/resource gates are verified.
+      // Rolling execution cannot rely on an unknown supply stock.
+      if(this.settings.rollingIndividualMode&&
+        this.settings.fuelHoldingLbsAtRunStart===undefined){
+        entry.reason='FUEL_HOLDING_UNVERIFIED_IN_ROLLING_MODE';continue;
+      }
       if(!this.settings.dryRun&&this.settings.fuelHoldingLbsAtRunStart!==undefined&&
         !verifiedHistoricalFuelRequirement(expected)&&
         !verifiedCurrentRouteFuelRequirement(expected,fuelQuoteEvidence,this.demand.maxAgeSeconds)&&
@@ -322,6 +350,15 @@ export class IndividualDepartureExecutor {
         entry.status='outcome_unknown';entry.reason='NO_RETRY_AFTER_CLICK_ATTEMPT:'+code(error);report.halted=true;
       }
       await persist();
+    }
+    // A limited first-page observation never establishes fleet-wide idleness.
+    // Fail visibly rather than returning a misleading green 0-departure run
+    // if no aircraft on the current first page could be assessed.
+    if(this.settings.rollingIndividualMode&&
+       (!rollingWindowVerified||initial.aircraft.length===0)){
+      report.halted=true;
+      await persist();
+      throw Error('ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES');
     }
     report.completedAt=new Date().toISOString();await persist();return report;
   }
