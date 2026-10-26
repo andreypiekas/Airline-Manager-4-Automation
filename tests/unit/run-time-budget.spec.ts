@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -61,6 +61,21 @@ test('production skip with sufficient demand fails instead of silently appearing
   expect(isSkippedDeparturePhaseFailure(true,true,60)).toBe(false); // execution runs its own gates
   expect(isSkippedDeparturePhaseFailure(false,false,60)).toBe(false); // module deliberately disabled
   expect(isSkippedDeparturePhaseFailure(true,false,Number.NaN)).toBe(false); // invalid evidence never infers eligibility
+});
+
+test('run #1013: a complete rescan that loses all ten previously eligible targets cannot be green',()=>{
+  // Real #1013: first Routes(151) had ten qualified ready aircraft;
+  // Routes(150) required a fresh 282s scan that yielded zero evaluated.
+  expect(hasUnreconciledReadyFleetDrift(10,10,1,0,0)).toBe(true);
+  expect(hasUnreconciledReadyFleetDrift(10,10,2,0,0)).toBe(true);
+  // Normal zero-demand, no rescan, or any actually evaluated target is not this anomaly.
+  expect(hasUnreconciledReadyFleetDrift(0,10,1,0,0)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(10,0,1,0,0)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(10,10,0,0,0)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(10,10,1,1,0)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(10,10,1,1,1)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(undefined,10,1,0,0)).toBe(false);
+  expect(hasUnreconciledReadyFleetDrift(10,Number.NaN,1,0,0)).toBe(false);
 });
 
 test('run #966: optional pricing is skipped to preserve a verified departure window',()=>{
