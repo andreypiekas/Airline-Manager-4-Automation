@@ -24,7 +24,7 @@ import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { optimizationConfig } from '../optimization/report';
 import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
-import { hasDepartureBudgetStarvation } from '../utils/run-time-budget';
+import { hasDepartureBudgetStarvation,hasUnreconciledReadyFleetDrift } from '../utils/run-time-budget';
 import { DepartureTerminalCheckpoints } from './terminal-checkpoints';
 import {readPendingDeferredDispatchKeys,checkpointDeferredDispatchQueue} from '../optimization/deferred-dispatch';
 
@@ -56,6 +56,8 @@ export function executionEnvironment(config:DemandConfig,env:NodeJS.ProcessEnv=p
 export interface DemandExecutionPrerequisites {
   /** Fully verified Fleet inventory already collected in the same production run. */
   verifiedFleetSnapshot?:CollectionResult;
+  /** Number of demand-qualified ready aircraft in the earlier verified planning snapshot. */
+  plannedSufficientDemandCount?:number;
   postReroutePricingBlockedAircraftIds?:ReadonlySet<string>;
   currentRouteFuelEvidence?:ReadonlyMap<string,{
     aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -193,6 +195,25 @@ export async function runDemandExecution(
   // Green test status must not mask fleet-ready dispatches skipped only because
   // expensive read-only phases consumed the mutation completion window.
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
+  // #1013: Routes(151) with 10 demand-qualified ready aircraft changed to
+  // Routes(150) before dispatch. A full rescan found no ready targets; the
+  // resulting empty report must not be reported as successful dispatch.
+  // Keep all inventory, fresh target, price and CAPTCHA gates unchanged.
+  if(!settings.dryRun&&hasUnreconciledReadyFleetDrift(
+    prerequisites.plannedSufficientDemandCount,
+    prerequisites.verifiedFleetSnapshot?.aircraft.filter(a=>a.state==='ready').length,
+    navigation.fullFleetScans,report.summary.evaluated,report.summary.departed
+  )){
+    console.error('[DepartureInventory] '+JSON.stringify({
+      status:'UNRECONCILED_READY_TARGETS_AFTER_RESCAN',
+      previouslySufficient:prerequisites.plannedSufficientDemandCount,
+      previouslyReady:prerequisites.verifiedFleetSnapshot!.aircraft.filter(a=>a.state==='ready').length,
+      fullFleetScans:navigation.fullFleetScans,
+      evaluated:report.summary.evaluated,departed:report.summary.departed,
+      mutationAuthorized:false
+    }));
+    throw Error('DEMAND_EXECUTION_UNRECONCILED_READY_FLEET_DRIFT');
+  }
   if(!settings.dryRun&&hasDepartureBudgetStarvation(report.entries)){
     const deferred=report.entries.filter(e=>e.status==='held' &&
       (e.reason==='RUN_TIME_BUDGET_EXHAUSTED_BEFORE_EVALUATION'||
