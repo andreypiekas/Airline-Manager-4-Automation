@@ -120,6 +120,9 @@ function verifiedCurrentRouteFuelRequirement(
   return {fuelLbs:e.fuelLbs,samples:0};
 }
 
+const isFleetCountDrift=(error:unknown):boolean=>error instanceof Error&&
+  ['DEPARTURE_FLEET_COUNT_CHANGED','RESEARCH_FLEET_COUNT_CHANGED'].includes(error.message);
+
 const SAFE_PREPARE_FAILURE_CODES=new Set([
   'DEPARTURE_FLEET_COUNT_CHANGED','DEPARTURE_HANDLER_UNVERIFIED',
   'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
@@ -297,7 +300,7 @@ export class IndividualDepartureExecutor {
         // fleet with this exact aircraft/route/context still ready. Never use
         // a stale count or an unverified partial window to authorize a click.
         if(!this.settings.rollingIndividualMode &&
-           error instanceof Error&&error.message==='DEPARTURE_FLEET_COUNT_CHANGED'&&
+           isFleetCountDrift(error)&&
            !fleetDriftRecoveryAttempted&&
            (this.settings.mutationDeadlineEpochMs===undefined||
             Date.now()+MUTATION_COMPLETION_RESERVE_MS+300_000<this.settings.mutationDeadlineEpochMs)){
@@ -324,8 +327,7 @@ export class IndividualDepartureExecutor {
           }
         }
         if(!fresh){
-          if(error instanceof Error&&error.message==='DEPARTURE_FLEET_COUNT_CHANGED')
-            fleetDriftUnreconciled=true;
+          if(isFleetCountDrift(error))fleetDriftUnreconciled=true;
           entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
           entry.prepareFailureCode=safePrepareFailureCode(failure);
           continue;
