@@ -6,6 +6,18 @@ export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):
  * solely because the fuel requirement could not be independently established.
  * Retain the safe HOLD and all persisted checkpoints; report an operational failure.
  */
+/** A full-fleet count drift that could not be reconciled is an incomplete
+ * production cycle even when earlier individual flights were confirmed.
+ * Never erase those confirmations or re-click a held target.
+ */
+export function hasUnreconciledDepartureFleetDrift(report:Pick<ExecutionReport,'entries'>):boolean {
+  return report.entries.some(e=>e.status==='held'&&(
+    e.reason==='FLEET_DRIFT_UNRECONCILED'||
+    (e.reason==='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED'&&
+      ['DEPARTURE_FLEET_COUNT_CHANGED','RESEARCH_FLEET_COUNT_CHANGED'].includes(e.prepareFailureCode||''))
+  ));
+}
+
 export function hasRollingFuelHoldingUnavailable(report:ExecutionReport):boolean {
   return report.entries.some(e=>e.status==='held'&&
     e.reason==='FUEL_HOLDING_UNVERIFIED_IN_ROLLING_MODE');
@@ -216,6 +228,17 @@ export async function runDemandExecution(
   // Green test status must not mask fleet-ready dispatches skipped only because
   // expensive read-only phases consumed the mutation completion window.
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
+  if(!settings.dryRun&&hasUnreconciledDepartureFleetDrift(report)){
+    console.error('[DepartureFleetDrift] '+JSON.stringify({
+      status:'INCOMPLETE_UNRECONCILED_FLEET_DRIFT',
+      departed:report.summary.departed,
+      heldByDrift:report.entries.filter(e=>e.status==='held'&&
+        (e.reason==='FLEET_DRIFT_UNRECONCILED'||
+         ['DEPARTURE_FLEET_COUNT_CHANGED','RESEARCH_FLEET_COUNT_CHANGED'].includes(e.prepareFailureCode||''))).length,
+      mutationAuthorized:false
+    }));
+    throw Error('DEMAND_EXECUTION_INCOMPLETE_FLEET_DRIFT');
+  }
   // #1013: Routes(151) with 10 demand-qualified ready aircraft changed to
   // Routes(150) before dispatch. A full rescan found no ready targets; the
   // resulting empty report must not be reported as successful dispatch.
