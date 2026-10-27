@@ -76,7 +76,7 @@ export async function waitForVerifiedFleetControlReadOnly(page:Page,maxPolls=6):
       ? "$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);"
       : "hideAllWhenClick();menuFleet('Routes');";
     if(await control.count()===1&&await control.isVisible()&&
-      (await control.getAttribute('onclick')||'').replace(/\\s/g,'')===callback.replace(/\\s/g,''))
+      (await control.getAttribute('onclick')||'').replace(/\s/g,'')===callback.replace(/\s/g,''))
       return true;
     if(sample+1<maxPolls)await page.waitForTimeout(400);
   }
