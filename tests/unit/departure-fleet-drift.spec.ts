@@ -32,7 +32,7 @@ test('Fleet drift evidence requires a complete, unique global inventory and unch
 
 async function runDrift(options:{
   refreshed?:CollectionResult;firstTargetDrift?:boolean;repeatDrift?:boolean;
-  mutationDeadlineEpochMs?:number
+  mutationDeadlineEpochMs?:number;driftCode?:string
 }={}){
   let collects=0,prepares=0,clicks=0,failures=0;
   const initial=full([a(),b()]);
@@ -43,7 +43,7 @@ async function runDrift(options:{
       prepares++;
       if(target.aircraftId===(options.firstTargetDrift?'1001':'1002')&&
          (failures===0||options.repeatDrift)){
-        failures++;throw Error('DEPARTURE_FLEET_COUNT_CHANGED');
+        failures++;throw Error(options.driftCode??'DEPARTURE_FLEET_COUNT_CHANGED');
       }
       return {...target,observedAt:new Date().toISOString()};
     },
@@ -99,4 +99,11 @@ test('repeated count drift is not repeatedly rescanned and cannot cause an uncer
   expect(result.clicks).toBe(1);
   expect(result.report.summary).toMatchObject({departed:1,held:1,unknown:0});
   expect(result.report.entries[1].prepareFailureCode).toBe('DEPARTURE_FLEET_COUNT_CHANGED');
+});
+
+test('count change during native pagination uses the same bounded reconciliation',async()=>{
+  const result=await runDrift({driftCode:'RESEARCH_FLEET_COUNT_CHANGED'});
+  expect(result.collects).toBe(2);
+  expect(result.clicks).toBe(2);
+  expect(result.report.summary).toMatchObject({departed:2,unknown:0});
 });
