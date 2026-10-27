@@ -28,6 +28,18 @@ export function hasUnverifiedFuelDeparture(report:ExecutionReport):boolean {
     e.demand?.decision==='would_depart');
 }
 
+/** Run #1075: all 11 ready aircraft had DETAILS_UI_TIMEOUT. A complete
+ * identity inventory does not prove demand/detail availability, so a green
+ * zero-departure result would hide an operationally incomplete cycle.
+ * This is reporting-only: no departure or purchase is authorized here.
+ */
+export function hasAllReadyDepartureDetailsUnverified(report:Pick<ExecutionReport,'entries'|'summary'>):boolean {
+  return report.summary.departed===0 && report.entries.length>0 &&
+    report.entries.every(e=>e.status==='held' &&
+      e.reason==='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED' &&
+      e.demand==null && e.prepareFailureCode==='UNCLASSIFIED');
+}
+
 import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -228,6 +240,15 @@ export async function runDemandExecution(
   // Green test status must not mask fleet-ready dispatches skipped only because
   // expensive read-only phases consumed the mutation completion window.
   if(report.halted)throw Error('DEMAND_EXECUTION_HALTED_UNKNOWN_RESULT_NO_RETRY');
+  if(!settings.dryRun&&hasAllReadyDepartureDetailsUnverified(report)){
+    console.error('[DepartureDetails] '+JSON.stringify({
+      status:'INCOMPLETE_ALL_READY_DETAILS_UNVERIFIED',
+      evaluated:report.summary.evaluated,departed:report.summary.departed,
+      heldByUnverifiedDetails:report.entries.length,mutationAuthorized:false,
+      message:'Nenhuma aeronave pronta teve detalhes verificaveis; sem cliques de partida.'
+    }));
+    throw Error('DEMAND_EXECUTION_ALL_READY_DETAILS_UNVERIFIED');
+  }
   if(!settings.dryRun&&hasUnreconciledDepartureFleetDrift(report)){
     console.error('[DepartureFleetDrift] '+JSON.stringify({
       status:'INCOMPLETE_UNRECONCILED_FLEET_DRIFT',
