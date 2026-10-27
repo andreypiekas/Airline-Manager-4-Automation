@@ -223,6 +223,7 @@ export class IndividualDepartureExecutor {
     const seenWindowTargets=new Set<string>();
     let rollingPass=0;
     let fleetDriftRecoveryAttempted=false;
+    let fleetDriftUnreconciled=false;
     // Only the individually verified target authorizes its departure. In rolling
     // mode, after confirmed flights new ready planes can occupy page one;
     // rescan in the SAME executor to preserve attempt, fuel and demand journals.
@@ -236,6 +237,11 @@ export class IndividualDepartureExecutor {
         from:expected.from,to:expected.to,status:'held',reason:'DATA_UNAVAILABLE',demand:null,actualOnboard:null};
       report.entries.push(entry);
       if(report.halted){entry.reason='PREVIOUS_OUTCOME_UNKNOWN';continue;}
+      if(fleetDriftUnreconciled){
+        entry.reason='FLEET_DRIFT_UNRECONCILED';
+        entry.prepareFailureCode='DEPARTURE_FLEET_COUNT_CHANGED';
+        continue;
+      }
       if(this.settings.campaignVerified===false){entry.reason='CAMPAIGN_NOT_VERIFIED';continue;}
       if(this.settings.postReroutePricingBlockedAircraftIds?.has(expected.aircraftId)){
         entry.reason='REROUTE_PRICING_NOT_VERIFIED';continue;
@@ -318,6 +324,8 @@ export class IndividualDepartureExecutor {
           }
         }
         if(!fresh){
+          if(error instanceof Error&&error.message==='DEPARTURE_FLEET_COUNT_CHANGED')
+            fleetDriftUnreconciled=true;
           entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
           entry.prepareFailureCode=safePrepareFailureCode(failure);
           continue;
