@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {IndividualDepartureExecutor,verifiedFleetDriftRefresh,type DeparturePort} from '../../demand/executor';
 import {readDemandConfig} from '../../demand/config';
+import {hasUnreconciledDepartureFleetDrift} from '../../demand/execute-run';
 import {flightCountdownObservation} from '../../optimization/flight-timing';
 import type {AircraftSnapshot,CollectionResult} from '../../demand/types';
 
@@ -64,6 +65,7 @@ test('one native Fleet count change triggers one read-only full rescan and fresh
   expect(result.prepares).toBe(3);
   expect(result.clicks).toBe(2);
   expect(result.report.summary).toMatchObject({evaluated:2,departed:2,held:0,unknown:0});
+  expect(hasUnreconciledDepartureFleetDrift(result.report)).toBe(false);
   expect(result.report.entries.every(e=>e.reason==='NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED')).toBe(true);
 });
 
@@ -79,6 +81,7 @@ for(const [name,refreshed] of [
     expect(result.collects).toBe(2);
     expect(result.clicks).toBe(1);
     expect(result.report.summary).toMatchObject({departed:1,held:1,unknown:0});
+    expect(hasUnreconciledDepartureFleetDrift(result.report)).toBe(true);
     expect(result.report.entries[1]).toMatchObject({
       status:'held',reason:'DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED',
       prepareFailureCode:'DEPARTURE_FLEET_COUNT_CHANGED'
@@ -92,6 +95,7 @@ test('drift on first target with unverified refreshed fleet never clicks',async(
   expect(result.report.entries[1]).toMatchObject({
     status:'held',reason:'FLEET_DRIFT_UNRECONCILED'
   });
+  expect(hasUnreconciledDepartureFleetDrift(result.report)).toBe(true);
 });
 test('repeated count drift is not repeatedly rescanned and cannot cause an uncertain click',async()=>{
   const result=await runDrift({repeatDrift:true});
