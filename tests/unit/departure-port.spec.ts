@@ -1,5 +1,5 @@
 import { test,expect,Page } from '@playwright/test';
-import { verifiedDepartureHandler,PlaywrightDeparturePort,safeDepartureConfirmReadCode } from '../../demand/departure-port';
+import { verifiedDepartureHandler,PlaywrightDeparturePort,safeDepartureConfirmReadCode,waitForVerifiedFleetControlReadOnly } from '../../demand/departure-port';
 import { executionEnvironment } from '../../demand/execute-run';
 import { readDemandConfig } from '../../demand/config';
 const handler="$('#panel, .flight-info').hide();hideFlightInfo();$('#routeViewDepart').hide();Ajax('route_depart.php?id=123&ref=list&costIndex=0','target',this);";
@@ -48,6 +48,37 @@ test('post-click confirmation errors are sanitized without exposing browser deta
   expect(safeDepartureConfirmReadCode(null)).toBe('UNCLASSIFIED');
 });
 
+test('post-click Fleet control can reappear after passive polls; no game click',async()=>{
+ let polls=0,clicks=0;
+ const page={
+  locator:(selector:string)=>({
+   count:async()=>selector==='#mapRoutes'?1:0,
+   isVisible:async()=>true,
+   getAttribute:async()=>polls>0?"hideAllWhenClick();menuFleet('Routes');":null,
+   click:async()=>{clicks++;}
+  }),
+  waitForTimeout:async()=>{polls++;}
+ } as unknown as Page;
+ expect(await waitForVerifiedFleetControlReadOnly(page)).toBe(true);
+ expect(polls).toBe(1);
+ expect(clicks).toBe(0);
+});
+test('unverified visible native tab cannot fall back to menu or authorize click',async()=>{
+ let clicks=0,polls=0;
+ const page={
+  locator:(selector:string)=>({
+   count:async()=>1,
+   isVisible:async()=>true,
+   getAttribute:async()=>selector==='#mapRoutes'?"hideAllWhenClick();menuFleet('Routes');":'UNKNOWN_CALLBACK',
+   click:async()=>{clicks++;}
+  }),
+  waitForTimeout:async()=>{polls++;}
+ } as unknown as Page;
+ expect(await waitForVerifiedFleetControlReadOnly(page,3)).toBe(false);
+ expect(polls).toBe(2);
+ expect(clicks).toBe(0);
+});
+
 test('missing post-click target snapshot logs three read-only retries, no departure click',async()=>{
   let clicks=0;
   const page={
@@ -69,7 +100,8 @@ test('missing post-click target snapshot logs three read-only retries, no depart
     console.warn=original;
   }
   expect(clicks).toBe(0);
-  expect(warnings).toEqual([1,2,3].map(attempt=>
+  expect(warnings.filter(x=>x.startsWith('[DepartureConfirmRead] '))).toEqual([1,2,3].map(attempt=>
     '[DepartureConfirmRead] '+JSON.stringify({attempt,code:'RESEARCH_LIST_CONTROL_UNVERIFIED'})
   ));
+  expect(warnings.filter(x=>x.startsWith('[DepartureConfirmControl] '))).toHaveLength(2);
 });
