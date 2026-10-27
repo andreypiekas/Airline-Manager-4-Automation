@@ -87,9 +87,11 @@ for(const [name,refreshed] of [
 }
 test('drift on first target with unverified refreshed fleet never clicks',async()=>{
   const result=await runDrift({firstTargetDrift:true,refreshed:{...full([a(),b(),c()]),complete:false}});
-  expect(result.clicks).toBe(1); // second independently verified target may still depart
+  expect(result.clicks).toBe(0);
   expect(result.report.entries[0].status).toBe('held');
-  expect(result.report.entries[1].status).toBe('departed');
+  expect(result.report.entries[1]).toMatchObject({
+    status:'held',reason:'FLEET_DRIFT_UNRECONCILED'
+  });
 });
 test('repeated count drift is not repeatedly rescanned and cannot cause an uncertain click',async()=>{
   const result=await runDrift({repeatDrift:true});
