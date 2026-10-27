@@ -61,6 +61,28 @@ export function safeDepartureConfirmReadCode(error:unknown):string {
   return 'UNCLASSIFIED';
 }
 
+/** Read-only observation of the exact native Fleet control after a departure.
+ * AJAX may temporarily hide/recreate its menu; never click an unverified
+ * control, infer flight success from this signal, or retry Depart.
+ */
+export async function waitForVerifiedFleetControlReadOnly(page:Page,maxPolls=6):Promise<boolean>{
+  if(!Number.isSafeInteger(maxPolls)||maxPolls<1||maxPolls>8)
+    throw Error('DEPARTURE_CONFIRM_FLEET_POLL_INVALID');
+  for(let sample=0;sample<maxPolls;sample++){
+    const tab=page.locator('#popBtn1'),menu=page.locator('#mapRoutes');
+    const tabOpen=await tab.count()===1&&await tab.isVisible();
+    const control=tabOpen?tab:menu;
+    const callback=tabOpen
+      ? "$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);"
+      : "hideAllWhenClick();menuFleet('Routes');";
+    if(await control.count()===1&&await control.isVisible()&&
+      (await control.getAttribute('onclick')||'').replace(/\s/g,'')===callback.replace(/\s/g,''))
+      return true;
+    if(sample+1<maxPolls)await page.waitForTimeout(400);
+  }
+  return false;
+}
+
 export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
   private verifiedRouteCount:number|null=null;
@@ -244,7 +266,13 @@ export class PlaywrightDeparturePort implements DeparturePort {
     // aircraft, avoiding a full-fleet scan after every successful departure.
     let last:AircraftSnapshot|null=null;
     for(let attempt=0;attempt<3;attempt++){
-      if(attempt>0)await this.page.waitForTimeout(attempt===1?1200:2200);
+      if(attempt>0){
+        await this.page.waitForTimeout(attempt===1?1200:2200);
+        const nativeControlReady=await waitForVerifiedFleetControlReadOnly(this.page);
+        console.warn('[DepartureConfirmControl] '+JSON.stringify({
+          attempt:attempt+1,nativeControlReady,readOnly:true,mutationAuthorized:false
+        }));
+      }
       try{
         await openFleetList(this.page,this.timeout);
         await findFleetRoute(this.page,expected,this.timeout);
