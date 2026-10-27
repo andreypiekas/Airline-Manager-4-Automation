@@ -77,7 +77,7 @@ export function verifiedFleetDriftRefresh(refreshed:CollectionResult,expected:Ai
   const aircraftIds=new Set<string>(),routeIds=new Set<string>();
   let exactReadyTargets=0;
   for(const a of refreshed.aircraft){
-    if(!/^[1-9]\\d*$/.test(a.aircraftId)||!/^[1-9]\\d*$/.test(a.routeId)||
+    if(!/^[1-9]\d*$/.test(a.aircraftId)||!/^[1-9]\d*$/.test(a.routeId)||
        !/^[A-Z0-9]{3}$/.test(a.from)||!/^[A-Z0-9]{3}$/.test(a.to)||a.from===a.to||
        (a.state!=='inflight'&&!a.registration.trim())||
        aircraftIds.has(a.aircraftId)||routeIds.has(a.routeId))return false;
