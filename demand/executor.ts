@@ -66,6 +66,28 @@ const sameContext = (a: AircraftSnapshot,b: AircraftSnapshot) => a.aircraftId ==
   a.registration === b.registration && a.from === b.from && a.to === b.to && !!a.capacity && !!b.capacity &&
   (['Y','J','F'] as const).every(k=>a.capacity![k]===b.capacity![k]);
 
+/** A changed Routes(N) invalidates the old global inventory. A new complete,
+ * unique, read-only Fleet collection must corroborate the exact existing target
+ * before any fresh prepare can resume. It never authorizes a click by itself.
+ */
+export function verifiedFleetDriftRefresh(refreshed:CollectionResult,expected:AircraftSnapshot):boolean{
+  if(!refreshed.complete||!Number.isSafeInteger(refreshed.expectedRoutes)||
+     refreshed.expectedRoutes===null||refreshed.expectedRoutes<1||
+     refreshed.aircraft.length!==refreshed.expectedRoutes)return false;
+  const aircraftIds=new Set<string>(),routeIds=new Set<string>();
+  let exactReadyTargets=0;
+  for(const a of refreshed.aircraft){
+    if(!/^[1-9]\d*$/.test(a.aircraftId)||!/^[1-9]\d*$/.test(a.routeId)||
+       !/^[A-Z0-9]{3}$/.test(a.from)||!/^[A-Z0-9]{3}$/.test(a.to)||a.from===a.to||
+       (a.state!=='inflight'&&!a.registration.trim())||
+       aircraftIds.has(a.aircraftId)||routeIds.has(a.routeId))return false;
+    aircraftIds.add(a.aircraftId);routeIds.add(a.routeId);
+    if(a.state==='ready'&&(!a.capacity||!a.remaining||!a.dailyTotal||a.issue))return false;
+    if(a.state==='ready'&&!a.issue&&sameContext(expected,a))exactReadyTargets++;
+  }
+  return exactReadyTargets===1;
+}
+
 const routePairKey=(a:string,b:string)=>[a,b].sort().join(':');
 const validDemandCabins=(c:Cabins|null|undefined):c is Cabins=>!!c&&(['Y','J','F'] as const).every(k=>Number.isSafeInteger(c[k])&&c[k]>=0);
 const minCabins=(a:Cabins,b:Cabins):Cabins=>({Y:Math.min(a.Y,b.Y),J:Math.min(a.J,b.J),F:Math.min(a.F,b.F)});
@@ -98,10 +120,13 @@ function verifiedCurrentRouteFuelRequirement(
   return {fuelLbs:e.fuelLbs,samples:0};
 }
 
+const isFleetCountDrift=(error:unknown):boolean=>error instanceof Error&&
+  ['DEPARTURE_FLEET_COUNT_CHANGED','RESEARCH_FLEET_COUNT_CHANGED'].includes(error.message);
+
 const SAFE_PREPARE_FAILURE_CODES=new Set([
   'DEPARTURE_FLEET_COUNT_CHANGED','DEPARTURE_HANDLER_UNVERIFIED',
   'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
-  'RESEARCH_ROUTE_COUNT_UNAVAILABLE','RESEARCH_PAGINATION_INVALID',
+  'RESEARCH_ROUTE_COUNT_UNAVAILABLE','RESEARCH_FLEET_COUNT_CHANGED','RESEARCH_PAGINATION_INVALID',
   'RESEARCH_ROUTE_NOT_FOUND','RESEARCH_PAGINATION_CONTROL_UNVERIFIED',
   'RESEARCH_PAGINATION_LIMIT','RESEARCH_ROUTE_NOT_AVAILABLE',
   'RESEARCH_IDENTITY_INVALID','RESEARCH_STATE_UNAVAILABLE',
@@ -200,6 +225,8 @@ export class IndividualDepartureExecutor {
     let ordered=orderVerifiedDepartureCandidates(initial,waiting,firstPageReady);
     const seenWindowTargets=new Set<string>();
     let rollingPass=0;
+    let fleetDriftRecoveryAttempted=false;
+    let fleetDriftUnreconciled=false;
     // Only the individually verified target authorizes its departure. In rolling
     // mode, after confirmed flights new ready planes can occupy page one;
     // rescan in the SAME executor to preserve attempt, fuel and demand journals.
@@ -213,6 +240,11 @@ export class IndividualDepartureExecutor {
         from:expected.from,to:expected.to,status:'held',reason:'DATA_UNAVAILABLE',demand:null,actualOnboard:null};
       report.entries.push(entry);
       if(report.halted){entry.reason='PREVIOUS_OUTCOME_UNKNOWN';continue;}
+      if(fleetDriftUnreconciled){
+        entry.reason='FLEET_DRIFT_UNRECONCILED';
+        entry.prepareFailureCode='DEPARTURE_FLEET_COUNT_CHANGED';
+        continue;
+      }
       if(this.settings.campaignVerified===false){entry.reason='CAMPAIGN_NOT_VERIFIED';continue;}
       if(this.settings.postReroutePricingBlockedAircraftIds?.has(expected.aircraftId)){
         entry.reason='REROUTE_PRICING_NOT_VERIFIED';continue;
@@ -260,11 +292,46 @@ export class IndividualDepartureExecutor {
           console.warn('[DepartureFuelQuote] '+JSON.stringify({status:'READ_FAILED_REMAINS_HOLD'}));
         }
       }
-      let fresh: AircraftSnapshot;
+      let fresh: AircraftSnapshot|undefined;
       try {fresh=await this.port.prepare(expected);}catch(error){
-        entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
-        entry.prepareFailureCode=safePrepareFailureCode(error);
-        continue;
+        let failure:unknown=error;
+        // A new route/aircraft can change Routes(N) while dispatch is running.
+        // Rescan at most once, read-only, and accept only a COMPLETE, unique
+        // fleet with this exact aircraft/route/context still ready. Never use
+        // a stale count or an unverified partial window to authorize a click.
+        if(!this.settings.rollingIndividualMode &&
+           isFleetCountDrift(error)&&
+           !fleetDriftRecoveryAttempted&&
+           (this.settings.mutationDeadlineEpochMs===undefined||
+            Date.now()+MUTATION_COMPLETION_RESERVE_MS+300_000<this.settings.mutationDeadlineEpochMs)){
+          fleetDriftRecoveryAttempted=true;
+          try{
+            const refreshed=await this.port.collect();
+            const verified=verifiedFleetDriftRefresh(refreshed,expected);
+            console.warn('[DepartureFleetDrift] '+JSON.stringify({
+              status:verified?'COMPLETE_RECONCILED':'HOLD_UNVERIFIED_REFRESH',
+              observed:refreshed.aircraft.length,expected:refreshed.expectedRoutes,
+              mutationAuthorizedByRefresh:false
+            }));
+            if(verified)fresh=await this.port.prepare(expected);
+          }catch(recoveryError){
+            if(recoveryError instanceof Error&&
+               recoveryError.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP'){
+              report.halted=true;await persist();throw recoveryError;
+            }
+            failure=recoveryError;
+            console.warn('[DepartureFleetDrift] '+JSON.stringify({
+              status:'HOLD_REFRESH_FAILED',code:safePrepareFailureCode(recoveryError),
+              mutationAuthorizedByRefresh:false
+            }));
+          }
+        }
+        if(!fresh){
+          if(isFleetCountDrift(error))fleetDriftUnreconciled=true;
+          entry.reason='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED';
+          entry.prepareFailureCode=safePrepareFailureCode(failure);
+          continue;
+        }
       }
       if(fresh.state!=='ready'||!sameContext(expected,fresh)){entry.reason='AIRCRAFT_CONTEXT_CHANGED';continue;}
       const key=demandPoolKey(fresh,this.demand.poolScope);
