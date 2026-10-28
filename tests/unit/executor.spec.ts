@@ -114,10 +114,10 @@ test('run #1131: incomplete rescan with zero ready candidates cannot be green',a
   }});
   await expect(partial.executor.run()).rejects.toThrow('EXECUTION_INCOMPLETE_EMPTY_CANDIDATE_WINDOW');
   expect(partial.clicks()).toBe(0);
-  expect(partial.saved.at(-1)).toMatchObject({
+  expect(partial.saved[partial.saved.length-1]).toMatchObject({
     halted:false,summary:{evaluated:0,departed:0,held:0,unknown:0}
   });
-  expect(partial.saved.at(-1)?.completedAt).not.toBeNull();
+  expect(partial.saved[partial.saved.length-1]?.completedAt).not.toBeNull();
 });
 test('complete all-inflight Fleet is a valid empty cycle, partial dry run does not mutate',async()=>{
   const complete=setup({initial:collection([snapshot({state:'inflight'})])});
