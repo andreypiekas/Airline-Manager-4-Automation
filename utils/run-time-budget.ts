@@ -118,6 +118,20 @@ export function hasUnreconciledReadyFleetDrift(
     evaluated===0&&departed===0;
 }
 
+/** A fully enumerated fleet is not a verified no-demand cycle when every
+ * evaluated aircraft lacks fresh usable details. Fail operationally rather
+ * than treating unknown eligibility as zero demand. Reporting only: never
+ * authorizes a purchase, a departure, or reuse of stale observations.
+ */
+export function isAllDemandEvidenceUnavailable(summary:{
+  evaluated:number;sufficient:number;insufficient:number;unavailable:number;
+}):boolean {
+  const values=[summary.evaluated,summary.sufficient,summary.insufficient,summary.unavailable];
+  return values.every(n=>Number.isSafeInteger(n)&&n>=0) &&
+    summary.evaluated>0 && summary.sufficient===0 && summary.insufficient===0 &&
+    summary.unavailable===summary.evaluated;
+}
+
 /** A skipped production departure phase with observed sufficient demand is operationally incomplete. */
 export function isSkippedDeparturePhaseFailure(enabled:boolean,allowed:boolean,sufficientDemand:number):boolean {
   return enabled && !allowed && Number.isSafeInteger(sufficientDemand) && sufficientDemand > 0;
