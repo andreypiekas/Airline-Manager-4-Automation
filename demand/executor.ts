@@ -223,6 +223,21 @@ export class IndividualDepartureExecutor {
     const waiting=this.settings.prioritizedDepartureKeys??new Set<string>();
     const firstPageReady=this.settings.firstPageReadyPriorityKeys??new Set<string>();
     let ordered=orderVerifiedDepartureCandidates(initial,waiting,firstPageReady);
+    // Run #1131: a Routes count change produced an incomplete rescan (120/175),
+    // but no ready candidates in that partial window. An empty candidate list
+    // cannot prove that no aircraft is ready in the missing pages.
+    // Fail the production status without authorizing any new action.
+    if(!this.settings.dryRun&&!this.settings.rollingIndividualMode&&
+       !initial.complete&&ordered.length===0){
+      console.error('[DepartureCollection] '+JSON.stringify({
+        status:'INCOMPLETE_EMPTY_CANDIDATE_WINDOW',
+        observed:initial.aircraft.length,expected:initial.expectedRoutes,
+        mutationAuthorized:false
+      }));
+      report.completedAt=new Date().toISOString();
+      await persist();
+      throw Error('EXECUTION_INCOMPLETE_EMPTY_CANDIDATE_WINDOW');
+    }
     const seenWindowTargets=new Set<string>();
     let rollingPass=0;
     let fleetDriftRecoveryAttempted=false;
