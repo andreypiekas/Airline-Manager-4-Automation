@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, isAllDemandEvidenceUnavailable, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -54,6 +54,17 @@ test('partial or zero departures with time-starved aircraft cannot be a green cy
   expect(hasDepartureBudgetStarvation([{status:'held',reason:'INITIAL_COLLECTION_INCOMPLETE'}])).toBe(false);
 });
 
+
+test('run #1127: all evaluated demand unavailable is an operational failure, not zero demand',()=>{
+  // Real #1127: 166/166 identities, 105 evaluated, 53 detail timeouts,
+  // 52 readings expired, 61 in flight, and no departure phase.
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:0,unavailable:105})).toBe(true);
+  expect(isAllDemandEvidenceUnavailable({evaluated:0,sufficient:0,insufficient:0,unavailable:0})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:101,sufficient:100,insufficient:1,unavailable:0})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:1,unavailable:104})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:0,unavailable:104})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:Number.NaN,sufficient:0,insufficient:0,unavailable:0})).toBe(false);
+});
 
 test('production skip with sufficient demand fails instead of silently appearing green',()=>{
   expect(isSkippedDeparturePhaseFailure(true,false,60)).toBe(true); // run #775 demand snapshot
