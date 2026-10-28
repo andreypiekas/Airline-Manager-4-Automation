@@ -12,7 +12,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, isAllDemandEvidenceUnavailable, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -440,6 +440,14 @@ test('All Operations', async ({ page }) => {
         });
       }
       return; // No global route/pricing operations may use a partial inventory.
+    }
+    // A complete Fleet identity scan does not prove zero demand when every
+    // evaluated aircraft's detail is unavailable/expired. No mutation is authorized.
+    if (!demandConfig.dryRun && moduleEnabled('ENABLE_DEPART') &&
+        isAllDemandEvidenceUnavailable(simulation.report.summary)) {
+      console.error('[DemandIntegrity] ALL_EVALUATED_DETAILS_UNAVAILABLE '+
+        JSON.stringify(simulation.report.summary));
+      throw new Error('DEMAND_ALL_EVALUATED_DETAILS_UNAVAILABLE');
     }
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;
