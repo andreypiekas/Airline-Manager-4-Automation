@@ -105,6 +105,28 @@ test('incomplete second fleet collection must fail the operational run rather th
   const benign=setup({initial:collection([snapshot({state:'inflight'})])});
   expect(hasIncompleteInitialDepartureCollection(await benign.executor.run())).toBe(false);
 });
+test('run #1131: incomplete rescan with zero ready candidates cannot be green',async()=>{
+  // Real #1131: Routes count changed from 169 to 175 during a Fleet rescan.
+  // Only 120 identities were observed; zero ready candidates is NOT zero demand.
+  const partial=setup({initial:{
+    ...collection([snapshot({state:'inflight'})],false),expectedRoutes:175,
+    warnings:['FLEET_INVENTORY_IDENTITY_UNVERIFIED']
+  }});
+  await expect(partial.executor.run()).rejects.toThrow('EXECUTION_INCOMPLETE_EMPTY_CANDIDATE_WINDOW');
+  expect(partial.clicks()).toBe(0);
+  expect(partial.saved.at(-1)).toMatchObject({
+    halted:false,summary:{evaluated:0,departed:0,held:0,unknown:0}
+  });
+  expect(partial.saved.at(-1)?.completedAt).not.toBeNull();
+});
+test('complete all-inflight Fleet is a valid empty cycle, partial dry run does not mutate',async()=>{
+  const complete=setup({initial:collection([snapshot({state:'inflight'})])});
+  expect((await complete.executor.run()).summary).toMatchObject({evaluated:0,departed:0,unknown:0});
+  expect(complete.clicks()).toBe(0);
+  const dry=setup({dryRun:true,initial:collection([snapshot({state:'inflight'})],false)});
+  expect((await dry.executor.run()).summary.departed).toBe(0);
+  expect(dry.clicks()).toBe(0);
+});
 for(const [index,options] of [{clickFail:true},{confirmed:null},{confirmed:snapshot({state:'ready'})},{confirmed:snapshot({state:'inflight',timing:null})}].entries())
  test(`unknown result stops without retry case ${index}`,async()=>{const s=setup(options);const r=await s.executor.run();expect(r.halted).toBe(true);expect(r.summary.unknown).toBe(1);expect(s.clicks()).toBe(1);});
 test('persistence failure stops before operation',async()=>{const s=setup({saveFail:true});await expect(s.executor.run()).rejects.toThrow('disk');expect(s.clicks()).toBe(0);});
