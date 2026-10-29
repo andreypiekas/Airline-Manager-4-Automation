@@ -267,7 +267,9 @@ function selfTest(){
  assert.ok(partialMd.includes('39** vistas de 154 (parcial)'));
  assert.ok(partialMd.includes('coleta global incompleta: 39/154; 2 alvo(s) verificado(s) individualmente'));
  assert.ok(partialMd.includes('1 aeronave(s) retidas por Fuel insuficiente; preço live 740/1k acima do teto 550/1k'));
- assert.ok(partialMd.includes('Estados da frota global indisponíveis'));\n assert.ok(partialMd.includes('| NORMAL | n/d |'));\n assert.ok(partialMd.includes('não é possível afirmar ausência de aeronaves que exigem atenção'));
+ assert.ok(partialMd.includes('Estados da frota global indisponíveis'));
+ assert.ok(partialMd.includes('| NORMAL | n/d |'));
+ assert.ok(partialMd.includes('não é possível afirmar ausência de aeronaves que exigem atenção'));
  fs.rmSync(dir,{recursive:true,force:true});console.log('company-dashboard self-test ok');
 }
 if(require.main===module){
