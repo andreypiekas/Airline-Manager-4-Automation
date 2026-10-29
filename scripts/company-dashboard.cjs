@@ -74,7 +74,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     bases:{status:ownedBases?.status??'not_observed',effective:Array.isArray(ownedBases?.effectiveBases)?ownedBases.effectiveBases:[],source:ownedBases?.source??null,reason:ownedBases?.reason??null},
     demand:{collectionComplete:demand?.collectionComplete??null,evaluated:demand?.summary?.evaluated??null,sufficient:demand?.summary?.sufficient??null,
       insufficient:demand?.summary?.insufficient??null,unavailable:demand?.summary?.unavailable??null,notReady:demand?.summary?.notReady??null},
-    fleet:{seen:demand?.summary?.fleetSeen??(partialGlobal?globalFallback.observed:aircraft.length),
+    fleet:{seen:partialGlobal?globalFallback.observed:(demand?.summary?.fleetSeen??aircraft.length),
       expected:partialGlobal?globalFallback.expected:null,collectionComplete:demand?.collectionComplete??(partialGlobal?false:null),
       individualVerified,ready:aircraft.filter(a=>a.state==='ready').length,
       inflight:aircraft.filter(a=>a.state==='inflight').length,unavailable:aircraft.filter(a=>a.state==='unavailable').length},
@@ -125,7 +125,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
   return {dashboard,states};
 }
 function markdown(d,states){
- const s=d.operationalStates,attention=states.filter(x=>x.state!=='NORMAL');
+ const s=d.fleet.collectionComplete===false?Object.fromEntries(Object.keys(d.operationalStates).map(k=>[k,'n/d'])):d.operationalStates,attention=states.filter(x=>x.state!=='NORMAL');
  const statusMap={success:'SUCESSO',failure:'FALHA',skipped:'IGNORADA'},runStatus=d.run?.stale?'IGNORADA — SHA OBSOLETO':(statusMap[d.run?.result]||String(d.run?.result||'DESCONHECIDO').toUpperCase());
  const mode=d.run?.mode==='production'?'PRODUÇÃO':d.run?.mode==='simulation'?'SIMULAÇÃO':d.run?.mode==='semi-automatic'?'SEMIAUTOMÁTICO':'N/D';
  const sha=d.run?.sha?String(d.run.sha).slice(0,8):'n/d';
@@ -183,7 +183,7 @@ function markdown(d,states){
   `| MANUTENCAO | ${s.MANUTENCAO} |`,`| PRONTA_PARA_DECOLAR | ${s.PRONTA_PARA_DECOLAR} |`,'',
   d.fleet.collectionComplete===false&&d.fleet.individualVerified>0?'Estados da frota global indisponíveis; consulte os resultados individuais no relatório de decolagens.':'',
   '### Aeronaves que exigem atenção','',
-  attention.length?'| Aeronave | Estado | Motivo |\n| --- | --- | --- |\n'+attention.map(x=>`| ${safe(x.registration)} | ${x.state} | ${safe(x.reason)} |`).join('\n'):'Nenhuma aeronave fora do estado NORMAL neste run.','',
+  attention.length?'| Aeronave | Estado | Motivo |\n| --- | --- | --- |\n'+attention.map(x=>`| ${safe(x.registration)} | ${x.state} | ${safe(x.reason)} |`).join('\n'):(d.fleet.collectionComplete===false?'Estado global indisponível; não é possível afirmar ausência de aeronaves que exigem atenção.':'Nenhuma aeronave fora do estado NORMAL neste run.'),'',
   '## Relatórios detalhados','',
   'Os detalhes completos permanecem no artifact **demand-report** (JSON + Markdown), incluindo demanda por aeronave, route research, pricing, reroute, supplies, histórico de voo, UI health e orçamento de tempo. O artifact **playwright-report** mantém os logs técnicos da execução.','',
   '_O painel não transforma ausência de evidência em zero e não remove os bloqueios fail-closed. Dados operacionais detalhados permanecem nos artifacts._',''];
@@ -253,7 +253,7 @@ function selfTest(){
  // Regression: an incomplete global fleet must not erase individually verified
  // Fuel holds or pretend that zero global snapshots means zero observed routes.
  fs.rmSync(path.join(dir,'fleet-observations.json'));
- fs.writeFileSync(path.join(dir,'demand-report.json'),'{}');
+ fs.writeFileSync(path.join(dir,'demand-report.json'),JSON.stringify({summary:{fleetSeen:0}}));
  fs.writeFileSync(path.join(dir,'global-fleet-fallback.json'),JSON.stringify({globalComplete:false,observed:39,expected:154}));
  fs.writeFileSync(path.join(dir,'execution-report.json'),JSON.stringify({summary:{evaluated:2,departed:0,held:2,unknown:0},entries:[
   {aircraftId:'21',routeId:'121',registration:'R21',status:'held',reason:'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY',demand:{aircraftId:'21',routeId:'121',state:'ready'}},
@@ -267,7 +267,7 @@ function selfTest(){
  assert.ok(partialMd.includes('39** vistas de 154 (parcial)'));
  assert.ok(partialMd.includes('coleta global incompleta: 39/154; 2 alvo(s) verificado(s) individualmente'));
  assert.ok(partialMd.includes('1 aeronave(s) retidas por Fuel insuficiente; preço live 740/1k acima do teto 550/1k'));
- assert.ok(partialMd.includes('Estados da frota global indisponíveis'));
+ assert.ok(partialMd.includes('Estados da frota global indisponíveis'));\n assert.ok(partialMd.includes('| NORMAL | n/d |'));\n assert.ok(partialMd.includes('não é possível afirmar ausência de aeronaves que exigem atenção'));
  fs.rmSync(dir,{recursive:true,force:true});console.log('company-dashboard self-test ok');
 }
 if(require.main===module){
