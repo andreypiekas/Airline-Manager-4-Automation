@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, assertFullFleetCoverageForGreenStatus, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -120,4 +120,13 @@ test('run #968: ready flights dispatch before optional pricing if no reroute cha
   expect(evaluateRunPhaseBudget('ticket-pricing-after-departures',0,240_000,MUTATION_PHASE_START_MINIMUM_MS).allowed).toBe(false);
   expect(evaluateRunPhaseBudget('ticket-pricing-after-departures',0,360_000,MUTATION_PHASE_START_MINIMUM_MS).allowed).toBe(true);
   expect(hasDepartureBudgetStarvation([{status:'held',reason:'RUN_TIME_BUDGET_EXHAUSTED_BEFORE_MUTATION'}])).toBe(true);
+});
+
+test('run #1191: partial Fleet 172/173 with six confirmed departures must not be green',()=>{
+  // Actual production fallback verified 20 ready targets, confirmed six
+  // departures and held fourteen, leaving 153 aircraft unassessed globally.
+  // No real actions are performed by this unit test.
+  expect(()=>assertFullFleetCoverageForGreenStatus(false)).toThrow(
+    'DEMAND_EXECUTION_INCOMPLETE_GLOBAL_FLEET_COVERAGE');
+  expect(()=>assertFullFleetCoverageForGreenStatus(true)).not.toThrow();
 });

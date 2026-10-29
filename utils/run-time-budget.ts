@@ -118,6 +118,14 @@ export function hasUnreconciledReadyFleetDrift(
     evaluated===0&&departed===0;
 }
 
+/** A partial Fleet inventory cannot prove that all ready aircraft were handled,
+ * even when some individually verified departures were confirmed. This check
+ * changes only the final run status; it never authorizes or repeats mutations.
+ */
+export function assertFullFleetCoverageForGreenStatus(globalComplete:boolean):void {
+  if(globalComplete!==true)throw Error('DEMAND_EXECUTION_INCOMPLETE_GLOBAL_FLEET_COVERAGE');
+}
+
 /** A skipped production departure phase with observed sufficient demand is operationally incomplete. */
 export function isSkippedDeparturePhaseFailure(enabled:boolean,allowed:boolean,sufficientDemand:number):boolean {
   return enabled && !allowed && Number.isSafeInteger(sufficientDemand) && sufficientDemand > 0;

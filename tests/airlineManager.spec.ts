@@ -12,7 +12,7 @@ import { withRunLock } from '../utils/run-lock';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, assertFullFleetCoverageForGreenStatus, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -439,7 +439,16 @@ test('All Operations', async ({ page }) => {
           phase:'post',mutationDeadlineEpochMs:phaseDeadlineEpochMs
         });
       }
-      return; // No global route/pricing operations may use a partial inventory.
+      // Run #1191: 6 individually confirmed departures did not reconcile the
+      // missing global identity (172/173) or assess the other 153 aircraft.
+      // Persisted confirmations and post-flight purchases remain intact; only
+      // the operational result is marked incomplete, never artificially green.
+      console.error('[RollingDispatchFallback] '+JSON.stringify({
+        status:'INCOMPLETE_GLOBAL_FLEET_COVERAGE',...dispatch.summary,
+        globalComplete:false,mutationAuthorizedByGlobalSnapshot:false
+      }));
+      assertFullFleetCoverageForGreenStatus(false);
+      return; // Unreachable for partial coverage; no global mutations permitted.
     }
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;
