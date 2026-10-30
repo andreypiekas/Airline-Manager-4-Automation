@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { parseFlightHistoryRow, readFlightHistoryEvidence } from '../../optimization/flight-history';
+import { parseFlightHistoryRow, isRecognizedRecalledFlightHistoryRow, readFlightHistoryEvidence } from '../../optimization/flight-history';
 
 test('parses inspected AM4 flight history row exactly',()=>{
   expect(parseFlightHistoryRow('49 mins ago GRU-DEL 340-200-6 624,220 Quotas Y161 J12 F4 266,939 Lbs $1,284,400')).toEqual({
@@ -43,4 +43,57 @@ test('reads visible flight-history window without clicks',async({page})=>{
 test('one unrecognized visible history row fails the evidence closed',async({page})=>{
   await page.setContent('<div id="detailsAction"><div id="flight-history"><div class="row bg-light m-text p-1 border">unknown history format</div></div></div>');
   expect((await readFlightHistoryEvidence(page.locator('#detailsAction'))).status).toBe('unavailable');
+});
+
+
+const confirmedRecent='5 hours ago BWN-MQJ XP-166 184,627 Quotas Y50 J46 F9 136,335 Lbs $573,400';
+const confirmedReturn='16 hours ago MQJ-BWN XP-166 179,169 Quotas Y49 J44 F9 136,335 Lbs $556,460';
+const recalled='3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled 136,335 Lbs $-260,383';
+
+test('run #1230: AM4 recalled flight is not a completed fuel observation',()=>{
+  expect(parseFlightHistoryRow(recalled)).toBeNull();
+  expect(isRecognizedRecalledFlightHistoryRow(recalled)).toBe(true);
+  for(const text of [
+    '3 days ago BWN-MQJ XP-166 NaN Quotas Recalled 136,335 Lbs $-260,383',
+    '3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled -1 Lbs $-260,383',
+    '3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled 0 Lbs $-260,383',
+    '3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled 136,335 Lbs $260,383',
+    '3 days ago BWN-BWN XP-166 83,102 Quotas Recalled 136,335 Lbs $-260,383',
+    'other history row'
+  ])expect(isRecognizedRecalledFlightHistoryRow(text)).toBe(false);
+});
+
+test('run #1230: 2+ strictly verified flights remain readable with a recognized Recalled record',async({page})=>{
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    [confirmedRecent,recalled,confirmedReturn].map(x=>
+      '<div class="row bg-light m-text p-1 border">'+x+'</div>').join('')+
+    '</div><button onclick="window.mutations=(window.mutations||0)+1">History</button></div>');
+  const evidence=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(evidence).toMatchObject({
+    status:'observed',complete:false,excludedRecalledRows:1,
+    source:'inspected-aircraft-flight-history',
+    comparisonReady:false,mutationAuthorized:false
+  });
+  expect(evidence.entries).toHaveLength(2);
+  expect(evidence.entries.map(x=>x.fuelLbs)).toEqual([136335,136335]);
+  expect(evidence.entries.map(x=>x.from+'-'+x.to))
+    .toEqual(['BWN-MQJ','MQJ-BWN']);
+  expect(evidence.entries.every(x=>x.co2Quotas>0&&x.revenue>0)).toBe(true);
+  expect(await page.evaluate(()=>(window as any).mutations||0)).toBe(0);
+});
+
+test('run #1230 safety: unknown/malformed row still invalidates whole history window',async({page})=>{
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    [confirmedRecent,'3 days ago BWN-MQJ XP-166 83,102 Quotas SomethingElse 136,335 Lbs $-260,383',confirmedReturn]
+      .map(x=>'<div class="row bg-light m-text p-1 border">'+x+'</div>').join('')+
+    '</div></div>');
+  const evidence=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(evidence).toMatchObject({status:'unavailable',entries:[],mutationAuthorized:false});
+});
+
+test('run #1230 safety: recalled record alone supplies no fuel evidence',async({page})=>{
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    '<div class="row bg-light m-text p-1 border">'+recalled+'</div></div></div>');
+  const evidence=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(evidence).toMatchObject({status:'unavailable',entries:[],mutationAuthorized:false});
 });
