@@ -32,7 +32,7 @@ import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDemandConfig } from './config';
-import { DemandConfig, CollectionResult } from './types';
+import { DemandConfig, CollectionResult, type AircraftSnapshot } from './types';
 import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
 import { inspectFirstPageReadOnly } from './rolling-first-page';
