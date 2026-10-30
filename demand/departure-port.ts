@@ -103,13 +103,15 @@ export class PlaywrightDeparturePort implements DeparturePort {
         timeout:Math.min(this.timeout,8000),
         maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
       });
+      const noReadyVerified=pilot.window==='STABLE' && pilot.readyCandidates===0 &&
+        pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
       const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
         pilot.verifiedAircraft.every(a=>a.state==='ready'&&!a.issue&&
           !!a.capacity&&!!a.remaining&&!!a.dailyTotal);
       console.log('[RollingDispatchInventory] '+JSON.stringify({
-        status:verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
+        status:noReadyVerified?'NO_READY_ON_VERIFIED_FIRST_PAGE':verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
         inspected:pilot.inspected,ready:pilot.readyCandidates,verified:pilot.verified,
         heldTargets:pilot.holds.length,
         heading:pilot.routeTotal,globalComplete:false,
@@ -119,9 +121,10 @@ export class PlaywrightDeparturePort implements DeparturePort {
       return {
         aircraft:verifiedWindow?pilot.verifiedAircraft:[],
         complete:false,expectedRoutes:pilot.routeTotal,
-        observationScope:verifiedWindow?'native-individual-first-page' as const:undefined,
+        observationScope:(verifiedWindow||noReadyVerified)?'native-individual-first-page' as const:undefined,
+        windowNoReadyVerified:noReadyVerified,
         windowReadyCandidates:pilot.readyCandidates,
-        warnings:verifiedWindow?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
+        warnings:(verifiedWindow||noReadyVerified)?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
       };
     }
     await openFleetList(this.page,this.timeout);
