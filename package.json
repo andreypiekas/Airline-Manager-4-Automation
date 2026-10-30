@@ -14,7 +14,7 @@
   "author": "Andrey Gheno Piekas",
   "license": "MIT",
   "devDependencies": {
-    "@playwright/test": "^1.44.0",
+    "@playwright/test": "1.55.1",
     "@types/node": "^20.12.12",
     "typescript": "5.9.3"
   },
