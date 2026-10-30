@@ -136,3 +136,62 @@ test('first-page rolling dispatch continues across more than four verified batch
   expect(r.collects).toBe(8);
   expect(r.report.entries.map(e=>e.aircraftId)).toEqual(planes.map(a=>a.aircraftId));
 });
+
+
+test('run #1227: one quarantined ready target is reconciled read-only, never clicked in same run',async()=>{
+  const a={...aircraft('24054763','YFB','TXL'),registration:'21-400-18'};
+  const b=aircraft('2002','TXL','DXB');
+  let clicks=0,quarantineReads=0,journalWrites=0;
+  const port:DeparturePort={
+    collect:async()=>native([a,b]),
+    inspectPersistedUncertainReady:async x=>{
+      quarantineReads++;
+      expect(x.aircraftId).toBe(a.aircraftId);
+      return {...x,observedAt:new Date().toISOString(),
+        departureControlShape:"Ajax('route_depart.php?id=<value>&ref=list','routeAction',this);"};
+    },
+    prepare:async x=>({...x,observedAt:new Date().toISOString()}),
+    depart:async()=>{clicks++;},
+    confirm:async x=>({...x,state:'inflight',onboard:{Y:90,J:0,F:0},
+      timing:flightCountdownObservation(x.aircraftId,x.routeId,'00:45:00',new Date().toISOString())})
+  };
+  const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+    rollingIndividualMode:true,dryRun:false,maxDepartures:10,
+    blockedDepartureKeys:new Set([a.aircraftId+':'+a.routeId]),
+    reconcilePersistedUncertainReady:async x=>{
+      expect(x.aircraftId).toBe(a.aircraftId);journalWrites++;return true;
+    },
+    campaignVerified:true,fuelHoldingLbsAtRunStart:30000,
+    currentRouteFuelEvidence:new Map([[b.aircraftId,quote(b)]])
+  },async()=>{}).run();
+  expect(report.summary).toMatchObject({evaluated:2,departed:1,held:1,unknown:0});
+  expect(report.entries.find(x=>x.aircraftId===a.aircraftId)?.reason)
+    .toBe('PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY');
+  expect(quarantineReads).toBe(1);
+  expect(journalWrites).toBe(1);
+  expect(clicks).toBe(1); // ONLY aircraft b may depart.
+  expect(report.rollingWindowUnverified).toBeFalsy();
+});
+
+test('run #1227: journal resolution denied retains quarantine and never re-clicks',async()=>{
+  const a=aircraft('24054763','YFB','TXL');
+  let departures=0;
+  const port:DeparturePort={
+    collect:async()=>native([a]),
+    inspectPersistedUncertainReady:async x=>({...x,
+      observedAt:new Date().toISOString(),
+      departureControlShape:"Ajax('route_depart.php?id=<value>','routeAction',this);"}),
+    prepare:async()=>{throw Error('UNEXPECTED_PREPARE');},
+    depart:async()=>{departures++;},
+    confirm:async()=>null
+  };
+  const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+    rollingIndividualMode:true,dryRun:false,maxDepartures:10,
+    blockedDepartureKeys:new Set([a.aircraftId+':'+a.routeId]),
+    reconcilePersistedUncertainReady:async()=>false,
+    campaignVerified:true,fuelHoldingLbsAtRunStart:30000
+  },async()=>{}).run();
+  expect(report.summary).toMatchObject({evaluated:1,departed:0,held:1,unknown:0});
+  expect(report.entries[0].reason).toBe('PERSISTED_UNCERTAIN_DEPARTURE_BLOCK');
+  expect(departures).toBe(0);
+});
