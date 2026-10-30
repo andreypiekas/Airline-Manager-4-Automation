@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { MaintenanceUtils, parseMaintenanceHoursToCheck, maintenanceCheckVerificationStatus } from '../../utils/maintenance.utils';
+import { MaintenanceUtils, parseMaintenanceHoursToCheck, maintenanceCheckVerificationStatus, scopedMaintenanceBulkCheckCards } from '../../utils/maintenance.utils';
 
 test('remaining maintenance hours require one explicit Hours to check field',()=>{
   expect(parseMaintenanceHoursToCheck('Registration: 001-A\nFlight hours\n10,443\nHours to check\n0\nWear 14%')).toBe(0);
@@ -68,4 +68,27 @@ test('real #960 scenario cannot be reported as completed when one of 33 card hou
   expect(maintenanceCheckVerificationStatus({evaluated:0,unverified:0})).toBe('unverified');
   expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:-1})).toBe('unverified');
   expect(maintenanceCheckVerificationStatus({evaluated:33,unverified:Number.NaN})).toBe('unverified');
+});
+
+
+test('run #1230 regression: native maintenance panel excludes unrelated bg-white card 0',async({page})=>{
+  await page.setContent(`
+    <div class="bg-white" id="background-header">Dashboard header without maintenance data</div>
+    <div id="routeAction"><div class="bg-white">Unrelated Fleet card</div></div>
+    <div id="maintAction">
+      <div class="bg-white" id="maintenance-1">Aircraft 1 Hours to check: 25</div>
+      <div class="bg-white" id="maintenance-2">Aircraft 2 Hours to check: 12</div>
+    </div>
+  `);
+  const cards=scopedMaintenanceBulkCheckCards(page);
+  expect(await page.locator('.bg-white').count()).toBe(4);
+  expect(await cards.count()).toBe(2);
+  expect(await cards.nth(0).getAttribute('id')).toBe('maintenance-1');
+  expect(await cards.nth(1).getAttribute('id')).toBe('maintenance-2');
+  expect((await cards.allInnerTexts()).map(parseMaintenanceHoursToCheck)).toEqual([25,12]);
+});
+
+test('maintenance scope fails closed: background Fleet cards alone are never service targets',async({page})=>{
+  await page.setContent('<div class="bg-white">Hours to check: 0</div><div id="routeAction" class="bg-white">Hours to check: 0</div>');
+  expect(await scopedMaintenanceBulkCheckCards(page).count()).toBe(0);
 });
