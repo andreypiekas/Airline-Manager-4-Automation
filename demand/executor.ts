@@ -61,6 +61,8 @@ export interface ExecutionReport {
   generatedAt: string; completedAt: string | null; halted: boolean;
   summary: { evaluated: number; departed: number; simulated: number; held: number; unknown: number };
   entries: ExecutionEntry[];
+  /** True if any observed current-page ready target lacked a fresh identity/control proof. */
+  rollingWindowUnverified?: boolean;
 }
 const sameContext = (a: AircraftSnapshot,b: AircraftSnapshot) => a.aircraftId === b.aircraftId && a.routeId === b.routeId &&
   a.registration === b.registration && a.from === b.from && a.to === b.to && !!a.capacity && !!b.capacity &&
@@ -188,6 +190,9 @@ export class IndividualDepartureExecutor {
         validDemandCabins(a.dailyTotal)&&
         ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
     let rollingWindowVerified=verifiedRollingWindow(initial);
+    if(this.settings.rollingIndividualMode && (initial.warnings.length>0 ||
+       (initial.windowReadyCandidates??0)>initial.aircraft.length))
+      report.rollingWindowUnverified=true;
     if(this.settings.rollingIndividualMode){
       console.log('[RollingDispatchCoverage] '+JSON.stringify({
         scope:'FIRST_NATIVE_PAGE_ONLY',globalComplete:false,
@@ -450,6 +455,7 @@ export class IndividualDepartureExecutor {
       throw Error('ROLLING_NEXT_WINDOW_COLLECTION_FAILED');
     }
     if(!verifiedRollingWindow(nextWindow)){
+      report.rollingWindowUnverified=true;
       console.warn('[RollingFirstPageCycle] '+JSON.stringify({
         status:'HOLD_NEXT_WINDOW_UNVERIFIED',pass:rollingPass+1,
         globalComplete:false,mutationAuthorized:false
@@ -461,6 +467,8 @@ export class IndividualDepartureExecutor {
         !this.attemptedAircraft.has(a.aircraftId) &&
         !this.attemptedRoutes.has(a.routeId));
     if(nextOrdered.length===0)break;
+    if(nextWindow.warnings.length>0 || (nextWindow.windowReadyCandidates??0)>nextWindow.aircraft.length)
+      report.rollingWindowUnverified=true;
     initial=nextWindow;rollingWindowVerified=true;
     ingestVerifiedWindow(nextWindow);
     ordered=nextOrdered;rollingPass++;
