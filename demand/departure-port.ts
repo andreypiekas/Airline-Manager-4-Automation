@@ -109,7 +109,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         // DOM, game URLs and session state, so never log the raw exception.
         const code=['RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
           'UI_CONTROL_OBSCURED'].includes(message)?message:
-          /timeout|waiting for|expect\\(/i.test(message)?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
+          /timeout|waiting for|expect\(/i.test(message)?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
         console.warn('[RollingDispatchInventory] '+JSON.stringify({
           status:'FIRST_PAGE_READ_ONLY_COLLECTION_FAILED',code,
           globalComplete:false,mutationAuthorized:false,fullFleetScans:0
