@@ -42,12 +42,15 @@ export async function inspectIndividualFirstPage(
   // Runner already selected native Fleet page one. Reuse only for this
   // initial observation; every target below forces a NEW native Ajax read.
   let first=await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true});
-  // A transient missing Routes(N) heading in the native first page must not
-  // permanently prevent inspection. Retry the verified Fleet menu exactly once;
-  // no candidate is trusted until a complete fresh observation passes.
-  if(first.status==='UI_UNVERIFIED'&&budget()){
+  // A route can arrive or a card can briefly lose its identity while the
+  // Ajax list refreshes. Recover ONCE, read-only, only after a fresh native
+  // first-page request. Neither the initial partial snapshot nor an outdated
+  // cursor can authorize a departure: all independent candidate checks remain.
+  if(['UI_UNVERIFIED','IDENTITY_UNVERIFIED','UNSTABLE'].includes(first.status)&&budget()){
+    const prior=first.status;
     console.warn('[RollingPreflightRecovery] '+JSON.stringify({
-      status:'RETRY_FIRST_PAGE_UI',mutationAuthorized:false
+      status:'RETRY_FIRST_PAGE_UNVERIFIED',reason:prior,
+      globalComplete:false,mutationAuthorized:false
     }));
     first=await inspectFirstPageReadOnly(page,timeout);
   }
