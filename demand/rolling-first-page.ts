@@ -108,10 +108,10 @@ async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
   const container=page.locator('#routesContainer');
   if(await list.count()!==1||!await list.isVisible()||
      await container.count()!==1||!await container.isVisible())return false;
-  const heading=page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/});
+  const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
   if(await heading.count()!==1)return false;
   const value=(await heading.innerText({timeout:1500}).catch(()=>'' )).trim();
-  const match=/^Routes\\s*\\((\\d+)\\)$/.exec(value);
+  const match=/^Routes\s*\((\d+)\)$/.exec(value);
   if(!match)return false;
   const total=Number(match[1]);
   if(!Number.isSafeInteger(total)||total<1)return false;
@@ -121,7 +121,7 @@ async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
   const next=pager.getByRole('link',{name:'Next',exact:true});
   if(total<=20)return await next.count()===0;
   return await next.count()===1 && await next.isVisible() &&
-    (await next.getAttribute('onclick')||'').replace(/\\s/g,'')===
+    (await next.getAttribute('onclick')||'').replace(/\s/g,'')===
       "Ajax('routes.php?start=20&sort=','routeAction',this);";
 }
 
