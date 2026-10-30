@@ -121,7 +121,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         complete:false,expectedRoutes:pilot.routeTotal,
         observationScope:verifiedWindow?'native-individual-first-page' as const:undefined,
         windowReadyCandidates:pilot.readyCandidates,
-        warnings:verifiedWindow?[]:['ROLLING_WINDOW_UNVERIFIED']
+        warnings:verifiedWindow?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
       };
     }
     await openFleetList(this.page,this.timeout);
