@@ -41,3 +41,9 @@ test('zero verified candidates and unknown click results cannot become green',()
   unknown.summary.unknown=1;unknown.halted=true;
   expect(()=>assertScopedFirstPageOutcome(unknown)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
 });
+
+test('partially checked first-page targets never count as scoped success',()=>{
+  const partial=report('departed','NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED');
+  partial.rollingWindowUnverified=true;
+  expect(()=>assertScopedFirstPageOutcome(partial)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});
