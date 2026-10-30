@@ -156,6 +156,15 @@ async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
   return current || reject('NATIVE_FIRST_PAGE_NEXT_CURSOR_UNVERIFIED');
 }
 
+/** Only after an ambiguous navigation click timeout. Never clicks anything.
+ * An interactive challenge, a later cursor or any absent native surface
+ * remains a hard stop. */ 
+async function assertNativePageAfterClickTimeout(page:Page):Promise<boolean>{
+  await assertNoInteractiveChallenge(page,'first-page-pilot:after-menu-click-timeout');
+  try{return await nativeFirstPageAlreadyVisible(page);}
+  catch{return false;}
+}
+
 /**
  * Opens ONLY page 1, verifies it twice, and does not open details or click Depart.
  * Flights arriving/maintenance can reorder cards between samples even when
@@ -193,10 +202,28 @@ export async function inspectFirstPageReadOnly(
         'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED'].includes(message)
         ?message:/timeout|waiting for|expect\(/i.test(message)
           ?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
-      console.warn('[FirstPageNativeOpenFailure] '+JSON.stringify({
-        stage:lastStage,code,globalComplete:false,mutationAuthorized:false
-      }));
-      throw error;
+      // In run #1220, Playwright timed out inside control.click(), yet the
+      // error snapshot showed a populated native Fleet page with Routes(N),
+      // verified Next(start=20) and ready aircraft. Clicking again risks
+      // toggling the menu or losing the live page. This is ONLY a read-only
+      // recovery: the page must have transitioned from NOT being reusable
+      // before the click to a strictly verified first native page afterward.
+      // Two independent stable samples and fresh per-target validation are
+      // still required below, before any mutation.
+      const recovered=lastStage==='CLICK_CONTROL'&&code==='UI_WAIT_TIMEOUT'&&
+        await assertNativePageAfterClickTimeout(page);
+      if(recovered){
+        console.warn('[FirstPageNativeOpenRecovery] '+JSON.stringify({
+          status:'VERIFIED_FIRST_PAGE_AFTER_MENU_CLICK_TIMEOUT',
+          globalComplete:false,mutationAuthorized:false,
+          requiresStableDoubleRead:true,requiresFreshIndividualTarget:true
+        }));
+      }else{
+        console.warn('[FirstPageNativeOpenFailure] '+JSON.stringify({
+          stage:lastStage,code,globalComplete:false,mutationAuthorized:false
+        }));
+        throw error;
+      }
     }
   }
   const first = await sampleFirstPage(page, timeout);
