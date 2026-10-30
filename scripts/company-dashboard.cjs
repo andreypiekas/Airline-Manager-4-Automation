@@ -7,7 +7,7 @@ const safe=s=>String(s??'').replace(/[|\r\n<>]/g,' ');
 function build(dir='test-results/demand',logPath='test-results/bot.log',journalPath='.am4-state/github/return-journal.json'){
   const demand=read(dir,'demand-report.json'),fleet=read(dir,'fleet-observations.json'),execution=read(dir,'execution-report.json'),
     routeExecution=read(dir,'route-execution.json'),routeResearch=read(dir,'route-research.json'),candidateData=read(dir,'candidate-data.json'),supplies=read(dir,'supply-report.json'),postSupplies=read(dir,'supply-post-report.json'),pricing=read(dir,'pricing-execution.json'),modules=read(dir,'operational-modules.json'),
-    uiHealth=read(dir,'ui-health.json'),challenge=read(dir,'challenge-detected.json'),semi=read(dir,'semi-automatic-summary.json'),runBudget=read(dir,'run-time-budget.json'),ownedBases=read(dir,'owned-airline-bases.json'),globalFallback=read(dir,'global-fleet-fallback.json');
+    uiHealth=read(dir,'ui-health.json'),challenge=read(dir,'challenge-detected.json'),semi=read(dir,'semi-automatic-summary.json'),runBudget=read(dir,'run-time-budget.json'),ownedBases=read(dir,'owned-airline-bases.json'),globalFallback=read(dir,'global-fleet-fallback.json'),pageOnly=read(dir,'first-page-only-report.json');
   const log=(()=>{try{return fs.readFileSync(logPath,'utf8')}catch{return ''}})();
   const journal=readPath(journalPath),events=Array.isArray(journal?.events)?journal.events:[];
   const resolvedUncertainDepartureIds=new Set(events.filter(x=>x?.type==='departure-uncertain-resolved').map(x=>x.uncertainEventId));
@@ -22,11 +22,13 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     if(latestUncertain&&latestVerified<=latestUncertain)uncertainSupplyKinds.add(kind);
   }
   const aircraft=Array.isArray(fleet?.aircraft)?fleet.aircraft:[];
+  const scopedPage=pageOnly?.mode==='current-first-page-only'&&pageOnly?.globalComplete===false&&
+    Number.isSafeInteger(pageOnly.evaluated)&&pageOnly.evaluated>=0;
   const partialGlobal=globalFallback?.globalComplete===false&&Number.isSafeInteger(globalFallback.observed)&&
     Number.isSafeInteger(globalFallback.expected)&&globalFallback.observed>=0&&
     globalFallback.expected>0&&globalFallback.observed<=globalFallback.expected;
   // Verified individual entries are a bounded first-page sample, never a complete fleet.
-  const individualVerified=partialGlobal?(execution?.entries||[]).filter(e=>
+  const individualVerified=(partialGlobal||scopedPage)?(execution?.entries||[]).filter(e=>
     e?.demand?.state==='ready'&&e?.demand?.aircraftId===e?.aircraftId&&
     e?.demand?.routeId===e?.routeId&&typeof e?.registration==='string'&&!!e.registration).length:0;
   const currentAircraftRouteKeys=new Set(aircraft.map(a=>a.aircraftId+':'+a.routeId));
@@ -74,8 +76,9 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     bases:{status:ownedBases?.status??'not_observed',effective:Array.isArray(ownedBases?.effectiveBases)?ownedBases.effectiveBases:[],source:ownedBases?.source??null,reason:ownedBases?.reason??null},
     demand:{collectionComplete:demand?.collectionComplete??null,evaluated:demand?.summary?.evaluated??null,sufficient:demand?.summary?.sufficient??null,
       insufficient:demand?.summary?.insufficient??null,unavailable:demand?.summary?.unavailable??null,notReady:demand?.summary?.notReady??null},
-    fleet:{seen:partialGlobal?globalFallback.observed:(demand?.summary?.fleetSeen??aircraft.length),
-      expected:partialGlobal?globalFallback.expected:null,collectionComplete:demand?.collectionComplete??(partialGlobal?false:null),
+    fleet:{seen:scopedPage?pageOnly.evaluated:(partialGlobal?globalFallback.observed:(demand?.summary?.fleetSeen??aircraft.length)),
+      expected:partialGlobal?globalFallback.expected:null,collectionComplete:scopedPage?false:(demand?.collectionComplete??(partialGlobal?false:null)),
+      scope:scopedPage?'FIRST_PAGE_ONLY':partialGlobal?'GLOBAL_PARTIAL':'GLOBAL_OBSERVED',
       individualVerified,ready:aircraft.filter(a=>a.state==='ready').length,
       inflight:aircraft.filter(a=>a.state==='inflight').length,unavailable:aircraft.filter(a=>a.state==='unavailable').length},
     departures:{evaluated:execution?.summary?.evaluated??null,departed:execution?.summary?.departed??null,held:execution?.summary?.held??null,unknown:execution?.summary?.unknown??null,
@@ -155,7 +158,7 @@ function markdown(d,states){
   '## Resumo executivo','',
   '| Área | Resultado | Evidência resumida |','| --- | --- | --- |',
   `| Bases | **${d.bases?.effective?.length??0}** ativas | ${d.bases?.effective?.length?d.bases.effective.map(safe).join(', '):'n/d'} · fonte ${safe(d.bases?.status||'n/d')} |`,
-  `| Frota (coleta antes das decolagens) | **${fmt(d.fleet.seen)}** vistas${d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)?` de ${fmt(d.fleet.expected)} (parcial)`:''} | ${d.fleet.collectionComplete===false?`${fmt(d.fleet.individualVerified)} verificadas individualmente · estado global não confirmado`:`${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis`} |`,
+  `| ${d.fleet.scope==='FIRST_PAGE_ONLY'?'Página atual (sem inventário global)':'Frota (coleta antes das decolagens)'} | **${fmt(d.fleet.seen)}** vistas${d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)?` de ${fmt(d.fleet.expected)} (parcial)`:''} | ${d.fleet.collectionComplete===false?`${fmt(d.fleet.individualVerified)} verificadas individualmente · estado global não confirmado`:`${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis`} |`,
   `| Demanda | **${fmt(d.demand.sufficient)}/${fmt(d.demand.evaluated)}** suficientes | insuficientes ${fmt(d.demand.insufficient)} · indisponíveis ${fmt(d.demand.unavailable)} · coleta ${d.demand.collectionComplete===true?'completa':d.demand.collectionComplete===false?'incompleta':'n/d'} |`,
   `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}) · incertas ${fmt(d.departures.unknown)} |`,
   `| Pricing | **${fmt(d.pricing.adjusted)}** ajustadas | ${fmt(d.pricing.unchanged)} no alvo · incertas ${fmt(d.pricing.unknown)}${d.pricing.phaseHoldReason?` · fase: ${safe(d.pricing.phaseHoldReason)}`:''} |`,
