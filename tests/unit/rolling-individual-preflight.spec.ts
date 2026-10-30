@@ -28,6 +28,7 @@ async function fixture(page:Page,frames:Plane[][],total=132){
         container.append(row);
       });
       const pager=document.createElement('ul');pager.className='pagination';const next=document.createElement('a');
+      next.href='javascript:void(0);'; // match the game's actual native link role
       next.textContent='Next';next.setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
       if(total>20){pager.append(next);container.append(pager);}
       document.getElementById('routeAction')!.replaceChildren(container);
