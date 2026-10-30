@@ -66,17 +66,28 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
     })
   );
   const cards: FirstPageAircraft[] = [];
+  const rejectCounts:Record<string,number>={};
+  const reject=(reason:string)=>{rejectCounts[reason]=(rejectCounts[reason]||0)+1;};
   let invalid = rawCards.length === 0 || rawCards.length > 20;
+  if(invalid)reject('VISIBLE_CARD_COUNT_OUT_OF_RANGE');
   for (const rawCard of rawCards) {
     const matches = rawCard.buttons.map(b => ({
       id: aircraftIdFromDetailsControl(b.callback),
       registration: b.registration,
       registrationNodeId: b.registrationNodeId
     })).filter(b => b.id !== null);
-    if (!/^[1-9]\d*$/.test(rawCard.routeId) || matches.length !== 1 ||
-        !matches[0].id || !/^[1-9]\d*$/.test(matches[0].id) ||
-        matches[0].registrationNodeId !== 'acRegList' + matches[0].id ||
-        !matches[0].registration || (rawCard.ready && rawCard.inflight)) {
+    const routeValid=/^[1-9]\d*$/.test(rawCard.routeId);
+    const detailsUnique=matches.length===1 && !!matches[0].id &&
+      /^[1-9]\d*$/.test(matches[0].id);
+    const registrationValid=detailsUnique &&
+      matches[0].registrationNodeId==='acRegList'+matches[0].id &&
+      !!matches[0].registration;
+    const conflictingState=rawCard.ready&&rawCard.inflight;
+    if(!routeValid||!detailsUnique||!registrationValid||conflictingState){
+      if(!routeValid)reject('ROUTE_ID_UNVERIFIED');
+      if(!detailsUnique)reject('DETAILS_CONTROL_IDENTITY_UNVERIFIED');
+      if(detailsUnique&&!registrationValid)reject('REGISTRATION_IDENTITY_UNVERIFIED');
+      if(conflictingState)reject('READY_INFLIGHT_STATE_CONFLICT');
       invalid = true;
       continue;
     }
@@ -87,14 +98,27 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
       state: rawCard.ready ? 'ready' : rawCard.inflight ? 'inflight' : 'unavailable'
     });
   }
-  invalid ||= new Set(cards.map(a => a.routeId)).size !== cards.length ||
-    new Set(cards.map(a => a.aircraftId)).size !== cards.length ||
-    cards.length !== rawCards.length;
+  if(new Set(cards.map(a=>a.routeId)).size!==cards.length){
+    invalid=true;reject('DUPLICATE_ROUTE_ID');
+  }
+  if(new Set(cards.map(a=>a.aircraftId)).size!==cards.length){
+    invalid=true;reject('DUPLICATE_AIRCRAFT_ID');
+  }
+  if(cards.length!==rawCards.length){
+    invalid=true;reject('UNVERIFIED_CARDS_PRESENT');
+  }
   const next = page.locator('#routesContainer .pagination').getByRole('link', { name:'Next', exact:true });
   const nextCount = await next.count();
   const cursorVerified = total <= 20 ? nextCount === 0 : nextCount === 1 &&
     (await next.getAttribute('onclick') || '').replace(/\s/g, '') ===
       "Ajax('routes.php?start=20&sort=','routeAction',this);";
+  if(!cursorVerified)reject('FIRST_PAGE_CURSOR_UNVERIFIED');
+  if(invalid||!cursorVerified)console.warn('[FirstPageReadOnlyDiagnostic] '+JSON.stringify({
+    status:'HOLD_FIRST_PAGE_IDENTITY_OR_CURSOR',
+    visible:rawCards.length,validated:cards.length,
+    nextLinks:nextCount,routeCountPresent:true,
+    reasons:rejectCounts,globalComplete:false,mutationAuthorized:false
+  }));
   return { total, cards, invalid, cursorVerified };
 }
 
