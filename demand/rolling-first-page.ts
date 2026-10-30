@@ -98,6 +98,33 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
   return { total, cards, invalid, cursorVerified };
 }
 
+/** A native Fleet first page that is ALREADY rendered can be reused.
+ * This prevents a redundant Fleet-tab click from waiting for a DOM container
+ * detach when AM4 keeps the same #routesContainer node during Ajax refresh.
+ * A later native page has Next(start=40+) or Previous and is never reused.
+ * The two independent full-window identity reads still happen below. */
+async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
+  const list=page.locator('#routeAction');
+  const container=page.locator('#routesContainer');
+  if(await list.count()!==1||!await list.isVisible()||
+     await container.count()!==1||!await container.isVisible())return false;
+  const heading=page.getByRole('button',{name:/^Routes\\s*\\(\\d+\\)$/});
+  if(await heading.count()!==1)return false;
+  const value=(await heading.innerText({timeout:1500}).catch(()=>'' )).trim();
+  const match=/^Routes\\s*\\((\\d+)\\)$/.exec(value);
+  if(!match)return false;
+  const total=Number(match[1]);
+  if(!Number.isSafeInteger(total)||total<1)return false;
+  const pager=container.locator('.pagination');
+  const previous=pager.getByRole('link',{name:'Previous',exact:true});
+  if(await previous.count()>0)return false;
+  const next=pager.getByRole('link',{name:'Next',exact:true});
+  if(total<=20)return await next.count()===0;
+  return await next.count()===1 && await next.isVisible() &&
+    (await next.getAttribute('onclick')||'').replace(/\\s/g,'')===
+      "Ajax('routes.php?start=20&sort=','routeAction',this);";
+}
+
 /**
  * Opens ONLY page 1, verifies it twice, and does not open details or click Depart.
  * Flights arriving/maintenance can reorder cards between samples even when
@@ -108,7 +135,19 @@ export async function inspectFirstPageReadOnly(page: Page, timeout = 10000): Pro
     status, routeTotal:null, visible:0, ready:0, aircraft:[], mutationAuthorized:false
   });
   await assertNoInteractiveChallenge(page,'first-page-pilot:before');
-  await openFleetList(page, timeout);
+  // The runner already opened page one. Do not reopen the Fleet tab when its
+  // exact native first-page cursor is still verified: in the live game the
+  // Ajax refresh may reuse the same container rather than detach it.
+  if(await nativeFirstPageAlreadyVisible(page)){
+    console.log('[RollingFirstPageOpen] '+JSON.stringify({
+      status:'REUSED_VERIFIED_NATIVE_FIRST_PAGE',fullFleetScan:false,mutationAuthorized:false
+    }));
+  }else{
+    console.log('[RollingFirstPageOpen] '+JSON.stringify({
+      status:'OPEN_NATIVE_FIRST_PAGE',fullFleetScan:false,mutationAuthorized:false
+    }));
+    await openFleetList(page, timeout);
+  }
   const first = await sampleFirstPage(page, timeout);
   if (!first) return blank('UI_UNVERIFIED');
   if (first.invalid || !first.cursorVerified) return {
