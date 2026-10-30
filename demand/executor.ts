@@ -435,11 +435,11 @@ export class IndividualDepartureExecutor {
       }
       await persist();
     }
-    if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=3 ||
+    if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=100 ||
        report.entries.filter(e=>e.status==='departed').length===departedBeforePass ||
        (this.settings.maxDepartures!=='all'&&
         this.attemptedAircraft.size>=this.settings.maxDepartures))break;
-    // Bounded only after real confirmed departures, with enough time left for
+    // Bounded by confirmed new targets, unique attempts, a conservative pass cap\n    // and the real mutation deadline; never read all pages of the Fleet.\n    // Refresh only after real confirmed departures, with enough time left for
     // native refresh, intent persistence and eventual countdown confirmation.
     if(this.settings.mutationDeadlineEpochMs!==undefined&&
        Date.now()+MUTATION_COMPLETION_RESERVE_MS+30_000>=this.settings.mutationDeadlineEpochMs)break;
