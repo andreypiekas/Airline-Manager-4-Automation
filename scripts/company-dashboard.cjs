@@ -146,6 +146,8 @@ function markdown(d,states){
  if(d.uiHealth.status!=='healthy'&&d.uiHealth.status!=='not_observed')alerts.push(`UI health: ${d.uiHealth.status}`);
  if(d.challenge?.detected)alerts.push('CAPTCHA/challenge detectado — execução interrompida sem tentativa de contorno');
  if((d.departures.timeBudgetHeld||0)>0)alerts.push(`${d.departures.timeBudgetHeld} aeronave(s) adiadas pelo orçamento de tempo; reavaliar na próxima execução`);
+ if(d.fleet.scope==='FIRST_PAGE_ONLY')alerts.push('modo página atual: apenas alvos atuais foram verificados; frota global NÃO examinada');
+
  if(d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)&&d.fleet.expected>0)
    alerts.push(`coleta global incompleta: ${fmt(d.fleet.seen)}/${fmt(d.fleet.expected)}; ${fmt(d.fleet.individualVerified)} alvo(s) verificado(s) individualmente (cobertura parcial)`);
  if((d.departures.fuelHeld||0)>0)
