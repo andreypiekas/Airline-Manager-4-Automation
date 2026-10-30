@@ -62,3 +62,31 @@ test('first-page-only dashboard labels sampled targets without claiming full fle
     expect(markdown).toContain('frota global NÃO examinada');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('run #1202 initial Fleet failure stays first-page scope with unobserved counts',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'am4-page-initial-failure-'));
+  try{
+    writeFileSync(join(dir,'first-page-only-report.json'),serializeJsonDocument({
+      schemaVersion:1,mode:'current-first-page-only',status:'STARTED_UNVERIFIED',
+      globalComplete:false,fleetWideCompletionClaim:false,globalFleetScans:0,
+      scope:'VERIFIED_WINDOWS_ONLY',evaluated:null,departed:null,held:null,unknown:null
+    }));
+    writeFileSync(join(dir,'execution-report.json'),JSON.stringify({
+      schemaVersion:1,dryRun:false,completedAt:null,halted:true,
+      summary:{evaluated:0,departed:0,simulated:0,held:0,unknown:0},entries:[]
+    }));
+    execFileSync(process.execPath,[resolve('scripts/company-dashboard.cjs'),dir],{
+      cwd:process.cwd(),encoding:'utf8',timeout:15_000
+    });
+    const dash=JSON.parse(readFileSync(join(dir,'company-dashboard.json'),'utf8'));
+    const md=readFileSync(join(dir,'company-dashboard.md'),'utf8');
+    expect(dash.fleet.scope).toBe('FIRST_PAGE_ONLY');
+    expect(dash.fleet.seen).toBeNull();
+    expect(dash.fleet.expected).toBeNull();
+    expect(dash.fleet.collectionComplete).toBe(false);
+    expect(dash.departures.departed).toBe(0);
+    expect(md).toContain('Página atual (sem inventário global)');
+    expect(md).toContain('frota global NÃO examinada');
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
