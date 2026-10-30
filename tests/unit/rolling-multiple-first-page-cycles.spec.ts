@@ -125,3 +125,13 @@ test('a failed subsequent read does not erase the confirmed departure checkpoint
   expect(completed.at(-1)?.entries[0]?.status).toBe('departed');
   expect(completed.at(-1)?.halted).toBe(true);
 });
+
+test('first-page rolling dispatch continues across more than four verified batches without a global scan',async()=>{
+  const planes=Array.from({length:7},(_,i)=>aircraft(String(3001+i),'GRU','XAP'));
+  const windows=[...planes.map(a=>native([a])),native([planes.at(-1)!])];
+  const r=await execute({windows,max:10,fuel:100000});
+  expect(r.report.summary).toMatchObject({departed:7,unknown:0});
+  expect(r.clicks).toBe(7);
+  expect(r.collects).toBe(8);
+  expect(r.report.entries.map(e=>e.aircraftId)).toEqual(planes.map(a=>a.aircraftId));
+});
