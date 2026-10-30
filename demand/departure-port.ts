@@ -269,15 +269,19 @@ export class PlaywrightDeparturePort implements DeparturePort {
    * It NEVER invokes depart() or re-clicks an ambiguous prior departure.
    * Missing restoration evidence is a hard HOLD, not a resolved event. */
   async inspectPersistedUncertainReady(expected:AircraftSnapshot):Promise<AircraftSnapshot>{
+    let readyConfirmed=false;
     try{
       const fresh=await this.prepare(expected);
       if(fresh.state!=='ready'||!!fresh.issue||!fresh.departureControlShape)
         throw Error('QUARANTINE_READY_NOT_VERIFIED');
+      readyConfirmed=true;
       return fresh;
     }finally{
       this.prepared=null; // revoke all click-ready state unconditionally
       const details=this.page.locator('#detailsAction');
       try{
+        if(readyConfirmed&&(await details.count()!==1||!await details.isVisible()))
+          throw Error('QUARANTINE_DETAILS_CONTEXT_UNVERIFIED');
         if(await details.count()===1 && await details.isVisible()){
           await assertNoInteractiveChallenge(this.page,'departure:quarantine:before-return');
           const back=this.page.locator('#route-name .glyphicons-chevron-left');
