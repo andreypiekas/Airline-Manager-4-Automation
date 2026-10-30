@@ -9,6 +9,7 @@ import { executionEnvironment, runDemandExecution } from '../demand/execute-run'
 import { pricingExecutionSettings, runTicketPricingExecution } from '../pricing/run';
 import { routeExecutionSettings, runRouteExecution } from '../optimization/route-execution-run';
 import { withRunLock } from '../utils/run-lock';
+import { firstPageOnlyEnabled, assertScopedFirstPageOutcome } from '../utils/first-page-only-policy';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
@@ -387,6 +388,50 @@ test('All Operations', async ({ page }) => {
 
     if (!fleetOpened) {
       throw new Error('[Demand] Fleet/Routes nao abriu apos recuperacao da interface.');
+    }
+    // Dedicated first-page-only production operation. DO NOT call global
+    // collectFleetWithFreshRetry, inventory every page, or infer fleet-wide
+    // completeness from Routes(N). Each target is independently reverified.
+    if(firstPageOnlyEnabled(process.env,demandConfig.dryRun)){
+      console.log('[FirstPageOnly] '+JSON.stringify({
+        scope:'CURRENT_NATIVE_FIRST_PAGE_ONLY',globalFleetScans:0,
+        fleetWideCompletionClaim:false,individualTargetVerificationRequired:true
+      }));
+      if(!moduleEnabled('ENABLE_DEPART')){
+        console.warn('[FirstPageOnly] Departures disabled: no fleet-wide success claim.');
+        throw Error('FIRST_PAGE_DISPATCH_DISABLED');
+      }
+      if(!phaseAllowed('first-page-individual-departures',phaseBudgetsMs.departures))
+        throw Error('FIRST_PAGE_DISPATCH_BUDGET_EXHAUSTED');
+      const dispatch=await runDemandExecution(page,demandConfig,{
+        ...process.env,
+        DEMAND_ROLLING_INDIVIDUAL_DISPATCH:'true',
+        CAMPAIGN_GATE_REQUIRED:campaignRequired?'true':'false',
+        CAMPAIGN_GATE_VERIFIED:campaignVerifiedForDeparture?'true':'false',
+        DEMAND_EXECUTION_MUTATION_DEADLINE_EPOCH_MS:String(departureMutationDeadlineEpochMs)
+      },'test-results/demand');
+      // This file intentionally records a PARTIAL first-page sample, not a
+      // globally reconciled Fleet. The native Routes(N) is not used as a gate.
+      const currentPageReport={schemaVersion:1,mode:'current-first-page-only',
+        globalComplete:false,scope:'VERIFIED_WINDOWS_ONLY',
+        evaluated:dispatch.summary.evaluated,departed:dispatch.summary.departed,
+        held:dispatch.summary.held,unknown:dispatch.summary.unknown,
+        fleetWideCompletionClaim:false,globalFleetScans:0,
+        generatedAt:new Date().toISOString()};
+      fs.writeFileSync('test-results/demand/first-page-only-report.json',
+        JSON.stringify(currentPageReport,null,2)+'\\n');
+      console.log('[FirstPageOnlyResult] '+JSON.stringify(currentPageReport));
+      const postGate=postDispatchSupplyDecision(dispatch);
+      const postBudget=phaseAllowed('first-page-post-dispatch-supplies',phaseBudgetsMs.supplies);
+      if(postGate.allowed&&postBudget&&moduleEnabled('ENABLE_FUEL')){
+        await runSupplies(page,false,process.env,'test-results/demand',undefined,{
+          phase:'post',mutationDeadlineEpochMs:phaseDeadlineEpochMs
+        });
+      }
+      // Do not call this a full Fleet success. Any ambiguous candidate stays
+      // red, while verified price/fuel/demand holds remain explicit in report.
+      assertScopedFirstPageOutcome(dispatch);
+      return;
     }
     let simulation: Awaited<ReturnType<typeof runDemandSimulationDetailed>>;
     try {
