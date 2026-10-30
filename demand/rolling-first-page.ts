@@ -64,7 +64,9 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
         routeId,
         buttons,
         hasReadyClass,
-        hasDepartControl:!!depart,
+        // Any native Depart-like control, even hidden/misnumbered, forbids the
+        // passive inflight exception. Ready candidates require the exact one.
+        hasDepartControl:!!el.querySelector('[id^="listDepart"]'),
         ready: el.classList.contains('classPAX') &&
           hasReadyClass && !!depart &&
           !!depart.getClientRects().length && !(depart as HTMLButtonElement).disabled,
