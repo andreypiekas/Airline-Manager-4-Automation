@@ -130,7 +130,9 @@ async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
  * Flights arriving/maintenance can reorder cards between samples even when
  * Routes(N) remains unchanged. Such a window is not stable evidence.
  */
-export async function inspectFirstPageReadOnly(page: Page, timeout = 10000): Promise<FirstPageObservation> {
+export async function inspectFirstPageReadOnly(
+  page: Page, timeout = 10000, options:{allowAlreadyOpen?:boolean}={}
+): Promise<FirstPageObservation> {
   const blank = (status: FirstPageObservation['status']): FirstPageObservation => ({
     status, routeTotal:null, visible:0, ready:0, aircraft:[], mutationAuthorized:false
   });
@@ -138,7 +140,7 @@ export async function inspectFirstPageReadOnly(page: Page, timeout = 10000): Pro
   // The runner already opened page one. Do not reopen the Fleet tab when its
   // exact native first-page cursor is still verified: in the live game the
   // Ajax refresh may reuse the same container rather than detach it.
-  if(await nativeFirstPageAlreadyVisible(page)){
+  if(options.allowAlreadyOpen===true && await nativeFirstPageAlreadyVisible(page)){
     console.log('[RollingFirstPageOpen] '+JSON.stringify({
       status:'REUSED_VERIFIED_NATIVE_FIRST_PAGE',fullFleetScan:false,mutationAuthorized:false
     }));
@@ -146,7 +148,10 @@ export async function inspectFirstPageReadOnly(page: Page, timeout = 10000): Pro
     console.log('[RollingFirstPageOpen] '+JSON.stringify({
       status:'OPEN_NATIVE_FIRST_PAGE',fullFleetScan:false,mutationAuthorized:false
     }));
-    await openFleetList(page, timeout);
+    // Revalidate by a fresh native Fleet request for subsequent target reads.
+    // The in-place fallback still requires an actual successful routes.php
+    // response, then TWO stable identity/cursor observations below.
+    await openFleetList(page, timeout, ()=>{}, {allowVerifiedInPlaceRefresh:true});
   }
   const first = await sampleFirstPage(page, timeout);
   if (!first) return blank('UI_UNVERIFIED');
