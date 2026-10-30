@@ -16,10 +16,8 @@ export function assertScopedFirstPageOutcome(report:ExecutionReport):void {
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
   for(const entry of report.entries){
     if(entry.status==='departed'&&entry.reason==='NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED')continue;
-    if(entry.status==='held'&&[
-      'DEMAND_BELOW_THRESHOLD','DEMAND_INSUFFICIENT','ALREADY_ATTEMPTED',
-      'FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY'
-    ].includes(entry.reason))continue;
+    if(entry.status==='held'&&(entry.demand?.decision==='hold_insufficient'||
+      ['ALREADY_ATTEMPTED','FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY'].includes(entry.reason)))continue;
     // Not verified, no fuel evidence, CAPTCHA/challenge, timer starvation,
     // unclear departure controls or unknown results cannot be green.
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
