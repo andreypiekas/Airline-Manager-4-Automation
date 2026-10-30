@@ -257,13 +257,17 @@ test('native first-page AJAX without new response or detached DOM fails closed',
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
 
-test('run #1205: transient invalid identity in first visible page gets one fresh verified retry',async({page})=>{
+test('run #1205: transient invalid native callback gets one fresh verified retry',async({page})=>{
   await fixture(page,[[plane(1,false)],[plane(1,false)]],1);
   await page.evaluate(()=>{
     const w=window as any,render=w.menuFleet;
     w.menuFleet=()=>{
       render();
-      if(w.opens===1)document.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+      // Absent registration spans are legitimate for PASSIVE inflight cards.
+      // A malformed native details callback is still forbidden for every
+      // card, including an airborne one. Retry once with fresh native UI.
+      if(w.opens===1)document.querySelector('#routeMainList1001 a')
+        ?.setAttribute('onclick',"Ajax('unknown.php','other');");
     };
   });
   const recovered=await inspectIndividualFirstPage(page,{timeout:650,maxCandidates:1});
