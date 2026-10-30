@@ -63,6 +63,8 @@ export interface ExecutionReport {
   entries: ExecutionEntry[];
   /** True if any observed current-page ready target lacked a fresh identity/control proof. */
   rollingWindowUnverified?: boolean;
+  /** Verified complete native first-page observation contained no ready aircraft. */
+  firstPageNoReadyVerified?: boolean;
 }
 const sameContext = (a: AircraftSnapshot,b: AircraftSnapshot) => a.aircraftId === b.aircraftId && a.routeId === b.routeId &&
   a.registration === b.registration && a.from === b.from && a.to === b.to && !!a.capacity && !!b.capacity &&
@@ -190,6 +192,9 @@ export class IndividualDepartureExecutor {
         validDemandCabins(a.dailyTotal)&&
         ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
     let rollingWindowVerified=verifiedRollingWindow(initial);
+    if(this.settings.rollingIndividualMode&&initial.windowNoReadyVerified===true&&
+       initial.warnings.length===0&&initial.aircraft.length===0)
+      report.firstPageNoReadyVerified=true;
     if(this.settings.rollingIndividualMode && (initial.warnings.length>0 ||
        (initial.windowReadyCandidates??0)>initial.aircraft.length))
       report.rollingWindowUnverified=true;
@@ -482,7 +487,7 @@ export class IndividualDepartureExecutor {
     // Fail visibly rather than returning a misleading green 0-departure run
     // if no aircraft on the current first page could be assessed.
     if(this.settings.rollingIndividualMode&&
-       (!rollingWindowVerified||initial.aircraft.length===0)){
+       (!rollingWindowVerified||(initial.aircraft.length===0&&!report.firstPageNoReadyVerified))){
       report.halted=true;
       await persist();
       throw Error('ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES');
