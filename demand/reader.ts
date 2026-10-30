@@ -536,35 +536,55 @@ export class DemandReader {
     const root=this.page.locator('#routesContainer');
     if(await root.count()!==1||!await root.isVisible())throw Error('ROLLING_FLEET_LIST_UNAVAILABLE');
     const cards=await root.locator('[id^="routeMainList"]').evaluateAll(es=>
-      es.filter(e=>!!e.getClientRects().length).map(e=>({
-        routeId:e.id.replace(/^routeMainList/,''),
-        aircraftIds:Array.from(e.querySelectorAll('a')).map(a=>
-          (a.getAttribute('onclick')||'').replace(/\s/g,'')
-            .match(/^playSound\('neutral_click'\);Ajax\('fleet_details\.php\?id=([1-9]\d*)','detailsAction'\);if\(intro==0\)\{\$\('#routeAction'\)\.hide\(\);\}$/)?.[1]).filter(Boolean),
-        registrationNodes:Array.from(e.querySelectorAll('[id^="acRegList"]')).map(n=>({
-          id:n.id,text:n.textContent?.trim()||''
-        })),
-        routeLabels:Array.from(e.querySelectorAll('span.s-text')).map(n=>n.textContent?.trim()||'')
-          .filter(x=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(x)),
-        pax:e.classList.contains('classPAX'),
-        ready:e.classList.contains('listDepartable'),
-        inflight:/Onboard\s*:/.test((e as HTMLElement).innerText),
-        depart:(()=>{
-          const b=e.querySelector('#listDepart'+e.id.replace(/^routeMainList/,''));
-          return !!b&&!!b.getClientRects().length&&!(b as HTMLButtonElement).disabled;
-        })()
-      })));
+      es.filter(e=>!!e.getClientRects().length).map(e=>{
+        const links=Array.from(e.querySelectorAll('a')).map(a=>{
+          const id=(a.getAttribute('onclick')||'').replace(/\s/g,'')
+            .match(/^playSound\('neutral_click'\);Ajax\('fleet_details\.php\?id=([1-9]\d*)','detailsAction'\);if\(intro==0\)\{\$\('#routeAction'\)\.hide\(\);\}$/)?.[1]||'';
+          const visibleRegistration=(a.textContent?.replace(/\s+/g,' ').trim()||'')
+            .match(/^(.{1,80}?)\s+-\s+.{1,100}$/)?.[1]||'';
+          return {id,visibleRegistration};
+        }).filter(a=>!!a.id);
+        const routeId=e.id.replace(/^routeMainList/,'');
+        const depart=e.querySelector('#listDepart'+routeId);
+        return {
+          routeId,
+          aircraftIds:links.map(a=>a.id),
+          passiveInflightRegistration:links.length===1?links[0].visibleRegistration:'',
+          registrationNodes:Array.from(e.querySelectorAll('[id^="acRegList"]')).map(n=>({
+            id:n.id,text:n.textContent?.trim()||''
+          })),
+          routeLabels:Array.from(e.querySelectorAll('span.s-text')).map(n=>n.textContent?.trim()||'')
+            .filter(x=>/^[A-Z0-9]{3}\s*-\s*[A-Z0-9]{3}$/.test(x)),
+          pax:e.classList.contains('classPAX'),
+          ready:e.classList.contains('listDepartable'),
+          inflight:/Onboard\s*:/.test((e as HTMLElement).innerText),
+          departControlPresent:!!depart,
+          depart:!!depart&&!!depart.getClientRects().length&&!(depart as HTMLButtonElement).disabled
+        };
+      }));
+    const verifiedCard=(c:typeof cards[number]):boolean=>{
+      if(c.aircraftIds.length!==1||!/^[1-9]\d*$/.test(c.routeId))return false;
+      const registrationNodeValid=c.registrationNodes.length===1 &&
+        c.registrationNodes[0].id==='acRegList'+c.aircraftIds[0] &&
+        !!c.registrationNodes[0].text;
+      // An inflight row has no usable Depart action. The game may omit
+      // acRegList on these cards (run #1221). The native aircraft callback ID
+      // remains mandatory and unique, and a visible label is used only to
+      // reconcile passive window stability. Missing/mismatched acRegList on
+      // a READY aircraft still blocks any departure.
+      const passiveInflightNoNode=c.inflight && !c.ready &&
+        !c.departControlPresent && !c.depart &&
+        c.registrationNodes.length===0 && !!c.passiveInflightRegistration;
+      return registrationNodeValid||passiveInflightNoNode;
+    };
     if(!cards.length||cards.length>20||
        new Set(cards.map(c=>c.routeId)).size!==cards.length||
-       cards.some(c=>c.aircraftIds.length!==1||c.registrationNodes.length!==1||
-         c.registrationNodes[0].id!=='acRegList'+c.aircraftIds[0]||
-         !c.registrationNodes[0].text||
-         !/^[1-9]\d*$/.test(c.routeId))||
+       cards.some(c=>!verifiedCard(c))||
        new Set(cards.map(c=>c.aircraftIds[0])).size!==cards.length)
       throw Error('ROLLING_WINDOW_IDENTITY_UNVERIFIED');
     const matches=cards.filter(c=>c.routeId===expected.routeId&&
       c.aircraftIds[0]===expected.aircraftId&&
-      c.registrationNodes[0].text===expected.registration);
+      c.registrationNodes[0]?.text===expected.registration);
     if(matches.length!==1)throw Error('ROLLING_TARGET_MOVED_OR_CHANGED');
     const card=matches[0];
     if(!card.pax||!card.ready||card.inflight||!card.depart||
