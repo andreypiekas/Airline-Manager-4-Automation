@@ -256,3 +256,40 @@ test('native first-page AJAX without new response or detached DOM fails closed',
   await expect(inspectFirstPageReadOnly(page,350)).rejects.toThrow('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
+
+test('run #1205: transient invalid identity in first visible page gets one fresh verified retry',async({page})=>{
+  await fixture(page,[[plane(1,false)],[plane(1,false)]],1);
+  await page.evaluate(()=>{
+    const w=window as any,render=w.menuFleet;
+    w.menuFleet=()=>{
+      render();
+      if(w.opens===1)document.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+    };
+  });
+  const recovered=await inspectIndividualFirstPage(page,{timeout:650,maxCandidates:1});
+  expect(recovered).toMatchObject({
+    window:'STABLE',routeTotal:1,inspected:0,readyCandidates:0,
+    verified:0,mutationAuthorized:false,holds:[]
+  });
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1205: persistently missing identity stays failed after exactly one read-only retry',async({page})=>{
+  await fixture(page,[[plane(1,true)]],1);
+  await page.evaluate(()=>{
+    const w=window as any,render=w.menuFleet;
+    w.menuFleet=()=>{
+      render();
+      document.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+    };
+  });
+  const blocked=await inspectIndividualFirstPage(page,{timeout:650,maxCandidates:1});
+  expect(blocked).toMatchObject({
+    window:'UNVERIFIED',routeTotal:null,inspected:0,readyCandidates:0,verified:0,
+    mutationAuthorized:false,holds:[{code:'WINDOW_UNVERIFIED'}]
+  });
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
