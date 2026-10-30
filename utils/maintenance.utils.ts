@@ -19,6 +19,16 @@ export function maintenanceCheckVerificationStatus(evidence:{evaluated:number;un
         ?'completed_observed':'unverified';
 }
 
+/** The native maintenance popup owns the bulk-check cards.
+ * Page-global .bg-white also matches unrelated surfaces and caused
+ * the permanent card 0 HOLD seen in production #1230. This selector
+ * deliberately excludes background/header cards outside #maintAction.
+ * It never treats a card without its own Hours to check proof as valid.
+ */
+export function scopedMaintenanceBulkCheckCards(page:Page) {
+    return page.locator('#maintAction .bg-white');
+}
+
 export class MaintenanceUtils {
     page: Page;
     repairWear: string;
@@ -119,14 +129,21 @@ export class MaintenanceUtils {
         await this.page.mouse.wheel(0, -2500);
         await GeneralUtils.randomSleep(800, 1200);
 
-        // Conta os cards de aeronaves observados.
-        let cardsCount = await this.page.locator('.bg-white').count();
+        // Read cards only inside the currently visible native maintenance panel.
+        // Never mix unrelated .bg-white elements from Fleet, background or popups.
+        const maintenancePanel=this.page.locator('#maintAction');
+        if(await maintenancePanel.count()!==1||!await maintenancePanel.isVisible())
+            throw new Error('MAINTENANCE_BULK_PANEL_UNVERIFIED');
+        const cards=scopedMaintenanceBulkCheckCards(this.page);
+        const cardsCount=await cards.count();
+        if(cardsCount<1||cardsCount>1000)
+            throw new Error('MAINTENANCE_BULK_CARDS_UNVERIFIED');
         console.log(`[Manutencao] Avaliando ${cardsCount} aeronaves (limite: ate ${this.hoursCheck} horas)...`);
 
         // Avalia cada card uma unica vez.
         for (let i = 0; i < cardsCount; i++) {
             // Recria o locator em cada iteracao para evitar referencia obsoleta.
-            const cardElement = this.page.locator('.bg-white').nth(i);
+            const cardElement = cards.nth(i);
             
             // Pengaman: Tunggu kartu terpasang dengan benar di DOM sebelum mengecek isinya
             try {
