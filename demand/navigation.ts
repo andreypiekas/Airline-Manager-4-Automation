@@ -48,13 +48,20 @@ export async function openFleetList(
     // accept a genuine successful native response if the DOM was reused.
     if (previous) {
       onStage('WAIT_OLD_CONTAINER_DETACH');
-      const detached=await expect.poll(()=>previous.evaluate(e=>e.isConnected),
-        {timeout:inPlaceResponse?Math.min(timeout,1200):timeout})
-        .toBe(false).then(()=>true,()=>false);
-      if(!detached){
-        if(!inPlaceResponse || !await inPlaceResponse)
-          throw Error('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
-        onStage('VERIFY_INPLACE_NATIVE_RESPONSE');
+      if(!inPlaceResponse){
+        // Preserve the original stricter behavior for every pre-existing
+        // caller, including complete fleet scans and post-click confirmation.
+        await expect.poll(()=>previous.evaluate(e=>e.isConnected),
+          {timeout}).toBe(false);
+      }else{
+        const detached=await expect.poll(()=>previous.evaluate(e=>e.isConnected),
+          {timeout:Math.min(timeout,1200)})
+          .toBe(false).then(()=>true,()=>false);
+        if(!detached){
+          if(!await inPlaceResponse)
+            throw Error('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
+          onStage('VERIFY_INPLACE_NATIVE_RESPONSE');
+        }
       }
     }
   } finally { await previous?.dispose(); }
