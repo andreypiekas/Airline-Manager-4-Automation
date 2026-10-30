@@ -19,6 +19,7 @@ import { DemandConfig, DemandReport } from './types';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
 import { appendFlightHistoryAnchors, appendObservedArrivals, appendResolvedUncertainDepartures, readFlightHistoryContinuityDiagnostics, readFlightHistoryStitchDiagnostics, readLiveAnchoredFlightHistoryStitchDiagnostics } from '../optimization/return-journal';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { serializeJsonDocument } from '../utils/json-document';
 
 export async function runDemandSimulationDetailed(page: Page, config: DemandConfig = readDemandConfig(), reviews: Record<string, RouteReview> = {}, options: { collectionRetryDeadlineEpochMs?: number } = {}) {
   const configuredOptimization = optimizationConfig();
@@ -35,13 +36,13 @@ export async function runDemandSimulationDetailed(page: Page, config: DemandConf
      process.env.AUTOMATION_MODE!=='semi-automatic'&&!off(process.env.ENABLE_DEPART)&&
      !off(process.env.ENABLE_ROLLING_INDIVIDUAL_FALLBACK)){
     await mkdir('test-results/demand',{recursive:true});
-    await writeFile('test-results/demand/global-fleet-fallback.json',JSON.stringify({
+    await writeFile('test-results/demand/global-fleet-fallback.json',serializeJsonDocument({
       schemaVersion:1,mode:'native-individual-fallback',
       globalComplete:false,observed:collection.aircraft.length,
       expected:collection.expectedRoutes,
       globalMutationsAuthorized:false,individualTargetChecksRequired:true,
       generatedAt:new Date().toISOString()
-    },null,2)+'\\n');
+    }));
     console.warn('[DemandCollection] '+JSON.stringify({
       observed:collection.aircraft.length,expected:collection.expectedRoutes,
       action:'SAFE_INDIVIDUAL_FALLBACK',globalComplete:false

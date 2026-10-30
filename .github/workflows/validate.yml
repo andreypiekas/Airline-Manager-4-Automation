@@ -16,6 +16,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Auditar dependencias (bloquear alta e critica)
+        run: npm audit --audit-level=high
       - run: npm run typecheck
       - run: npm run build:state
       - run: node scripts/company-dashboard.cjs --self-test

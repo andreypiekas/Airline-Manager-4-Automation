@@ -64,6 +64,8 @@ export interface CollectionResult {
   observationScope?: 'native-individual-first-page';
   /** The number of individually verified ready candidates on that window. */
   windowReadyCandidates?: number;
+  /** Stable complete CURRENT page with zero ready cards; not a global observation. */
+  windowNoReadyVerified?: boolean;
   aircraft: AircraftSnapshot[];
   complete: boolean;
   expectedRoutes: number | null;
