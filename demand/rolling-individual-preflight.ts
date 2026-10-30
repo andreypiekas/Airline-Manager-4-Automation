@@ -39,7 +39,9 @@ export async function inspectIndividualFirstPage(
   };
   const budget=()=>deadline===undefined||Date.now()+Math.max(5000,timeout*2)<deadline;
   if(!budget()){report.window='TIME_BUDGET';return report;}
-  let first=await inspectFirstPageReadOnly(page,timeout);
+  // Runner already selected native Fleet page one. Reuse only for this
+  // initial observation; every target below forces a NEW native Ajax read.
+  let first=await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true});
   // A transient missing Routes(N) heading in the native first page must not
   // permanently prevent inspection. Retry the verified Fleet menu exactly once;
   // no candidate is trusted until a complete fresh observation passes.

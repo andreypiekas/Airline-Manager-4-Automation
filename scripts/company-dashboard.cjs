@@ -22,8 +22,8 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     if(latestUncertain&&latestVerified<=latestUncertain)uncertainSupplyKinds.add(kind);
   }
   const aircraft=Array.isArray(fleet?.aircraft)?fleet.aircraft:[];
-  const scopedPage=pageOnly?.mode==='current-first-page-only'&&pageOnly?.globalComplete===false&&
-    Number.isSafeInteger(pageOnly.evaluated)&&pageOnly.evaluated>=0;
+  const scopedPage=pageOnly?.mode==='current-first-page-only'&&
+    pageOnly?.globalComplete===false&&pageOnly?.fleetWideCompletionClaim===false;
   const partialGlobal=globalFallback?.globalComplete===false&&Number.isSafeInteger(globalFallback.observed)&&
     Number.isSafeInteger(globalFallback.expected)&&globalFallback.observed>=0&&
     globalFallback.expected>0&&globalFallback.observed<=globalFallback.expected;
@@ -76,7 +76,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     bases:{status:ownedBases?.status??'not_observed',effective:Array.isArray(ownedBases?.effectiveBases)?ownedBases.effectiveBases:[],source:ownedBases?.source??null,reason:ownedBases?.reason??null},
     demand:{collectionComplete:demand?.collectionComplete??null,evaluated:demand?.summary?.evaluated??null,sufficient:demand?.summary?.sufficient??null,
       insufficient:demand?.summary?.insufficient??null,unavailable:demand?.summary?.unavailable??null,notReady:demand?.summary?.notReady??null},
-    fleet:{seen:scopedPage?pageOnly.evaluated:(partialGlobal?globalFallback.observed:(demand?.summary?.fleetSeen??aircraft.length)),
+    fleet:{seen:scopedPage?(Number.isSafeInteger(pageOnly.evaluated)&&pageOnly.evaluated>=0?pageOnly.evaluated:null):(partialGlobal?globalFallback.observed:(demand?.summary?.fleetSeen??aircraft.length)),
       expected:partialGlobal?globalFallback.expected:null,collectionComplete:scopedPage?false:(demand?.collectionComplete??(partialGlobal?false:null)),
       scope:scopedPage?'FIRST_PAGE_ONLY':partialGlobal?'GLOBAL_PARTIAL':'GLOBAL_OBSERVED',
       individualVerified,ready:aircraft.filter(a=>a.state==='ready').length,

@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { inspectIndividualFirstPage } from '../../demand/rolling-individual-preflight';
+import { inspectFirstPageReadOnly } from '../../demand/rolling-first-page';
 import { PlaywrightDeparturePort } from '../../demand/departure-port';
 import { DemandReader } from '../../demand/reader';
 
@@ -27,6 +28,7 @@ async function fixture(page:Page,frames:Plane[][],total=132){
         container.append(row);
       });
       const pager=document.createElement('ul');pager.className='pagination';const next=document.createElement('a');
+      next.href='javascript:void(0);'; // match the game's actual native link role
       next.textContent='Next';next.setAttribute('onclick',"Ajax('routes.php?start=20&sort=','routeAction',this);");
       if(total>20){pager.append(next);container.append(pager);}
       document.getElementById('routeAction')!.replaceChildren(container);
@@ -184,5 +186,73 @@ test('native rolling departure port collects and prepares exact ready target wit
     aircraftId:'2001',routeId:'1001',registration:'TEST-1',state:'ready'
   });
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+/** Reproduces run #1202: Fleet is already showing page one. An extra Fleet
+ * click may leave #routesContainer connected during native Ajax, so waiting
+ * for detachment would time out even though seven Depart controls are visible. */
+test('run #1202: reuse current native first page without redundant click or global scan',async({page})=>{
+  await fixture(page,[[plane(1,true),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.evaluate(()=>{
+    const w=window as any,old=w.menuFleet;
+    w.menuFleet=()=>{
+      // Mimic in-place AJAX of the original #routesContainer node.
+      if(document.querySelector('#routesContainer')){w.opens++;return;}
+      old();
+    };
+  });
+  const result=await inspectFirstPageReadOnly(page,500,{allowAlreadyOpen:true});
+  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:1,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+  expect(await page.locator('#routesContainer [id^="routeMainList"]').count()).toBe(2);
+});
+
+test('a later native page (Next start=40) must not be mistaken for page one',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.locator('#routesContainer .pagination a').evaluate(el=>
+    el.setAttribute('onclick',"Ajax('routes.php?start=40&sort=','routeAction',this);"));
+  const result=await inspectFirstPageReadOnly(page,600,{allowAlreadyOpen:true});
+  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('already-open first page with no ready aircraft remains read-only and scoped',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  const preflight=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:20});
+  expect(preflight).toMatchObject({window:'SHORT_PAGE',routeTotal:173,inspected:0,readyCandidates:0,verified:0,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+});
+
+test('native first-page Ajax may refresh an existing DOM container only with verified response',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.route('https://am4.test/routes.php',r=>r.fulfill({status:200,body:'read only',headers:{'access-control-allow-origin':'*'}}));
+  await page.evaluate(()=>{
+    const w=window as any;
+    w.menuFleet=()=>{
+      w.opens++;
+      void fetch('https://am4.test/routes.php',{mode:'no-cors'}).catch(()=>undefined);
+      // The native container and its already-reconciled cards remain mounted.
+    };
+  });
+  const observation=await inspectFirstPageReadOnly(page,2000); // forces fresh read
+  expect(observation).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:0,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+test('native first-page AJAX without new response or detached DOM fails closed',async({page})=>{
+  await fixture(page,[[plane(1,true)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.evaluate(()=>{(window as any).menuFleet=()=>{
+    (window as any).opens++;
+    // No Ajax response, no new DOM: previous content cannot authorize a click.
+  };});
+  await expect(inspectFirstPageReadOnly(page,350)).rejects.toThrow('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
