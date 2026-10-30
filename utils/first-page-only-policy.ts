@@ -12,7 +12,8 @@ export function firstPageOnlyEnabled(env:Record<string,string|undefined>,dryRun:
  * it NEVER means the full fleet was inspected, idle or reconciled. */
 export function assertScopedFirstPageOutcome(report:ExecutionReport):void {
   if(report.dryRun||report.halted||report.rollingWindowUnverified===true||!report.completedAt||report.summary.unknown>0||
-    report.summary.evaluated<1||report.entries.length!==report.summary.evaluated)
+    (report.summary.evaluated===0&&report.firstPageNoReadyVerified!==true)||
+    report.entries.length!==report.summary.evaluated)
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
   for(const entry of report.entries){
     if(entry.status==='departed'&&entry.reason==='NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED')continue;
