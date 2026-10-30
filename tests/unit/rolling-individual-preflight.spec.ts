@@ -227,3 +227,31 @@ test('already-open first page with no ready aircraft remains read-only and scope
   expect(preflight).toMatchObject({window:'SHORT_PAGE',routeTotal:173,inspected:0,readyCandidates:0,verified:0,mutationAuthorized:false});
   expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
 });
+
+test('native first-page Ajax may refresh an existing DOM container only with verified response',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.route('https://am4.test/routes.php',r=>r.fulfill({status:200,body:'read only',headers:{'access-control-allow-origin':'*'}}));
+  await page.evaluate(()=>{
+    const w=window as any;
+    w.menuFleet=()=>{
+      w.opens++;
+      void fetch('https://am4.test/routes.php',{mode:'no-cors'}).catch(()=>undefined);
+      // The native container and its already-reconciled cards remain mounted.
+    };
+  });
+  const observation=await inspectFirstPageReadOnly(page,2000); // forces fresh read
+  expect(observation).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:0,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+test('native first-page AJAX without new response or detached DOM fails closed',async({page})=>{
+  await fixture(page,[[plane(1,true)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.evaluate(()=>{(window as any).menuFleet=()=>{
+    (window as any).opens++;
+    // No Ajax response, no new DOM: previous content cannot authorize a click.
+  };});
+  await expect(inspectFirstPageReadOnly(page,350)).rejects.toThrow('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
