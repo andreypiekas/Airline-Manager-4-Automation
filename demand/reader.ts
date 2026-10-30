@@ -558,7 +558,7 @@ export class DemandReader {
           pax:e.classList.contains('classPAX'),
           ready:e.classList.contains('listDepartable'),
           inflight:/Onboard\s*:/.test((e as HTMLElement).innerText),
-          departControlPresent:!!depart,
+          departControlPresent:!!e.querySelector('[id^="listDepart"]'),
           depart:!!depart&&!!depart.getClientRects().length&&!(depart as HTMLButtonElement).disabled
         };
       }));
