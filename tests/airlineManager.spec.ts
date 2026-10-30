@@ -394,6 +394,17 @@ test('All Operations', async ({ page }) => {
     // collectFleetWithFreshRetry, inventory every page, or infer fleet-wide
     // completeness from Routes(N). Each target is independently reverified.
     if(firstPageOnlyEnabled(process.env,demandConfig.dryRun)){
+      // A failure before the very first page can be read must not fabricate
+      // fleet.seen=0 or report a global inventory that was never collected.
+      const scopedReportFile='test-results/demand/first-page-only-report.json';
+      fs.mkdirSync('test-results/demand',{recursive:true});
+      fs.writeFileSync(scopedReportFile,serializeJsonDocument({
+        schemaVersion:1,mode:'current-first-page-only',scope:'VERIFIED_WINDOWS_ONLY',
+        status:'STARTED_UNVERIFIED',globalComplete:false,
+        fleetWideCompletionClaim:false,globalFleetScans:0,
+        evaluated:null,departed:null,held:null,unknown:null,
+        generatedAt:new Date().toISOString()
+      }));
       console.log('[FirstPageOnly] '+JSON.stringify({
         scope:'CURRENT_NATIVE_FIRST_PAGE_ONLY',globalFleetScans:0,
         fleetWideCompletionClaim:false,individualTargetVerificationRequired:true
@@ -419,8 +430,7 @@ test('All Operations', async ({ page }) => {
         held:dispatch.summary.held,unknown:dispatch.summary.unknown,
         fleetWideCompletionClaim:false,globalFleetScans:0,
         generatedAt:new Date().toISOString()};
-      fs.writeFileSync('test-results/demand/first-page-only-report.json',
-        JSON.stringify(currentPageReport,null,2)+'\\n');
+      fs.writeFileSync(scopedReportFile,serializeJsonDocument(currentPageReport));
       console.log('[FirstPageOnlyResult] '+JSON.stringify(currentPageReport));
       const postGate=postDispatchSupplyDecision(dispatch);
       const postBudget=phaseAllowed('first-page-post-dispatch-supplies',phaseBudgetsMs.supplies);
