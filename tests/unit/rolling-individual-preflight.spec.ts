@@ -187,4 +187,43 @@ test('native rolling departure port collects and prepares exact ready target wit
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(2);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
-\n/** Reproduces run #1202: Fleet is already showing page one. An extra Fleet\n * click may leave #routesContainer connected during native Ajax, so waiting\n * for detachment would time out even though seven Depart controls are visible. */\ntest('run #1202: reuse current native first page without redundant click or global scan',async({page})=>{\n  await fixture(page,[[plane(1,true),plane(2,false)]],173);\n  await page.locator('#mapRoutes').click();\n  await page.evaluate(()=>{\n    const w=window as any,old=w.menuFleet;\n    w.menuFleet=()=>{\n      // Mimic in-place AJAX of the original #routesContainer node.\n      if(document.querySelector('#routesContainer')){w.opens++;return;}\n      old();\n    };\n  });\n  const result=await inspectFirstPageReadOnly(page,500);\n  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:1,mutationAuthorized:false});\n  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);\n  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);\n  expect(await page.locator('#routesContainer [id^="routeMainList"]').count()).toBe(2);\n});\n\ntest('a later native page (Next start=40) must not be mistaken for page one',async({page})=>{\n  await fixture(page,[[plane(1,false),plane(2,false)]],173);\n  await page.locator('#mapRoutes').click();\n  await page.locator('#routesContainer .pagination a').evaluate(el=>\n    el.setAttribute('onclick',"Ajax('routes.php?start=40&sort=','routeAction',this);"));\n  const result=await inspectFirstPageReadOnly(page,600);\n  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,mutationAuthorized:false});\n  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);\n  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);\n});\n\ntest('already-open first page with no ready aircraft remains read-only and scoped',async({page})=>{\n  await fixture(page,[[plane(1,false),plane(2,false)]],173);\n  await page.locator('#mapRoutes').click();\n  const preflight=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:20});\n  expect(preflight).toMatchObject({window:'SHORT_PAGE',routeTotal:173,inspected:0,readyCandidates:0,verified:0,mutationAuthorized:false});\n  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);\n});\n
+
+/** Reproduces run #1202: Fleet is already showing page one. An extra Fleet
+ * click may leave #routesContainer connected during native Ajax, so waiting
+ * for detachment would time out even though seven Depart controls are visible. */
+test('run #1202: reuse current native first page without redundant click or global scan',async({page})=>{
+  await fixture(page,[[plane(1,true),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.evaluate(()=>{
+    const w=window as any,old=w.menuFleet;
+    w.menuFleet=()=>{
+      // Mimic in-place AJAX of the original #routesContainer node.
+      if(document.querySelector('#routesContainer')){w.opens++;return;}
+      old();
+    };
+  });
+  const result=await inspectFirstPageReadOnly(page,500);
+  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:1,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+  expect(await page.locator('#routesContainer [id^="routeMainList"]').count()).toBe(2);
+});
+
+test('a later native page (Next start=40) must not be mistaken for page one',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  await page.locator('#routesContainer .pagination a').evaluate(el=>
+    el.setAttribute('onclick',"Ajax('routes.php?start=40&sort=','routeAction',this);"));
+  const result=await inspectFirstPageReadOnly(page,600);
+  expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('already-open first page with no ready aircraft remains read-only and scoped',async({page})=>{
+  await fixture(page,[[plane(1,false),plane(2,false)]],173);
+  await page.locator('#mapRoutes').click();
+  const preflight=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:20});
+  expect(preflight).toMatchObject({window:'SHORT_PAGE',routeTotal:173,inspected:0,readyCandidates:0,verified:0,mutationAuthorized:false});
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+});
