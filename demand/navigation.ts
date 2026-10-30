@@ -13,9 +13,10 @@ export function routePageLimit(totalRoutes:number,pageSize=20){
  * No behavior change for existing production callers. */
 export type FleetOpenStage =
  'INSPECT_CONTROL'|'CLICK_CONTROL'|'WAIT_OLD_CONTAINER_DETACH'|
- 'WAIT_CONTAINER_VISIBLE'|'WAIT_ROUTE_CARDS_VISIBLE'|'VERIFY_QUOTE_CLOSED';
+ 'WAIT_CONTAINER_VISIBLE'|'WAIT_ROUTE_CARDS_VISIBLE'|'VERIFY_QUOTE_CLOSED'|'VERIFY_INPLACE_NATIVE_RESPONSE';
 export async function openFleetList(
- page: Page, timeout: number, onStage: (stage:FleetOpenStage)=>void = () => {}
+ page: Page, timeout: number, onStage: (stage:FleetOpenStage)=>void = () => {},
+ options: {allowVerifiedInPlaceRefresh?: boolean} = {}
 ) {
   onStage('INSPECT_CONTROL');
   const menu = page.locator('#mapRoutes');
@@ -26,14 +27,35 @@ export async function openFleetList(
   const allowed = tabOpen ? "$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('routes.php','routeAction',this,false,false);" : "hideAllWhenClick();menuFleet('Routes');";
   if (await control.count() !== 1 || !await control.isVisible() ||
     (await control.getAttribute('onclick') || '').replace(/\s/g,'') !== allowed) throw new Error('RESEARCH_LIST_CONTROL_UNVERIFIED');
-  const previous = await page.locator('#routesContainer').count() === 1 ? await page.locator('#routesContainer').elementHandle() : null;
+  const previous = await page.locator('#routesContainer').count() === 1
+    ? await page.locator('#routesContainer').elementHandle() : null;
+  // Opt-in ONLY for a first-page read-only refresh. Some AM4 AJAX renders
+  // update the same container in place; a verified native routes.php response
+  // is alternative freshness evidence to DOM detachment, NOT a click gate.
+  const inPlaceResponse = options.allowVerifiedInPlaceRefresh && previous
+    ? page.waitForResponse(response => {
+        try {
+          const url=new URL(response.url());
+          return url.pathname.endsWith('/routes.php')&&!url.searchParams.has('start');
+        }catch{return false;}
+      }, {timeout}).then(response=>response.ok()).catch(()=>false)
+    : null;
   try {
     onStage('CLICK_CONTROL');
     await control.click({timeout});
-    // Prevent an old hidden list from satisfying the loading checks.
+    // Normal DOM replacement remains the default and is required for all
+    // existing global Fleet callers. In first-page read-only mode only,
+    // accept a genuine successful native response if the DOM was reused.
     if (previous) {
       onStage('WAIT_OLD_CONTAINER_DETACH');
-      await expect.poll(() => previous.evaluate(e => e.isConnected),{timeout}).toBe(false);
+      const detached=await expect.poll(()=>previous.evaluate(e=>e.isConnected),
+        {timeout:inPlaceResponse?Math.min(timeout,1200):timeout})
+        .toBe(false).then(()=>true,()=>false);
+      if(!detached){
+        if(!inPlaceResponse || !await inPlaceResponse)
+          throw Error('FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED');
+        onStage('VERIFY_INPLACE_NATIVE_RESPONSE');
+      }
     }
   } finally { await previous?.dispose(); }
   onStage('WAIT_CONTAINER_VISIBLE');
