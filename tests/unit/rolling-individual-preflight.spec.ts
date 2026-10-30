@@ -293,3 +293,39 @@ test('run #1205: persistently missing identity stays failed after exactly one re
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
+
+test('run #1220: Fleet click timeout after native page becomes visible recovers read-only',async({page})=>{
+  await fixture(page,[[plane(1,true),plane(2,false)]],178);
+  // Obstruct native menu click without disabling its real Playwright
+  // actionability checks; the game can independently finish its Ajax render.
+  await page.evaluate(()=>{
+    const cover=document.createElement('div');
+    cover.id='ordinary-transition-cover';
+    Object.assign(cover.style,{position:'fixed',inset:'0',zIndex:'999999',background:'transparent'});
+    document.body.append(cover);
+    setTimeout(()=>{(window as any).menuFleet();},80);
+  });
+  const observation=await inspectFirstPageReadOnly(page,550,{allowAlreadyOpen:true});
+  expect(observation).toMatchObject({
+    status:'SHORT_PAGE',routeTotal:178,visible:2,ready:1,mutationAuthorized:false
+  });
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1220: menu click timeout without a verified native first page remains blocked',async({page})=>{
+  await fixture(page,[[plane(1,true)]],178);
+  await page.evaluate(()=>{
+    const cover=document.createElement('div');
+    cover.id='ordinary-transition-cover';
+    Object.assign(cover.style,{position:'fixed',inset:'0',zIndex:'999999',background:'transparent'});
+    document.body.append(cover);
+    // No native page render is ever produced.
+  });
+  await expect(inspectFirstPageReadOnly(page,450,{allowAlreadyOpen:true}))
+    .rejects.toThrow();
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
