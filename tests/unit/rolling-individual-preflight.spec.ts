@@ -202,7 +202,7 @@ test('run #1202: reuse current native first page without redundant click or glob
       old();
     };
   });
-  const result=await inspectFirstPageReadOnly(page,500);
+  const result=await inspectFirstPageReadOnly(page,500,{allowAlreadyOpen:true});
   expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,visible:2,ready:1,mutationAuthorized:false});
   expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
@@ -214,7 +214,7 @@ test('a later native page (Next start=40) must not be mistaken for page one',asy
   await page.locator('#mapRoutes').click();
   await page.locator('#routesContainer .pagination a').evaluate(el=>
     el.setAttribute('onclick',"Ajax('routes.php?start=40&sort=','routeAction',this);"));
-  const result=await inspectFirstPageReadOnly(page,600);
+  const result=await inspectFirstPageReadOnly(page,600,{allowAlreadyOpen:true});
   expect(result).toMatchObject({status:'SHORT_PAGE',routeTotal:173,mutationAuthorized:false});
   expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
