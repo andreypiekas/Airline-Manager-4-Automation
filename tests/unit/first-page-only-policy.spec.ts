@@ -53,3 +53,13 @@ test('verified insufficient demand is a safe hold even with a localized reason',
   insufficient.entries[0].demand={decision:'hold_insufficient'} as NonNullable<ExecutionReport['entries'][number]['demand']>;
   expect(()=>assertScopedFirstPageOutcome(insufficient)).not.toThrow();
 });
+
+test('explicitly verified page with no ready planes is a scoped no-op, not global idleness',()=>{
+  const empty=report('held','DEMAND_BELOW_THRESHOLD');
+  empty.summary={evaluated:0,departed:0,held:0,unknown:0,simulated:0};
+  empty.entries=[];
+  empty.firstPageNoReadyVerified=true;
+  expect(()=>assertScopedFirstPageOutcome(empty)).not.toThrow();
+  empty.firstPageNoReadyVerified=false;
+  expect(()=>assertScopedFirstPageOutcome(empty)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});
