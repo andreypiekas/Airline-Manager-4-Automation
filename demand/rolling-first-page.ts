@@ -92,7 +92,7 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
       continue;
     }
     cards.push({
-      aircraftId: matches[0].id,
+      aircraftId: matches[0].id!,
       routeId: rawCard.routeId,
       registration: matches[0].registration,
       state: rawCard.ready ? 'ready' : rawCard.inflight ? 'inflight' : 'unavailable'
