@@ -15,16 +15,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Preparar lockfile corrigido offline (temporario)
-        run: npm install --package-lock-only --save-dev --save-exact @playwright/test@1.55.1
-      - name: Exportar lockfile para revisao (temporario)
-        uses: actions/upload-artifact@v4
-        with:
-          name: audited-playwright-lock-preview
-          path: |
-            package.json
-            package-lock.json
-          retention-days: 2
       - run: npm ci
       - name: Auditar dependencias (bloquear alta e critica)
         run: npm audit --audit-level=high
