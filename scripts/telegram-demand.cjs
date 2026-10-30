@@ -40,6 +40,14 @@ function importantMessage(dir='test-results/demand',botResult=process.env.BOT_RE
   if(postSupply?.halted===true)events.push('reposicao pos-decolagens interrompida por fail-safe');
   const fuelHeld=(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length;
   if(fuelHeld>0)events.push('decolagens retidas por combustivel insuficiente verificado: '+fuelHeld);
+  const quarantineHeld=(execution?.entries||[]).filter(x=>x?.status==='held'&&
+    x?.reason==='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK').length;
+  const quarantineResolved=(execution?.entries||[]).filter(x=>x?.status==='held'&&
+    x?.reason==='PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY').length;
+  if(quarantineHeld>0)
+    events.push('quarentena de partida anterior AINDA NAO RESOLVIDA: '+quarantineHeld+'; nenhum novo clique');
+  if(quarantineResolved>0)
+    events.push('quarentena anterior reconciliada por leitura segura: '+quarantineResolved+'; liberacao somente no proximo ciclo, sem nova decolagem nesta run');
   const reroutePricingHeld=(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='REROUTE_PRICING_NOT_VERIFIED').length;
   if(reroutePricingHeld>0)events.push('aeronaves reroteadas aguardando pricing confirmado: '+reroutePricingHeld);
   const rerouted=route?.summary?.rerouted;
@@ -172,6 +180,9 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   if(d?.demand)lines.push('Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes | insuf. '+n(d.demand.insufficient)+' | indispon. '+n(d.demand.unavailable));
   if(d?.departures){
     lines.push('Decolagens: '+n(d.departures.departed)+'/'+n(d.departures.evaluated)+' confirmadas | retidas '+n(d.departures.held)+' | incertas '+n(d.departures.unknown));
+    if((d.departures.quarantineHeld||0)+(d.departures.quarantineReconciledReadOnly||0)>0)
+      lines.push('Quarentena decolagens: '+n(d.departures.quarantineHeld)+' pendente(s), '+
+        n(d.departures.quarantineReconciledReadOnly)+' reconciliada(s) SEM clique; desbloqueio apenas proxima run');
     lines.push(departureValueMessage(dir));
   }
   const shared=sharedRouteMessage(dir);

@@ -63,3 +63,19 @@ test('explicitly verified page with no ready planes is a scoped no-op, not globa
   empty.firstPageNoReadyVerified=false;
   expect(()=>assertScopedFirstPageOutcome(empty)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
 });
+
+
+test('run #1227: durable read-only reconciliation of a prior uncertain flight is scoped success, not a re-click',()=>{
+  const r=report('held','PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY');
+  expect(r.summary).toMatchObject({departed:0,held:1,unknown:0});
+  expect(()=>assertScopedFirstPageOutcome(r)).not.toThrow();
+  // But an UNRESOLVED older uncertainty must remain operationally RED.
+  r.entries[0].reason='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK';
+  expect(()=>assertScopedFirstPageOutcome(r))
+    .toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+  // New current-run uncertainties must never be masked by older resolution.
+  r.entries[0].reason='PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY';
+  r.summary.unknown=1;
+  expect(()=>assertScopedFirstPageOutcome(r))
+    .toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});

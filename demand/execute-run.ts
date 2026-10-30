@@ -32,14 +32,14 @@ import { Page } from '@playwright/test';
 import { mkdir,open,rename,writeFile,readFile,appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDemandConfig } from './config';
-import { DemandConfig, CollectionResult } from './types';
+import { DemandConfig, CollectionResult, type AircraftSnapshot } from './types';
 import { IndividualDepartureExecutor, ExecutionReport } from './executor';
 import { PlaywrightDeparturePort } from './departure-port';
 import { inspectFirstPageReadOnly } from './rolling-first-page';
 import { verifiedFirstPagePriorityKeys } from './rolling-first-page-priority';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { optimizationConfig } from '../optimization/report';
-import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys } from '../optimization/return-journal';
+import { appendConfirmedDepartures,appendDemandHoldObservations,appendUncertainDepartures,readUnresolvedDepartureKeys,appendResolvedUncertainFromVerifiedFirstPageTarget } from '../optimization/return-journal';
 import { loadAdaptiveDemandThresholds } from './adaptive-threshold';
 import { hasDepartureBudgetStarvation,hasUnreconciledReadyFleetDrift } from '../utils/run-time-budget';
 import { DepartureTerminalCheckpoints } from './terminal-checkpoints';
@@ -197,6 +197,11 @@ export async function runDemandExecution(
   const report=await new IndividualDepartureExecutor(
     departurePort,config,{...settings,
     blockedDepartureKeys,prioritizedDepartureKeys,firstPageReadyPriorityKeys,fuelHoldingLbsAtRunStart,
+    ...(settings.rollingIndividualMode&&optimization.returnJournal
+      ?{reconcilePersistedUncertainReady:(fresh:AircraftSnapshot)=>
+        appendResolvedUncertainFromVerifiedFirstPageTarget(
+          optimization.returnJournal!.directory,optimization.returnJournal!.scope,fresh
+        )}:{ }),
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
     currentRouteFuelEvidence:prerequisites.currentRouteFuelEvidence},save,adaptive).run();

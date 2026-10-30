@@ -33,6 +33,15 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     e?.demand?.routeId===e?.routeId&&typeof e?.registration==='string'&&!!e.registration).length:0;
   const currentAircraftRouteKeys=new Set(aircraft.map(a=>a.aircraftId+':'+a.routeId));
   const activeUncertainDepartureKeys=new Set([...uncertainDepartureKeys].filter(k=>currentAircraftRouteKeys.has(k)));
+  // Page-one mode has no global fleet file. Do not report zero quarantines
+  // when the CURRENT execution itself proves a previously blocked target.
+  const heldQuarantineKeys=new Set((execution?.entries||[])
+    .filter(e=>e?.status==='held'&&e?.reason==='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK')
+    .map(e=>e.aircraftId+':'+e.routeId));
+  const resolvedQuarantineKeys=new Set((execution?.entries||[])
+    .filter(e=>e?.status==='held'&&
+      e?.reason==='PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY')
+    .map(e=>e.aircraftId+':'+e.routeId));
   const execBy=new Map((execution?.entries||[]).map(x=>[x.aircraftId,x]));
   const routeBy=new Map((routeExecution?.entries||[]).map(x=>[x.aircraftId,x]));
   const routeDecisionBy=new Map((candidateData?.routeDecisions||[]).map(x=>[x.aircraftId,x]));
@@ -83,7 +92,9 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
       inflight:aircraft.filter(a=>a.state==='inflight').length,unavailable:aircraft.filter(a=>a.state==='unavailable').length},
     departures:{evaluated:execution?.summary?.evaluated??null,departed:execution?.summary?.departed??null,held:execution?.summary?.held??null,unknown:execution?.summary?.unknown??null,
       fuelHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&x?.reason==='FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY').length,
-      timeBudgetHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&/^RUN_TIME_BUDGET_EXHAUSTED_BEFORE_/.test(x?.reason||'')).length},
+      timeBudgetHeld:(execution?.entries||[]).filter(x=>x?.status==='held'&&/^RUN_TIME_BUDGET_EXHAUSTED_BEFORE_/.test(x?.reason||'')).length,
+      quarantineHeld:heldQuarantineKeys.size,
+      quarantineReconciledReadOnly:resolvedQuarantineKeys.size},
     routes:{evaluated:routeExecution?.summary?.evaluated??null,rerouted:routeExecution?.summary?.rerouted??null,
       held:routeExecution?.summary?.held??null,unknown:routeExecution?.summary?.unknown??null,
       reviewDecisions:{
@@ -106,7 +117,8 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
     operationalStates:{NORMAL:count('NORMAL'),AGUARDANDO_DEMANDA:count('AGUARDANDO_DEMANDA'),AGUARDANDO_RECURSO:count('AGUARDANDO_RECURSO'),
       DADOS_INDISPONIVEIS:count('DADOS_INDISPONIVEIS'),QUARENTENA_DECOLAGEM:count('QUARENTENA_DECOLAGEM'),ORIGEM_OPERACIONAL_INDEFINIDA:count('ORIGEM_OPERACIONAL_INDEFINIDA'),
       PRECISA_REVISAR_ROTA:count('PRECISA_REVISAR_ROTA'),PRECISA_REVISAR_PRECO:count('PRECISA_REVISAR_PRECO'),MANUTENCAO:count('MANUTENCAO'),PRONTA_PARA_DECOLAR:count('PRONTA_PARA_DECOLAR')},
-    quarantines:{departure:activeUncertainDepartureKeys.size,route:uncertainRouteAircraftIds.size,pricingRoute:uncertainPricingRouteIds.size,supplyKinds:uncertainSupplyKinds.size},
+    quarantines:{departure:new Set([...activeUncertainDepartureKeys,...heldQuarantineKeys]).size,
+      route:uncertainRouteAircraftIds.size,pricingRoute:uncertainPricingRouteIds.size,supplyKinds:uncertainSupplyKinds.size},
     maintenance:{preventiveACheckRepairs:modules?.maintenance?.status??(log.includes('[Operacao] Manutencao automatica finalizada.')?'completed_observed':
       log.includes('[Operacao] Iniciando manutencao preventiva, A-checks e reparos...')?'started_observed':'not_observed'),
       evidence:modules?.maintenance?.evidence??null,
@@ -137,6 +149,8 @@ function markdown(d,states){
  const supplyText=(name,x)=>!x?`${name}: n/d`:`${name}: ${x.status} (${x.reason||'sem motivo'}${Number.isSafeInteger(x.pricePer1000)?`; preço ${fmt(x.pricePer1000)}/1k`:''}${Number.isSafeInteger(x.quantity)?`; qtd ${fmt(x.quantity)}`:''})`;
  const alerts=[];
  if(q.departure)alerts.push(`${q.departure} quarentena(s) persistente(s) de decolagem`);
+ if((d.departures.quarantineReconciledReadOnly||0)>0)
+   alerts.push(`${d.departures.quarantineReconciledReadOnly} quarentena(s) de decolagem reconciliada(s) por leitura posterior, SEM novo clique nesta execução; liberadas apenas para próximo ciclo`);
  if(q.route)alerts.push(`${q.route} quarentena(s) de reroute`);
  if(q.pricingRoute)alerts.push(`${q.pricingRoute} quarentena(s) de pricing`);
  if(q.supplyKinds)alerts.push(`${q.supplyKinds} quarentena(s) de suprimentos`);
@@ -162,7 +176,7 @@ function markdown(d,states){
   `| Bases | **${d.bases?.effective?.length??0}** ativas | ${d.bases?.effective?.length?d.bases.effective.map(safe).join(', '):'n/d'} · fonte ${safe(d.bases?.status||'n/d')} |`,
   `| ${d.fleet.scope==='FIRST_PAGE_ONLY'?'Página atual (sem inventário global)':'Frota (coleta antes das decolagens)'} | **${fmt(d.fleet.seen)}** vistas${d.fleet.collectionComplete===false&&Number.isSafeInteger(d.fleet.expected)?` de ${fmt(d.fleet.expected)} (parcial)`:''} | ${d.fleet.collectionComplete===false?`${fmt(d.fleet.individualVerified)} verificadas individualmente · estado global não confirmado`:`${fmt(d.fleet.inflight)} em voo · ${fmt(d.fleet.ready)} prontas · ${fmt(d.fleet.unavailable)} indisponíveis`} |`,
   `| Demanda | **${fmt(d.demand.sufficient)}/${fmt(d.demand.evaluated)}** suficientes | insuficientes ${fmt(d.demand.insufficient)} · indisponíveis ${fmt(d.demand.unavailable)} · coleta ${d.demand.collectionComplete===true?'completa':d.demand.collectionComplete===false?'incompleta':'n/d'} |`,
-  `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}) · incertas ${fmt(d.departures.unknown)} |`,
+  `| Decolagens | **${fmt(d.departures.departed)}/${fmt(d.departures.evaluated)}** confirmadas | retidas ${fmt(d.departures.held)} (por tempo: ${fmt(d.departures.timeBudgetHeld)}, quarentena: ${fmt(d.departures.quarantineHeld)}, reconciliadas sem clique: ${fmt(d.departures.quarantineReconciledReadOnly)}) · incertas ${fmt(d.departures.unknown)} |`,
   `| Pricing | **${fmt(d.pricing.adjusted)}** ajustadas | ${fmt(d.pricing.unchanged)} no alvo · incertas ${fmt(d.pricing.unknown)}${d.pricing.phaseHoldReason?` · fase: ${safe(d.pricing.phaseHoldReason)}`:''} |`,
   `| Rotas | **${fmt(d.routes.rerouted)}** reroutes confirmados | revisão: KEEP ${fmt(review.keep)} · HOLD ${fmt(review.hold)} · WOULD_REROUTE ${fmt(review.wouldReroute)} |`,
   `| UI | **${safe(d.uiHealth.status)}** | checks não saudáveis: ${fmt(d.uiHealth.unhealthyChecks)} |`,
@@ -232,7 +246,8 @@ function selfTest(){
  assert.equal(dashboard.operationalStates.PRECISA_REVISAR_ROTA,2);assert.equal(dashboard.operationalStates.QUARENTENA_DECOLAGEM,2);assert.equal(dashboard.operationalStates.ORIGEM_OPERACIONAL_INDEFINIDA,1);assert.equal(dashboard.operationalStates.PRECISA_REVISAR_PRECO,1);assert.equal(dashboard.operationalStates.PRONTA_PARA_DECOLAR,1);assert.equal(dashboard.operationalStates.AGUARDANDO_RECURSO,1);
  assert.deepEqual(dashboard.routes.reviewDecisions,{keep:1,hold:1,wouldReroute:0,unavailable:0});
  assert.equal(dashboard.routes.originUnavailable,1);assert.equal(dashboard.pricing.phaseHoldReason,'PRICING_INITIAL_COLLECTION_INCOMPLETE');
- assert.deepEqual(dashboard.quarantines,{departure:1,route:1,pricingRoute:1,supplyKinds:0});
+ // One unresolved journal key + a distinct directly observed HOLD key.
+ assert.deepEqual(dashboard.quarantines,{departure:2,route:1,pricingRoute:1,supplyKinds:0});
  assert.equal(dashboard.departures.timeBudgetHeld,1);
  assert.ok(markdown(dashboard,[]).includes('1 aeronave(s) adiadas pelo orçamento de tempo'));
  assert.equal(dashboard.maintenance.preventiveACheckRepairs,'completed_observed');assert.deepEqual(dashboard.maintenance.evidence,{evaluated:22,selected:1,bulkCheckExecuted:true,repairEligible:false});assert.equal(dashboard.campaign.status,'verified_active');assert.equal(dashboard.campaign.allRequiredVerified,true);assert.equal(dashboard.campaign.departureAuthorized,true);

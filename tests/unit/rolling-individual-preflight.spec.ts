@@ -181,11 +181,21 @@ test('native rolling departure port collects and prepares exact ready target wit
     expectedRoutes:1,windowReadyCandidates:1
   });
   expect(inventory.aircraft).toHaveLength(1);
+  // A persisted uncertain target receives one additional read-only proof.
+  // The prepared native departure handler MUST be revoked and the details
+  // pane safely closed without any route_depart.php request or click.
+  const quarantined=await port.inspectPersistedUncertainReady(inventory.aircraft[0]);
+  expect(quarantined).toMatchObject({
+    aircraftId:'2001',routeId:'1001',registration:'TEST-1',state:'ready'
+  });
+  expect(quarantined.departureControlShape).toContain('route_depart.php?');
+  expect(await page.locator('#detailsAction').isVisible()).toBe(false);
+  expect(await page.locator('#routeAction').isVisible()).toBe(true);
   const checked=await port.prepare(inventory.aircraft[0]);
   expect(checked).toMatchObject({
     aircraftId:'2001',routeId:'1001',registration:'TEST-1',state:'ready'
   });
-  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(3);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
 

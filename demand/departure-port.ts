@@ -262,6 +262,43 @@ export class PlaywrightDeparturePort implements DeparturePort {
     this.metrics.targetPreparationMs+=Date.now()-prepareStarted;
     this.prepared={aircraft:fresh,handler};return fresh;
   }
+
+  /** Strictly read-only reconciliation proof for a PRIOR-RUN uncertain click.
+   * Reuses the full fresh first-page target and native Depart control checks
+   * from prepare(), but discards the prepared handler and closes details.
+   * It NEVER invokes depart() or re-clicks an ambiguous prior departure.
+   * Missing restoration evidence is a hard HOLD, not a resolved event. */
+  async inspectPersistedUncertainReady(expected:AircraftSnapshot):Promise<AircraftSnapshot>{
+    let readyConfirmed=false;
+    try{
+      const fresh=await this.prepare(expected);
+      if(fresh.state!=='ready'||!!fresh.issue||!fresh.departureControlShape)
+        throw Error('QUARANTINE_READY_NOT_VERIFIED');
+      readyConfirmed=true;
+      return fresh;
+    }finally{
+      this.prepared=null; // revoke all click-ready state unconditionally
+      const details=this.page.locator('#detailsAction');
+      try{
+        if(readyConfirmed&&(await details.count()!==1||!await details.isVisible()))
+          throw Error('QUARANTINE_DETAILS_CONTEXT_UNVERIFIED');
+        if(await details.count()===1 && await details.isVisible()){
+          await assertNoInteractiveChallenge(this.page,'departure:quarantine:before-return');
+          const back=this.page.locator('#route-name .glyphicons-chevron-left');
+          if(await back.count()!==1||!await back.isVisible())
+            throw Error('QUARANTINE_BACK_CONTROL_UNVERIFIED');
+          await back.click({timeout:this.timeout});
+          await assertNoInteractiveChallenge(this.page,'departure:quarantine:after-return');
+          if(await details.isVisible()||!await this.page.locator('#routeAction').isVisible())
+            throw Error('QUARANTINE_UI_NOT_RESTORED');
+        }
+      }catch{
+        // No further mutation is ever authorized from this observation.
+        throw Error('QUARANTINE_READ_ONLY_UI_RESTORE_FAILED');
+      }
+    }
+  }
+
   async depart(expected:AircraftSnapshot){
     const prepared=this.prepared;this.prepared=null; // Consume before any operation, including failures.
     if(!prepared||prepared.aircraft.aircraftId!==expected.aircraftId||prepared.aircraft.routeId!==expected.routeId||

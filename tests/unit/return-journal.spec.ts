@@ -455,3 +455,55 @@ test('gross ceiling KEEP persists truthful ceiling evidence without inventing ne
  }]);
  expect(()=>validateReturnJournal(raw,'company-test',when)).not.toThrow();
 });
+
+
+test('run #1227: strictly verified ready aircraft on FIRST page resolves prior uncertainty without a global scan',async()=>{
+  await reviewWithReturnJournal(input(),options(),now);
+  const {
+    appendUncertainDepartures,appendResolvedUncertainFromVerifiedFirstPageTarget,
+    readUnresolvedDepartureKeys
+  }=await import('../../optimization/return-journal');
+  const prior:any={entries:[{status:'outcome_unknown',aircraftId:'9',registration:'UNCERTAIN',
+    routeId:'99',from:'AAA',to:'BBB',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:CONFIRMATION_MISSING'}]};
+  expect(await appendUncertainDepartures(directory,'company-test','1213',prior,now)).toBe(1);
+  const at='2026-09-30T11:10:00.000Z',later=new Date('2026-09-30T11:11:00.000Z');
+  const ready:any={
+    aircraftId:'9',registration:'UNCERTAIN',routeId:'99',routeLabel:'AAA - BBB',
+    from:'AAA',to:'BBB',state:'ready',capacity:{Y:100,J:0,F:0},
+    remaining:{Y:80,J:0,F:0},dailyTotal:{Y:300,J:0,F:0},
+    observedAt:at,departureControlShape:
+      "Ajax('route_depart.php?id=<value>&ref=list&costIndex=<number>','routeAction',this);"
+  };
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',later)).has('9:99')).toBe(true);
+  // A first-page individual READY proof does not set global CollectionResult.complete.
+  // No all-fleet collection or mutation is used by this journal-only function.
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,observedAt:now.toISOString()},later)).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,registration:'OTHER'},later)).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,departureControlShape:undefined},later)).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,routeId:'100'},later)).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,from:'CCC'},later)).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,state:'inflight'},later)).toBe(false);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',later)).has('9:99')).toBe(true);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',ready,later)).toBe(false);
+  // Exactly 30 seconds is the maximum age: fresh MUST be recently observed.
+  const freshTime=new Date('2026-09-30T11:10:45.000Z');
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,observedAt:freshTime.toISOString()},later)).toBe(true);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',later)).has('9:99')).toBe(false);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(directory,'company-test',
+    {...ready,observedAt:freshTime.toISOString()},later)).toBe(false);
+  const saved=JSON.parse(await readFile(join(directory,'return-journal.json'),'utf8'));
+  expect(saved.events.filter((e:any)=>e.type==='departure-uncertain')).toHaveLength(1);
+  expect(saved.events.filter((e:any)=>e.type==='departure-uncertain-resolved')).toHaveLength(1);
+  expect(saved.events.at(-1)).toMatchObject({
+    type:'departure-uncertain-resolved',uncertainEventId:'unc_1213_9_99',
+    liveState:'ready',result:'live_state_verified',
+    reason:'STRICTLY_NEWER_VERIFIED_LIVE_STATE'
+  });
+});
