@@ -102,6 +102,19 @@ export class PlaywrightDeparturePort implements DeparturePort {
       const pilot=await inspectIndividualFirstPage(this.page,{
         timeout:Math.min(this.timeout,8000),
         maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
+      }).catch((error:unknown)=>{
+        const message=error instanceof Error?error.message:'';
+        if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+        // Fixed categories only. Playwright exception text can include private
+        // DOM, game URLs and session state, so never log the raw exception.
+        const code=['RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
+          'UI_CONTROL_OBSCURED'].includes(message)?message:
+          /timeout|waiting for|expect\\(/i.test(message)?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
+        console.warn('[RollingDispatchInventory] '+JSON.stringify({
+          status:'FIRST_PAGE_READ_ONLY_COLLECTION_FAILED',code,
+          globalComplete:false,mutationAuthorized:false,fullFleetScans:0
+        }));
+        throw Error('ROLLING_FIRST_PAGE_PREFLIGHT_FAILED');
       });
       const noReadyVerified=pilot.window==='STABLE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
