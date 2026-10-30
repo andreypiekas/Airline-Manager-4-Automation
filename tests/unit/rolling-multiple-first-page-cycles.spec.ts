@@ -127,7 +127,8 @@ test('a failed subsequent read does not erase the confirmed departure checkpoint
 });
 
 test('first-page rolling dispatch continues across more than four verified batches without a global scan',async()=>{
-  const planes=Array.from({length:7},(_,i)=>aircraft(String(3001+i),'GRU','XAP'));
+  const destinations=['XAP','DTW','TXL','JFK','LAX','SFO','MIA'];
+  const planes=Array.from({length:7},(_,i)=>aircraft(String(3001+i),'GRU',destinations[i]));
   const windows=[...planes.map(a=>native([a])),native([planes.at(-1)!])];
   const r=await execute({windows,max:10,fuel:100000});
   expect(r.report.summary).toMatchObject({departed:7,unknown:0});
