@@ -246,7 +246,8 @@ function selfTest(){
  assert.equal(dashboard.operationalStates.PRECISA_REVISAR_ROTA,2);assert.equal(dashboard.operationalStates.QUARENTENA_DECOLAGEM,2);assert.equal(dashboard.operationalStates.ORIGEM_OPERACIONAL_INDEFINIDA,1);assert.equal(dashboard.operationalStates.PRECISA_REVISAR_PRECO,1);assert.equal(dashboard.operationalStates.PRONTA_PARA_DECOLAR,1);assert.equal(dashboard.operationalStates.AGUARDANDO_RECURSO,1);
  assert.deepEqual(dashboard.routes.reviewDecisions,{keep:1,hold:1,wouldReroute:0,unavailable:0});
  assert.equal(dashboard.routes.originUnavailable,1);assert.equal(dashboard.pricing.phaseHoldReason,'PRICING_INITIAL_COLLECTION_INCOMPLETE');
- // One unresolved journal key + a distinct directly observed HOLD key.\n assert.deepEqual(dashboard.quarantines,{departure:2,route:1,pricingRoute:1,supplyKinds:0});
+ // One unresolved journal key + a distinct directly observed HOLD key.
+ assert.deepEqual(dashboard.quarantines,{departure:2,route:1,pricingRoute:1,supplyKinds:0});
  assert.equal(dashboard.departures.timeBudgetHeld,1);
  assert.ok(markdown(dashboard,[]).includes('1 aeronave(s) adiadas pelo orçamento de tempo'));
  assert.equal(dashboard.maintenance.preventiveACheckRepairs,'completed_observed');assert.deepEqual(dashboard.maintenance.evidence,{evaluated:22,selected:1,bulkCheckExecuted:true,repairEligible:false});assert.equal(dashboard.campaign.status,'verified_active');assert.equal(dashboard.campaign.allRequiredVerified,true);assert.equal(dashboard.campaign.departureAuthorized,true);
