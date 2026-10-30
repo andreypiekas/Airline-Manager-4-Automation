@@ -536,6 +536,75 @@ export async function appendResolvedUncertainDepartures(directory:string,scope:s
  },join(root,'.return-journal.lock'));
 }
 
+
+/** Reconcile one persisted uncertain departure using a FRESH, individually
+ * verified READY aircraft on the native FIRST PAGE. Caller must have run
+ * two stable page reads and a separate read-only exact-target prepare.
+ * This function NEVER accesses the game or authorizes a departure.
+ * The uncertain event remains append-only and auditable. */
+export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
+  directory:string,scope:string,fresh:AircraftSnapshot,now=new Date()
+):Promise<boolean>{
+  const stamp=Date.parse(fresh?.observedAt||'');
+  const cabinOk=(v:AircraftSnapshot['capacity']):boolean=>
+    !!v&&(['Y','J','F'] as const).every(k=>Number.isSafeInteger(v[k])&&v[k]>=0);
+  if(!validId(scope)||!Number.isFinite(now.getTime())||
+     !fresh||fresh.state!=='ready'||!!fresh.issue||
+     !validId(fresh.aircraftId)||!validId(fresh.routeId)||
+     typeof fresh.registration!=='string'||!fresh.registration.trim()||
+     !validOrigin(fresh.from)||!validOrigin(fresh.to)||fresh.from===fresh.to||
+     fresh.routeLabel.replace(/\s/g,'')!==fresh.from+'-'+fresh.to||
+     !cabinOk(fresh.capacity)||!cabinOk(fresh.remaining)||!cabinOk(fresh.dailyTotal)||
+     !(['Y','J','F'] as const).every(k=>
+       fresh.remaining![k]<=fresh.dailyTotal![k])||
+     !fresh.departureControlShape?.includes('route_depart.php?')||
+     !Number.isFinite(stamp)||stamp>now.getTime()||
+     now.getTime()-stamp>30_000)return false;
+  const root=resolve(directory);
+  return withRunLock(async()=>{
+    const filename=join(root,'return-journal.json');
+    const data=validateReturnJournal(
+      JSON.parse(await readFile(filename,'utf8')),scope,now
+    );
+    const events=data.events?[...data.events]:[];
+    const resolved=new Set(events.filter(
+      (e):e is ResolvedUncertainDepartureEvent=>
+        e.type==='departure-uncertain-resolved').map(e=>e.uncertainEventId));
+    const relevant=events.filter((e):e is UncertainDepartureEvent=>
+      e.type==='departure-uncertain'&&!resolved.has(e.eventId)&&
+      e.aircraftId===fresh.aircraftId&&e.routeId===fresh.routeId);
+    // Multiple unresolved attempts or changed registration/direction are
+    // not safely recoverable from a single first-page observation.
+    if(relevant.length!==1)return false;
+    const uncertain=relevant[0];
+    const pairMatches=[fresh.from,fresh.to].sort().join(':')===
+      [uncertain.from,uncertain.to].sort().join(':');
+    if(fresh.registration!==uncertain.registration||!pairMatches||
+       stamp<=Date.parse(uncertain.observedAt))return false;
+    const event:ResolvedUncertainDepartureEvent={
+      eventId:'res_'+uncertain.sourceRunId+'_'+uncertain.aircraftId+'_'+uncertain.routeId,
+      type:'departure-uncertain-resolved',uncertainEventId:uncertain.eventId,
+      aircraftId:fresh.aircraftId,registration:fresh.registration,
+      routeId:fresh.routeId,from:fresh.from,to:fresh.to,
+      observedAt:fresh.observedAt,result:'live_state_verified',
+      liveState:'ready',reason:'STRICTLY_NEWER_VERIFIED_LIVE_STATE'
+    };
+    if(!validResolvedUncertainDepartureEvent(event,now))return false;
+    if(events.some(e=>e.eventId===event.eventId))return false;
+    if(events.length>=100000)throw Error('JOURNAL_FULL');
+    events.push(event);data.events=events;
+    const temporary=join(root,'return-journal.'+randomUUID()+'.tmp');
+    try{
+      const file=await open(temporary,'wx',0o600);
+      try{await file.writeFile(JSON.stringify(data,null,2)+'\n');await file.sync();}
+      finally{await file.close();}
+      await rename(temporary,filename);
+    }catch{throw Error('JOURNAL_SAVE_FAILED');}
+    finally{await unlink(temporary).catch(()=>undefined);}
+    return true;
+  },join(root,'.return-journal.lock'));
+}
+
 export async function appendUncertainDepartures(directory:string,scope:string,runId:string,report:{entries:any[]},now=new Date()):Promise<number>{if(!validId(scope)||!validId(runId)||!Number.isFinite(now.getTime()))throw new Error('JOURNAL_CONFIG_INVALID');const root=resolve(directory);await mkdir(root,{recursive:true});return withRunLock(async()=>{const filename=join(root,'return-journal.json');const data=validateReturnJournal(JSON.parse(await readFile(filename,'utf8')),scope,now);const events=data.events?[...data.events]:[];let added=0;for(const e of report.entries||[]){if(e?.status!=='outcome_unknown'||typeof e.reason!=='string'||!e.reason.startsWith('NO_RETRY_AFTER_CLICK_ATTEMPT:'))continue;const event:UncertainDepartureEvent={eventId:`unc_${runId}_${e.aircraftId}_${e.routeId}`,type:'departure-uncertain',aircraftId:e.aircraftId,registration:e.registration,routeId:e.routeId,from:e.from,to:e.to,observedAt:now.toISOString(),result:'outcome_unknown',reason:e.reason,sourceRunId:runId};if(!validUncertainDepartureEvent(event,now))throw new Error('JOURNAL_UNCERTAIN_DEPARTURE_INVALID');if(events.some(x=>x.eventId===event.eventId))continue;events.push(event);added++;}if(!added)return 0;data.events=events;const temporary=join(root,`return-journal.${randomUUID()}.tmp`);try{const file=await open(temporary,'wx',0o600);try{await file.writeFile(JSON.stringify(data,null,2)+'\n');await file.sync();}finally{await file.close();}await rename(temporary,filename);}finally{await unlink(temporary).catch(()=>undefined);}return added;},join(root,'.return-journal.lock'));}
 
 /**
