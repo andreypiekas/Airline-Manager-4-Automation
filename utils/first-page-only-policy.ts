@@ -11,7 +11,7 @@ export function firstPageOnlyEnabled(env:Record<string,string|undefined>,dryRun:
 /** Green in page-only mode means the VERIFIED WINDOW was handled safely;
  * it NEVER means the full fleet was inspected, idle or reconciled. */
 export function assertScopedFirstPageOutcome(report:ExecutionReport):void {
-  if(report.dryRun||report.halted||!report.completedAt||report.summary.unknown>0||
+  if(report.dryRun||report.halted||report.rollingWindowUnverified===true||!report.completedAt||report.summary.unknown>0||
     report.summary.evaluated<1||report.entries.length!==report.summary.evaluated)
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
   for(const entry of report.entries){
