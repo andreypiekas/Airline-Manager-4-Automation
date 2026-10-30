@@ -2,6 +2,7 @@ import {test,expect} from '@playwright/test';
 import {IndividualDepartureExecutor,type DeparturePort,type ExecutionReport, type CurrentRouteFuelEvidence} from '../../demand/executor';
 import {readDemandConfig} from '../../demand/config';
 import {flightCountdownObservation} from '../../optimization/flight-timing';
+import {readFlightHistoryEvidence} from '../../optimization/flight-history';
 import type {AircraftSnapshot,CollectionResult} from '../../demand/types';
 
 const aircraft=(id:string,from='GRU',to='XAP'):AircraftSnapshot=>({
@@ -194,4 +195,69 @@ test('run #1227: journal resolution denied retains quarantine and never re-click
   expect(report.summary).toMatchObject({evaluated:1,departed:0,held:1,unknown:0});
   expect(report.entries[0].reason).toBe('PERSISTED_UNCERTAIN_DEPARTURE_BLOCK');
   expect(departures).toBe(0);
+});
+
+
+test('run #1230: real parsed history with one Recalled line verifies conservative fuel for one ready target',async({page})=>{
+  const rows=[
+    '5 hours ago BWN-MQJ XP-166 184,627 Quotas Y50 J46 F9 136,335 Lbs $573,400',
+    '3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled 136,335 Lbs $-260,383',
+    '16 hours ago MQJ-BWN XP-166 179,169 Quotas Y49 J44 F9 136,335 Lbs $556,460'
+  ];
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    rows.map(x=>'<div class="row bg-light m-text p-1 border">'+x+'</div>').join('')+
+    '</div></div>');
+  const history=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(history).toMatchObject({status:'observed',excludedRecalledRows:1});
+  const ready={...aircraft('24444145','MQJ','BWN'),
+    registration:'PP-172-2',flightHistory:history};
+  let clicks=0;
+  const port:DeparturePort={
+    collect:async()=>native([ready]),
+    prepare:async expected=>({...expected,observedAt:new Date().toISOString()}),
+    depart:async()=>{clicks++;},
+    confirm:async expected=>({...expected,state:'inflight',
+      onboard:{Y:80,J:0,F:0},
+      timing:flightCountdownObservation(
+        expected.aircraftId,expected.routeId,'01:15:00',new Date().toISOString()
+      )})
+  };
+  const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+    rollingIndividualMode:true,dryRun:false,maxDepartures:1,
+    fuelHoldingLbsAtRunStart:150000,
+    campaignVerified:true
+    // No fabricated current-route quote: the two actual historical flights
+    // are sufficient to debit the highest observed native fuel requirement.
+  },async()=>{}).run();
+  expect(report.summary).toMatchObject({departed:1,held:0,unknown:0});
+  expect(report.entries[0].resourceEvidence).toMatchObject({
+    verifiedRouteFuelLbs:136335,matchingHistorySamples:2,
+    fuelEvidenceSource:'history',trackingComplete:true
+  });
+  expect(clicks).toBe(1);
+});
+
+test('run #1230: Recalled entry alone cannot authorize a departure',async({page})=>{
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    '<div class="row bg-light m-text p-1 border">'+
+    '3 days ago BWN-MQJ XP-166 83,102 Quotas Recalled 136,335 Lbs $-260,383'+
+    '</div></div></div>');
+  const history=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(history.status).toBe('unavailable');
+  const ready={...aircraft('24444145','MQJ','BWN'),
+    registration:'PP-172-2',flightHistory:history};
+  let clicks=0;
+  const port:DeparturePort={
+    collect:async()=>native([ready]),
+    prepare:async expected=>({...expected,observedAt:new Date().toISOString()}),
+    depart:async()=>{clicks++;},
+    confirm:async()=>null
+  };
+  const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+    rollingIndividualMode:true,dryRun:false,maxDepartures:1,
+    fuelHoldingLbsAtRunStart:150000,campaignVerified:true
+  },async()=>{}).run();
+  expect(report.summary).toMatchObject({departed:0,held:1,unknown:0});
+  expect(report.entries[0].reason).toBe('FUEL_REQUIREMENT_UNVERIFIED');
+  expect(clicks).toBe(0);
 });
