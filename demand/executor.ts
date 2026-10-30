@@ -16,6 +16,8 @@ export interface DeparturePort {
   prepare(expected: AircraftSnapshot): Promise<AircraftSnapshot>;
   depart(expected: AircraftSnapshot): Promise<void>;
   confirm(expected: AircraftSnapshot): Promise<AircraftSnapshot | null>;
+  /** Strictly read-only proof; must revoke prepared click state. */
+  inspectPersistedUncertainReady?(expected:AircraftSnapshot):Promise<AircraftSnapshot>;
 }
 export interface ExecutionSettings {
   dryRun: boolean;
@@ -25,6 +27,8 @@ export interface ExecutionSettings {
   /** Absolute deadline after which no new departure mutation may start. */
   mutationDeadlineEpochMs?: number;
   blockedDepartureKeys?: ReadonlySet<string>;
+  /** Append-only durable resolution after independent native target proof. */
+  reconcilePersistedUncertainReady?: (fresh:AircraftSnapshot)=>Promise<boolean>;
   /** Scheduling hint from durable journal; never a departure authorization. */
   prioritizedDepartureKeys?: ReadonlySet<string>;
   /** Scheduling hint from a freshly matched first native Fleet page; no departure permission. */
@@ -260,7 +264,54 @@ export class IndividualDepartureExecutor {
         entry.reason='REROUTE_PRICING_NOT_VERIFIED';continue;
       }
       if(this.attemptedAircraft.has(expected.aircraftId)||this.attemptedRoutes.has(expected.routeId)){entry.reason='ALREADY_ATTEMPTED';continue;}
-      if(this.settings.blockedDepartureKeys?.has(expected.aircraftId+':'+expected.routeId)){entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK';continue;}
+      if(this.settings.blockedDepartureKeys?.has(targetKey)){
+        entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_BLOCK';
+        // A previous uncertain mutation must NEVER be retried in this run.
+        // In page-one mode, however, we may independently re-read the exact
+        // READY target and append a strictly newer resolution to the durable
+        // journal. That unlocks only a FUTURE scheduled run.
+        if(!this.settings.dryRun&&this.settings.rollingIndividualMode&&
+           rollingWindowVerified&&this.port.inspectPersistedUncertainReady&&
+           this.settings.reconcilePersistedUncertainReady){
+          try{
+            const fresh=await this.port.inspectPersistedUncertainReady(expected);
+            const age=Date.now()-Date.parse(fresh.observedAt);
+            const verified=fresh.state==='ready'&&!fresh.issue&&
+              sameContext(expected,fresh)&&
+              !!fresh.remaining&&!!fresh.dailyTotal&&
+              !!fresh.departureControlShape?.includes('route_depart.php?')&&
+              Number.isFinite(age)&&age>=0&&age<=this.demand.maxAgeSeconds*1000;
+            if(verified&&await this.settings.reconcilePersistedUncertainReady(fresh)){
+              entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY';
+              console.warn('[DepartureQuarantine] '+JSON.stringify({
+                status:'RESOLVED_BY_STRICT_NEWER_READY_STATE',
+                departClicked:false,retryCurrentRun:false,
+                globalFleetScans:0,previousUncertaintyStillAudited:true
+              }));
+            }
+          }catch(error){
+            const message=error instanceof Error?error.message:'';
+            // A non-restored details panel or failed journal write is an
+            // unsafe context for later targets. Halt with no additional click.
+            if(message==='QUARANTINE_READ_ONLY_UI_RESTORE_FAILED'||
+               message==='INTERACTIVE_CHALLENGE_DETECTED_STOP'||
+               message.startsWith('JOURNAL_')){
+              report.halted=true;
+              console.warn('[DepartureQuarantine] '+JSON.stringify({
+                status:'HOLD_UNVERIFIED_CONTEXT',departClicked:false,
+                subsequentMutationsBlocked:true
+              }));
+              await persist();
+              break;
+            }
+            console.warn('[DepartureQuarantine] '+JSON.stringify({
+              status:'READ_ONLY_RESOLUTION_UNAVAILABLE',
+              departClicked:false,quarantineRetained:true
+            }));
+          }
+        }
+        continue;
+      }
       if(this.settings.maxDepartures!=='all' && this.attemptedAircraft.size>=this.settings.maxDepartures){entry.reason='EXECUTION_LIMIT';continue;}
       if(!initial.complete&&!rollingWindowVerified){entry.reason='INITIAL_COLLECTION_INCOMPLETE';continue;}
       if((aircraftCounts.get(expected.aircraftId)||0)!==1||(routeCounts.get(expected.routeId)||0)!==1){
