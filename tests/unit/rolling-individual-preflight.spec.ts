@@ -257,13 +257,17 @@ test('native first-page AJAX without new response or detached DOM fails closed',
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
 
-test('run #1205: transient invalid identity in first visible page gets one fresh verified retry',async({page})=>{
+test('run #1205: transient invalid native callback gets one fresh verified retry',async({page})=>{
   await fixture(page,[[plane(1,false)],[plane(1,false)]],1);
   await page.evaluate(()=>{
     const w=window as any,render=w.menuFleet;
     w.menuFleet=()=>{
       render();
-      if(w.opens===1)document.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+      // Absent registration spans are legitimate for PASSIVE inflight cards.
+      // A malformed native details callback is still forbidden for every
+      // card, including an airborne one. Retry once with fresh native UI.
+      if(w.opens===1)document.querySelector('#routeMainList1001 a')
+        ?.setAttribute('onclick',"Ajax('unknown.php','other');");
     };
   });
   const recovered=await inspectIndividualFirstPage(page,{timeout:650,maxCandidates:1});
@@ -326,6 +330,113 @@ test('run #1220: menu click timeout without a verified native first page remains
   await expect(inspectFirstPageReadOnly(page,450,{allowAlreadyOpen:true}))
     .rejects.toThrow();
   expect(await page.evaluate(()=>(window as any).opens)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+
+/** Real #1221: 20 cards visible but 19 flying cards render their registration
+ * as a native link label without a matching acRegList node. No flying card
+ * can authorize a departure; the ready card retains the full strict proof. */
+test('run #1221: 1 ready + 19 passive inflight without spans is a verified page-one window',async({page})=>{
+  const frame=Array.from({length:20},(_,i)=>plane(i+1,i===0));
+  await fixture(page,[frame],178);
+  await page.evaluate(()=>{
+    const w=window as any,original=w.menuFleet;
+    w.menuFleet=()=>{
+      original();
+      for(const row of document.querySelectorAll('#routesContainer [id^="routeMainList"]')){
+        if(!row.classList.contains('listDepartable'))
+          row.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+      }
+    };
+  });
+  const observation=await inspectFirstPageReadOnly(page,1200);
+  expect(observation).toMatchObject({
+    status:'STABLE',routeTotal:178,visible:20,ready:1,mutationAuthorized:false
+  });
+  expect(observation.aircraft).toHaveLength(20);
+  expect(observation.aircraft[0]).toMatchObject({
+    aircraftId:'2001',routeId:'1001',registration:'TEST-1',state:'ready'
+  });
+  expect(observation.aircraft.slice(1).every(a=>
+    a.state==='inflight'&&a.registration.startsWith('TEST-')&&
+    /^\d+$/.test(a.aircraftId))).toBe(true);
+  expect(new Set(observation.aircraft.map(a=>a.aircraftId)).size).toBe(20);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1221: passive inflight cards do not prevent individual ready target detail validation',async({page})=>{
+  const frame=Array.from({length:20},(_,i)=>plane(i+1,i===0));
+  await fixture(page,[frame],178);
+  await page.evaluate(()=>{
+    const w=window as any,original=w.menuFleet;
+    w.menuFleet=()=>{
+      original();
+      for(const row of document.querySelectorAll('#routesContainer [id^="routeMainList"]')){
+        if(!row.classList.contains('listDepartable'))
+          row.querySelector('[id^="acRegList"]')?.removeAttribute('id');
+      }
+    };
+  });
+  // The fake game does not supply the detailed seat/demand panel. Ensure
+  // preflight reaches the exact ready target and then FAILS on missing
+  // individual details rather than blocking 19 unrelated flying cards.
+  const report=await inspectIndividualFirstPage(page,{timeout:700,maxCandidates:1});
+  expect(report).toMatchObject({
+    window:'STABLE',routeTotal:178,readyCandidates:1,inspected:1,
+    verified:0,mutationAuthorized:false,holds:[{code:'TARGET_DETAILS_UNVERIFIED'}]
+  });
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1221 safety: ready aircraft missing strict registration node stays blocked',async({page})=>{
+  await fixture(page,[[plane(1,true),plane(2,false)]],178);
+  await page.evaluate(()=>{
+    const w=window as any,original=w.menuFleet;
+    w.menuFleet=()=>{
+      original();
+      document.querySelector('#routeMainList1001 [id^="acRegList"]')?.removeAttribute('id');
+      document.querySelector('#routeMainList1002 [id^="acRegList"]')?.removeAttribute('id');
+    };
+  });
+  const report=await inspectFirstPageReadOnly(page,750);
+  expect(report.status).toBe('IDENTITY_UNVERIFIED');
+  expect(report.aircraft).toHaveLength(0);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1221 safety: inflight missing registration but any Depart control stays blocked',async({page})=>{
+  await fixture(page,[[plane(1,false)]],178);
+  await page.evaluate(()=>{
+    const w=window as any,original=w.menuFleet;
+    w.menuFleet=()=>{
+      original();
+      document.querySelector('#routeMainList1001 [id^="acRegList"]')?.removeAttribute('id');
+      const unsafe=document.createElement('button');
+      unsafe.id='listDepart1001';unsafe.disabled=true;unsafe.textContent='Depart';
+      document.querySelector('#routeMainList1001')?.append(unsafe);
+    };
+  });
+  const report=await inspectFirstPageReadOnly(page,750);
+  expect(report.status).toBe('IDENTITY_UNVERIFIED');
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('run #1221 safety: invalid native aircraft callback on passive inflight card stays blocked',async({page})=>{
+  await fixture(page,[[plane(1,true),plane(2,false)]],178);
+  await page.evaluate(()=>{
+    const w=window as any,original=w.menuFleet;
+    w.menuFleet=()=>{
+      original();
+      document.querySelector('#routeMainList1002 [id^="acRegList"]')?.removeAttribute('id');
+      document.querySelector('#routeMainList1002 a')?.setAttribute('onclick',"Ajax('unknown.php','other');");
+    };
+  });
+  const report=await inspectFirstPageReadOnly(page,750);
+  expect(report.status).toBe('IDENTITY_UNVERIFIED');
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });

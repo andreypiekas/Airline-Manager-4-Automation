@@ -52,14 +52,23 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
       const buttons = Array.from(el.querySelectorAll('a'))
         .map(a => ({ callback: a.getAttribute('onclick') || '',
           registration: a.querySelector('[id^="acRegList"]')?.textContent?.trim() || '',
-          registrationNodeId: a.querySelector('[id^="acRegList"]')?.id || '' }));
+          registrationNodeId: a.querySelector('[id^="acRegList"]')?.id || '',
+          // Some airborne cards render plain text rather than acRegList spans.
+          // This is only a page-stability label; NEVER a departure identity.
+          linkRegistration: (a.textContent?.replace(/\s+/g,' ').trim() || '')
+            .match(/^(.{1,80}?)\s+-\s+.{1,100}$/)?.[1] || '' }));
       const routeId = el.id.replace(/^routeMainList/, '');
       const depart = el.querySelector('#listDepart' + routeId) as HTMLElement | null;
+      const hasReadyClass=el.classList.contains('listDepartable');
       return {
         routeId,
         buttons,
+        hasReadyClass,
+        // Any native Depart-like control, even hidden/misnumbered, forbids the
+        // passive inflight exception. Ready candidates require the exact one.
+        hasDepartControl:!!el.querySelector('[id^="listDepart"]'),
         ready: el.classList.contains('classPAX') &&
-          el.classList.contains('listDepartable') && !!depart &&
+          hasReadyClass && !!depart &&
           !!depart.getClientRects().length && !(depart as HTMLButtonElement).disabled,
         inflight: /Onboard\s*:/.test((el as HTMLElement).innerText)
       };
@@ -74,7 +83,8 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
     const matches = rawCard.buttons.map(b => ({
       id: aircraftIdFromDetailsControl(b.callback),
       registration: b.registration,
-      registrationNodeId: b.registrationNodeId
+      registrationNodeId: b.registrationNodeId,
+      linkRegistration: b.linkRegistration
     })).filter(b => b.id !== null);
     const routeValid=/^[1-9]\d*$/.test(rawCard.routeId);
     const detailsUnique=matches.length===1 && !!matches[0].id &&
@@ -82,11 +92,23 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
     const registrationValid=detailsUnique &&
       matches[0].registrationNodeId==='acRegList'+matches[0].id &&
       !!matches[0].registration;
+    // Run #1221: 19/20 were airborne without acRegList spans. A passive
+    // inflight card can be part of the STABLE WINDOW using its exact native
+    // aircraft callback plus visible link label, NEVER as a ready candidate.
+    // Any ready class, even one with a hidden/disabled Depart button, must
+    // still provide the strict acRegList<aircraftId> registration proof.
+    const passiveInflight=rawCard.inflight && !rawCard.ready &&
+      !rawCard.hasReadyClass && !rawCard.hasDepartControl;
+    const passiveInflightWithoutSpan=detailsUnique && passiveInflight &&
+      matches[0].registrationNodeId==='' &&
+      matches[0].registration==='' && !!matches[0].linkRegistration;
     const conflictingState=rawCard.ready&&rawCard.inflight;
-    if(!routeValid||!detailsUnique||!registrationValid||conflictingState){
+    if(!routeValid||!detailsUnique||
+       (!registrationValid&&!passiveInflightWithoutSpan)||conflictingState){
       if(!routeValid)reject('ROUTE_ID_UNVERIFIED');
       if(!detailsUnique)reject('DETAILS_CONTROL_IDENTITY_UNVERIFIED');
-      if(detailsUnique&&!registrationValid)reject('REGISTRATION_IDENTITY_UNVERIFIED');
+      if(detailsUnique&&!registrationValid&&!passiveInflightWithoutSpan)
+        reject('REGISTRATION_IDENTITY_UNVERIFIED');
       if(conflictingState)reject('READY_INFLIGHT_STATE_CONFLICT');
       invalid = true;
       continue;
@@ -94,7 +116,9 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
     cards.push({
       aircraftId: matches[0].id!,
       routeId: rawCard.routeId,
-      registration: matches[0].registration,
+      // Passive rows use a stable visible label only for page fingerprint.
+      // All mutations still require the strict native node on READY targets.
+      registration:registrationValid?matches[0].registration:matches[0].linkRegistration,
       state: rawCard.ready ? 'ready' : rawCard.inflight ? 'inflight' : 'unavailable'
     });
   }
