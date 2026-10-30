@@ -128,25 +128,32 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
  * A later native page has Next(start=40+) or Previous and is never reused.
  * The two independent full-window identity reads still happen below. */
 async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
+  const reject=(reason:string):false=>{
+    console.warn('[FirstPageReuseDiagnostic] '+JSON.stringify({
+      status:'REOPEN_REQUIRED',reason,globalComplete:false,mutationAuthorized:false
+    }));
+    return false;
+  };
   const list=page.locator('#routeAction');
   const container=page.locator('#routesContainer');
   if(await list.count()!==1||!await list.isVisible()||
-     await container.count()!==1||!await container.isVisible())return false;
+     await container.count()!==1||!await container.isVisible())return reject('FIRST_PAGE_SURFACE_NOT_VISIBLE');
   const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
-  if(await heading.count()!==1)return false;
+  if(await heading.count()!==1)return reject('ROUTES_HEADING_NOT_UNIQUE');
   const value=(await heading.innerText({timeout:1500}).catch(()=>'' )).trim();
   const match=/^Routes\s*\((\d+)\)$/.exec(value);
-  if(!match)return false;
+  if(!match)return reject('ROUTES_HEADING_PARSE_UNVERIFIED');
   const total=Number(match[1]);
-  if(!Number.isSafeInteger(total)||total<1)return false;
+  if(!Number.isSafeInteger(total)||total<1)return reject('ROUTES_COUNT_INVALID');
   const pager=container.locator('.pagination');
   const previous=pager.getByRole('link',{name:'Previous',exact:true});
-  if(await previous.count()>0)return false;
+  if(await previous.count()>0)return reject('NATIVE_PREVIOUS_CURSOR_PRESENT');
   const next=pager.getByRole('link',{name:'Next',exact:true});
-  if(total<=20)return await next.count()===0;
-  return await next.count()===1 && await next.isVisible() &&
+  if(total<=20)return await next.count()===0 || reject('UNEXPECTED_NEXT_CURSOR');
+  const current=await next.count()===1 && await next.isVisible() &&
     (await next.getAttribute('onclick')||'').replace(/\s/g,'')===
       "Ajax('routes.php?start=20&sort=','routeAction',this);";
+  return current || reject('NATIVE_FIRST_PAGE_NEXT_CURSOR_UNVERIFIED');
 }
 
 /**
@@ -175,7 +182,22 @@ export async function inspectFirstPageReadOnly(
     // Revalidate by a fresh native Fleet request for subsequent target reads.
     // The in-place fallback still requires an actual successful routes.php
     // response, then TWO stable identity/cursor observations below.
-    await openFleetList(page, timeout, ()=>{}, {allowVerifiedInPlaceRefresh:true});
+    let lastStage='INSPECT_CONTROL';
+    try{
+      await openFleetList(page, timeout,stage=>{lastStage=stage;},
+        {allowVerifiedInPlaceRefresh:true});
+    }catch(error){
+      // Never expose Playwright exception text, URLs or page HTML.
+      const message=error instanceof Error?error.message:'';
+      const code=['FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED',
+        'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED'].includes(message)
+        ?message:/timeout|waiting for|expect\(/i.test(message)
+          ?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
+      console.warn('[FirstPageNativeOpenFailure] '+JSON.stringify({
+        stage:lastStage,code,globalComplete:false,mutationAuthorized:false
+      }));
+      throw error;
+    }
   }
   const first = await sampleFirstPage(page, timeout);
   if (!first) return blank('UI_UNVERIFIED');
