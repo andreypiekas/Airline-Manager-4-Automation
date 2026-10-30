@@ -47,3 +47,9 @@ test('partially checked first-page targets never count as scoped success',()=>{
   partial.rollingWindowUnverified=true;
   expect(()=>assertScopedFirstPageOutcome(partial)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
 });
+
+test('verified insufficient demand is a safe hold even with a localized reason',()=>{
+  const insufficient=report('held','Demanda abaixo do percentual minimo.');
+  insufficient.entries[0].demand={decision:'hold_insufficient'} as NonNullable<ExecutionReport['entries'][number]['demand']>;
+  expect(()=>assertScopedFirstPageOutcome(insufficient)).not.toThrow();
+});
