@@ -12,6 +12,10 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
   const journal=readPath(journalPath),events=Array.isArray(journal?.events)?journal.events:[];
   const resolvedUncertainDepartureIds=new Set(events.filter(x=>x?.type==='departure-uncertain-resolved').map(x=>x.uncertainEventId));
   const uncertainDepartureKeys=new Set(events.filter(x=>x?.type==='departure-uncertain'&&!resolvedUncertainDepartureIds.has(x.eventId)).map(x=>x.aircraftId+':'+x.routeId));
+  // A durable journal records unresolved events outside the current first page;
+  // it does not imply that the full fleet has been inspected.
+  const journalUnresolvedDepartureKeys=journal?.schemaVersion===1&&Array.isArray(journal?.entries)&&
+    (journal.events===undefined||Array.isArray(journal.events))?uncertainDepartureKeys.size:null;
   const uncertainRouteAircraftIds=new Set(events.filter(x=>x?.type==='route-uncertain').map(x=>x.aircraftId));
   const uncertainPricingRouteIds=new Set(events.filter(x=>x?.type==='pricing-uncertain').map(x=>x.routeId));
   const supplyObservations=Array.isArray(journal?.supplyObservations)?journal.supplyObservations:[];
@@ -119,6 +123,7 @@ function build(dir='test-results/demand',logPath='test-results/bot.log',journalP
       PRECISA_REVISAR_ROTA:count('PRECISA_REVISAR_ROTA'),PRECISA_REVISAR_PRECO:count('PRECISA_REVISAR_PRECO'),MANUTENCAO:count('MANUTENCAO'),PRONTA_PARA_DECOLAR:count('PRONTA_PARA_DECOLAR')},
     quarantines:{departure:new Set([...activeUncertainDepartureKeys,...heldQuarantineKeys]).size,
       route:uncertainRouteAircraftIds.size,pricingRoute:uncertainPricingRouteIds.size,supplyKinds:uncertainSupplyKinds.size},
+    journalSafety:{unresolvedDepartureKeys:journalUnresolvedDepartureKeys},
     maintenance:{preventiveACheckRepairs:modules?.maintenance?.status??(log.includes('[Operacao] Manutencao automatica finalizada.')?'completed_observed':
       log.includes('[Operacao] Iniciando manutencao preventiva, A-checks e reparos...')?'started_observed':'not_observed'),
       evidence:modules?.maintenance?.evidence??null,
@@ -148,7 +153,9 @@ function markdown(d,states){
  const fmt=n=>Number.isSafeInteger(n)?n.toLocaleString('en-US'):(n??'n/d');
  const supplyText=(name,x)=>!x?`${name}: n/d`:`${name}: ${x.status} (${x.reason||'sem motivo'}${Number.isSafeInteger(x.pricePer1000)?`; preço ${fmt(x.pricePer1000)}/1k`:''}${Number.isSafeInteger(x.quantity)?`; qtd ${fmt(x.quantity)}`:''})`;
  const alerts=[];
- if(q.departure)alerts.push(`${q.departure} quarentena(s) persistente(s) de decolagem`);
+ if(q.departure)alerts.push(`${q.departure} quarentena(s) de decolagem observada(s) no escopo desta execução`);
+ if(Number.isSafeInteger(d.journalSafety?.unresolvedDepartureKeys)&&d.journalSafety.unresolvedDepartureKeys>q.departure)
+  alerts.push(`${d.journalSafety.unresolvedDepartureKeys} pendência(s) de decolagem no registro persistente; algumas não foram vistas na página atual`);
  if((d.departures.quarantineReconciledReadOnly||0)>0)
    alerts.push(`${d.departures.quarantineReconciledReadOnly} quarentena(s) de decolagem reconciliada(s) por leitura posterior, SEM novo clique nesta execução; liberadas apenas para próximo ciclo`);
  if(q.route)alerts.push(`${q.route} quarentena(s) de reroute`);
@@ -193,7 +200,8 @@ function markdown(d,states){
   `- Campanhas: **${safe(d.campaign.status)}**${d.campaign.evidence?.ecoFriendly?` — Eco ${d.campaign.evidence.ecoFriendly.verifiedActive===true?'✅':'❌'} · Reputation ${d.campaign.evidence.airlineReputation?.required===false?'n/a':d.campaign.evidence.airlineReputation?.verifiedActive===true?'✅':'❌'} · departure ${d.campaign.departureAuthorized===true?'autorizado':'bloqueado'}`:''}.`,'',
   '## Segurança e atenção','',
   alerts.length?alerts.map(x=>`- ⚠️ ${safe(x)}`).join('\n'):'- ✅ Nenhum alerta agregado adicional neste run.','',
-  `Quarentenas persistentes — decolagem **${q.departure}** · reroute **${q.route}** · pricing **${q.pricingRoute}** · suprimentos **${q.supplyKinds}**.`,'',
+  `Quarentenas — decolagem observada neste escopo **${q.departure}** · reroute registrado **${q.route}** · pricing registrado **${q.pricingRoute}** · suprimentos registrados **${q.supplyKinds}**.`,
+  `Pendências de decolagem no registro persistente: **${fmt(d.journalSafety?.unresolvedDepartureKeys)}** (independente da página atual; não comprova o estado de toda a frota).`,'',
   '## Estados operacionais','',
   '| Estado | Quantidade |','| --- | ---: |',
   `| NORMAL | ${s.NORMAL} |`,`| AGUARDANDO_DEMANDA | ${s.AGUARDANDO_DEMANDA} |`,`| AGUARDANDO_RECURSO | ${s.AGUARDANDO_RECURSO} |`,
@@ -235,6 +243,10 @@ function selfTest(){
  fs.writeFileSync(path.join(dir,'operational-modules.json'),JSON.stringify({schemaVersion:1,maintenance:{status:'completed_observed',observedAt:'2026-01-01T00:00:00.000Z',evidence:{evaluated:22,selected:1,bulkCheckExecuted:true,repairEligible:false}},campaign:{status:'verified_active',observedAt:'2026-01-01T00:00:00.000Z',evidence:{allRequiredVerified:true,departureAuthorized:true,ecoFriendly:{required:true,verifiedActive:true,status:'already_active'},airlineReputation:{required:true,verifiedActive:true,status:'already_active'}}}}));
  fs.writeFileSync(path.join(dir,'journal.json'),JSON.stringify({schemaVersion:1,scope:'x',entries:[],events:[
   {type:'departure-uncertain',aircraftId:'2',routeId:'2'},
+  {type:'departure-uncertain',eventId:'unc_hidden_77',aircraftId:'77',routeId:'77'},
+  {type:'departure-uncertain',eventId:'unc_hidden_78',aircraftId:'78',routeId:'78'},
+  {type:'departure-uncertain',eventId:'unc_resolved_79',aircraftId:'79',routeId:'79'},
+  {type:'departure-uncertain-resolved',uncertainEventId:'unc_resolved_79'},
   {type:'route-uncertain',aircraftId:'3'},
   {type:'pricing-uncertain',routeId:'5'},
   {type:'supply-uncertain',kind:'co2',observedAt:'2026-01-01T00:00:00.000Z'}
@@ -248,6 +260,10 @@ function selfTest(){
  assert.equal(dashboard.routes.originUnavailable,1);assert.equal(dashboard.pricing.phaseHoldReason,'PRICING_INITIAL_COLLECTION_INCOMPLETE');
  // One unresolved journal key + a distinct directly observed HOLD key.
  assert.deepEqual(dashboard.quarantines,{departure:2,route:1,pricingRoute:1,supplyKinds:0});
+ assert.equal(dashboard.journalSafety.unresolvedDepartureKeys,3);
+ assert.ok(markdown(dashboard,[]).includes('Pendências de decolagem no registro persistente: **3**'));
+ assert.ok(markdown(dashboard,[]).includes('decolagem observada neste escopo **2**'));
+ assert.equal(build(dir,path.join(dir,'missing.log'),path.join(dir,'missing-journal.json')).dashboard.journalSafety.unresolvedDepartureKeys,null);
  assert.equal(dashboard.departures.timeBudgetHeld,1);
  assert.ok(markdown(dashboard,[]).includes('1 aeronave(s) adiadas pelo orçamento de tempo'));
  assert.equal(dashboard.maintenance.preventiveACheckRepairs,'completed_observed');assert.deepEqual(dashboard.maintenance.evidence,{evaluated:22,selected:1,bulkCheckExecuted:true,repairEligible:false});assert.equal(dashboard.campaign.status,'verified_active');assert.equal(dashboard.campaign.allRequiredVerified,true);assert.equal(dashboard.campaign.departureAuthorized,true);
