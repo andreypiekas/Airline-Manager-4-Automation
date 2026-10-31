@@ -85,7 +85,7 @@ test('stuck zero Fuel clock with two fresh native panels can purchase within con
   expect(report.halted).toBe(false);
   expect(report.entries[0]).toMatchObject({kind:'fuel',status:'purchased',reason:'STOCK_AND_PAYMENT_CONFIRMED',before:{pricePer1000:500}});
   expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);
-  expect(await page.evaluate(()=>(window as any).fuelOpens)).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate('fuelOpens')).toBeGreaterThanOrEqual(3);
  }finally{await rm(dir,{recursive:true,force:true})}
 });
 test('stuck zero clock without native refresh proof never attempts purchase',async({page})=>{
