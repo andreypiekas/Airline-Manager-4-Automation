@@ -97,3 +97,38 @@ test('run #1230 safety: recalled record alone supplies no fuel evidence',async({
   const evidence=await readFlightHistoryEvidence(page.locator('#detailsAction'));
   expect(evidence).toMatchObject({status:'unavailable',entries:[],mutationAuthorized:false});
 });
+
+const zeroDollarRecalled='1 day ago DEL-KTD XP-178 522 Quotas Recalled 353,464 Lbs $0';
+const confirmedPp192Out='1 day ago DEL-IPC XP-179 1,318,588 Quotas Y385 J12 F13 417,939 Lbs $3,894,342';
+const confirmedPp192Back='14 hours ago IPC-DEL XP-179 1,300,935 Quotas Y377 J13 F13 417,939 Lbs $3,842,059';
+
+test('run #1249: zero-dollar recalled row is excluded while verified PP-192 fuel history remains readable',async({page})=>{
+  expect(parseFlightHistoryRow(zeroDollarRecalled)).toBeNull();
+  expect(isRecognizedRecalledFlightHistoryRow(zeroDollarRecalled)).toBe(true);
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    [confirmedPp192Back,confirmedPp192Out,zeroDollarRecalled]
+      .map(x=>'<div class="row bg-light m-text p-1 border">'+x+'</div>').join('')+
+    '</div></div>');
+  const evidence=await readFlightHistoryEvidence(page.locator('#detailsAction'));
+  expect(evidence).toMatchObject({
+    status:'observed',complete:false,excludedRecalledRows:1,
+    comparisonReady:false,mutationAuthorized:false
+  });
+  expect(evidence.entries).toHaveLength(2);
+  expect(evidence.entries.map(x=>x.fuelLbs)).toEqual([417939,417939]);
+  expect(evidence.entries.map(x=>x.from+'-'+x.to)).toEqual(['IPC-DEL','DEL-IPC']);
+  expect(evidence.entries.every(x=>x.revenue>0)).toBe(true);
+});
+
+test('run #1249 safety: zero-dollar recalled row alone never establishes fuel evidence',async({page})=>{
+  await page.setContent('<div id="detailsAction"><div id="flight-history">'+
+    '<div class="row bg-light m-text p-1 border">'+zeroDollarRecalled+'</div></div></div>');
+  expect(await readFlightHistoryEvidence(page.locator('#detailsAction')))
+    .toMatchObject({status:'unavailable',entries:[],mutationAuthorized:false});
+  for(const bad of [
+    zeroDollarRecalled.replace('$0','$00'),
+    zeroDollarRecalled.replace('$0','$-0'),
+    zeroDollarRecalled.replace('$0','$123'),
+    zeroDollarRecalled.replace('DEL-KTD','DEL-DEL')
+  ])expect(isRecognizedRecalledFlightHistoryRow(bad)).toBe(false);
+});

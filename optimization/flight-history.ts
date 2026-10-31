@@ -42,18 +42,21 @@ export function parseFlightHistoryRow(text:string):FlightHistoryEntry|null{
 
 /** A recalled flight is NOT evidence of a completed flight or fuel burn.
  * AM4 displays it in the same history table with "Quotas Recalled" and
- * negative revenue. Recognize this exact native format solely to exclude it
+ * negative revenue or zero-dollar recalled records. Recognize these native formats solely to exclude them
  * while retaining independent, fully parsed real-flight observations.
  * Any other malformed or unrecognized row still invalidates the window. */
 export function isRecognizedRecalledFlightHistoryRow(text:string):boolean{
   const normalized=text.replace(/\s+/g,' ').trim();
-  const m=normalized.match(/^(.{1,40}? ago) ([A-Z0-9]{3})-([A-Z0-9]{3}) (.{1,80}?) ([\d,]+) Quotas Recalled ([\d,]+) Lbs \$-([\d,]+)$/);
+  const m=normalized.match(/^(.{1,40}? ago) ([A-Z0-9]{3})-([A-Z0-9]{3}) (.{1,80}?) ([\d,]+) Quotas Recalled ([\d,]+) Lbs \$(0|-[\d,]+)$/);
   if(!m||m[2]===m[3]||!m[4].trim())return false;
   try{
-    const quotas=integerText(m[5]),fuel=integerText(m[6]),refund=integerText(m[7]);
+    const quotas=integerText(m[5]),fuel=integerText(m[6]);
+    // Zero-dollar recalls remain excluded; only negative nonzero refunds are otherwise valid.
+    const zeroRevenueRecall=m[7]==='0';
+    const refund=zeroRevenueRecall?0:integerText(m[7].slice(1));
     return Number.isSafeInteger(quotas)&&quotas>=0&&
       Number.isSafeInteger(fuel)&&fuel>0&&
-      Number.isSafeInteger(refund)&&refund>0;
+      Number.isSafeInteger(refund)&&(zeroRevenueRecall||refund>0);
   }catch{return false;}
 }
 
