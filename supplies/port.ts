@@ -187,7 +187,7 @@ export class SupplyPort {
     throw Error('SUPPLY_PRICE_ROLLOVER');
    return remaining();
   };
-  let first:number,second:number;
+  let first:number,second=-1;
   try {
    first=await refresh();
    if(first>=10)return;
