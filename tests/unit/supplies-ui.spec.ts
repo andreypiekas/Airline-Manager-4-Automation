@@ -14,11 +14,11 @@ async function fixture(page:Page,variant=''){
  });
  await page.goto('https://www.airlinemanager.com/synthetic');
  await page.setContent(`<span id="headerAccount">100000</span><div id="smallMainMenu"><div onclick="hideAllWhenClick();popup('fuel.php','Fuel',false,false,true);"><div><span>Fuel</span></div></div></div><div><span id="popTitle" style="display:none">Fuel</span><button onclick="closePop();document.getElementById('rewardPopup').style.display='none';">Close</button></div><div id="rewardPopup"></div><button id="popBtn2"></button><div id="fuelMain" style="display:none"></div><script>
- const variant=${JSON.stringify(variant)};let kind='fuel';window.purchases=0;let amount=1000;let stock={fuel:1000,co2:variant==='negative-co2'?-13013699:1000};let cash=variant==='negative-co2'?168815066:100000;
- function price(){return variant==='expensive'?2000:kind==='fuel'?500:variant==='negative-co2'?104:100}
+ const variant=${JSON.stringify(variant)};let kind='fuel';window.purchases=0;let amount=1000;let fuelOpens=0;let stock={fuel:1000,co2:variant==='negative-co2'?-13013699:1000};let cash=variant==='negative-co2'?168815066:100000;
+ function price(){return variant==='expensive'?2000:variant==='stuck-fuel-clock-price-jump'&&kind==='fuel'&&fuelOpens>1?700:kind==='fuel'?500:variant==='negative-co2'?104:100}
  function discount(){return variant==='discount-fuel'&&kind==='fuel'?25:variant==='discount-co2'&&kind==='co2'?10:variant==='overcharge-fuel'&&kind==='fuel'?25:0}
  function totalCost(qty){return Math.round(qty*price()/1000*(1-discount()/100))+(variant==='overcharge-fuel'&&kind==='fuel'?123:0)}
- function priceClock(){return variant==='rollover-co2'&&kind==='co2'?'00:00:05':'00:15:00'}
+ function priceClock(){return variant.startsWith('stuck-fuel-clock')&&kind==='fuel'?'00:00:00':variant==='rollover-co2'&&kind==='co2'?'00:00:05':'00:15:00'}
  function $(s){return {val(){return document.querySelector(s).value},removeClass(){return this},addClass(){return this},hide(){return this}}}
  function playSound(){}function hideAllWhenClick(){}function closePop(){document.querySelector('#popTitle').style.display='none';document.querySelector('#fuelMain').style.display='none'}
  function render(){const unit=kind==='fuel'?'Lbs':'Quotas';const p=document.querySelector('#fuelMain');p.style.display='block';document.querySelector('#popTitle').style.display='block';document.querySelector('#headerAccount').textContent=String(cash);const capacity=kind==='co2'&&variant==='negative-co2'?10050500:10000;
@@ -28,7 +28,7 @@ async function fixture(page:Page,variant=''){
  document.querySelector('#purchase').setAttribute('onclick',variant==='callback'?'window.purchases++':kind==='fuel'?${JSON.stringify(purchaseCallback('fuel'))}:${JSON.stringify(purchaseCallback('co2'))});
  document.querySelector('#amountInput').onkeyup=()=>{document.querySelector('#total').textContent='$'+totalCost(Number(document.querySelector('#amountInput').value))};
  document.querySelector('#popBtn2').setAttribute('onclick',"$('.popMenuBtn').removeClass('active');$(this).addClass('active');$('#detailsAction').hide();Ajax('co2.php','fuelMain',this,false,false);");}
- function popup(){kind='fuel';render()}
+ function popup(){kind='fuel';fuelOpens++;render();if(variant==='stuck-fuel-clock'||variant==='stuck-fuel-clock-price-jump')fetch('/fuel.php')}
  async function Ajax(url){if(url==='co2.php'){kind='co2';render();return}window.purchases++;const qty=Number(new URL(url,location.href).searchParams.get('amount'));if(variant!=='unknown'&&variant!=='httpfail'){stock[kind]+=qty;cash-=totalCost(qty);render()}await fetch('/'+url)}
  </script>`);
 }
@@ -72,6 +72,40 @@ test('pre-click CO2 price rollover is a safe skip and never becomes an uncertain
  }finally{await rm(dir,{recursive:true,force:true})}
 });
 
+
+
+// Regression #1245: a persistent 00:00:00 timer is not a price-change proof.
+// Two fresh, independently requested native market panels plus exact quote
+// reconciliation permit the same fully validated purchase, never a blind click.
+test('stuck zero Fuel clock with two fresh native panels can purchase within configured cap',async({page})=>{
+ await fixture(page,'stuck-fuel-clock');
+ const {dir,run}=await execute(page,false);
+ try{
+  const report=await run();
+  expect(report.halted).toBe(false);
+  expect(report.entries[0]).toMatchObject({kind:'fuel',status:'purchased',reason:'STOCK_AND_PAYMENT_CONFIRMED',before:{pricePer1000:500}});
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(2);
+  expect(await page.evaluate('fuelOpens')).toBeGreaterThanOrEqual(3);
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+test('stuck zero clock without native refresh proof never attempts purchase',async({page})=>{
+ await fixture(page,'stuck-fuel-clock-no-response');
+ const {dir,run}=await execute(page,false);
+ try{
+  const report=await run();
+  expect(report.entries[0]).toMatchObject({kind:'fuel',status:'skipped',reason:'PRICE_ROLLOVER_BEFORE_PURCHASE'});
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(1); // CO2 alone
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
+test('server-updated Fuel price during zero-clock refresh blocks purchase without retry',async({page})=>{
+ await fixture(page,'stuck-fuel-clock-price-jump');
+ const {dir,run}=await execute(page,false);
+ try{
+  const report=await run();
+  expect(report.entries[0]).toMatchObject({kind:'fuel',status:'skipped',reason:'PRICE_ROLLOVER_BEFORE_PURCHASE'});
+  expect(await page.evaluate(()=>(window as any).purchases)).toBe(1); // CO2 alone
+ }finally{await rm(dir,{recursive:true,force:true})}
+});
 
 test('real discounted fuel quote reconciles native 25% price and confirms purchase',async({page})=>{
  await fixture(page,'discount-fuel');

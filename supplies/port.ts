@@ -153,6 +153,50 @@ export class SupplyPort {
   await expect.poll(async()=>{try{await read();return true;}catch{return false;}},{timeout:this.timeout}).toBe(true);
   return read();
  }
+ /**
+  * AM4 can keep PRICE CHANGE at 00:00:00 after a rollover.
+  * Only that exact stuck value permits two independent READ-ONLY server refreshes,
+  * requiring unchanged stock, balance, price and payable quote. A 1-9s clock,
+  * missing response, changed quote or interrupted refresh fails closed.
+  */
+ private async verifyPriceWindow(kind:Commodity,quantity:number,before:SupplySnapshot,quote:SupplyQuote){
+  const remaining=async()=>{
+   const text=await this.page.locator('#fuelMain').innerText();
+   const matches=[...text.matchAll(/PRICE CHANGE\s+(\d{2}):(\d{2}):(\d{2})/gi)];
+   if(matches.length!==1)throw Error('SUPPLY_PRICE_ROLLOVER');
+   const [,h,m,s]=matches[0].map(Number);
+   if(![h,m,s].every(Number.isSafeInteger)||m>59||s>59)return -1;
+   return h*3600+m*60+s;
+  };
+  const initial=await remaining();
+  if(initial>=10)return;
+  if(initial!==0)throw Error('SUPPLY_PRICE_ROLLOVER');
+  const refresh=async()=>{
+   const received=this.page.waitForResponse(response=>{
+    const url=new URL(response.url());
+    return url.origin==='https://www.airlinemanager.com' &&
+      url.pathname===`/${kind}.php` && url.searchParams.get('mode')!=='do';
+   },{timeout:this.timeout}).catch(()=>null);
+   await this.open(kind);
+   const response=await received;
+   if(!response||!response.ok()||(await response.finished())!==null)throw Error('SUPPLY_PRICE_ROLLOVER');
+   const snapshot=await this.snapshot(kind);
+   if(JSON.stringify(snapshot)!==JSON.stringify(before))throw Error('SUPPLY_PRICE_ROLLOVER');
+   const freshQuote=await this.quote(kind,quantity);
+   if(freshQuote.total!==quote.total||freshQuote.discountPercent!==quote.discountPercent)
+    throw Error('SUPPLY_PRICE_ROLLOVER');
+   return remaining();
+  };
+  let first:number,second=-1;
+  try {
+   first=await refresh();
+   if(first>=10)return;
+   if(first!==0)throw Error('SUPPLY_PRICE_ROLLOVER');
+   await this.page.waitForTimeout(1000);
+   second=await refresh();
+  }catch{throw Error('SUPPLY_PRICE_ROLLOVER');}
+  if(second!==0&&second<10)throw Error('SUPPLY_PRICE_ROLLOVER');
+ }
  async purchase(kind:Commodity,quantity:number,before:SupplySnapshot,quote:SupplyQuote){
   let mutationAttempted=false;
   try{
@@ -163,9 +207,8 @@ export class SupplyPort {
    if(JSON.stringify(fresh)!==JSON.stringify(before))throw Error('SUPPLY_SNAPSHOT_CHANGED');
    const freshQuote=parseSupplyQuote(await this.page.locator('#fuelMain').innerText(),fresh.pricePer1000,quantity);
    if(freshQuote.total!==quote.total||freshQuote.discountPercent!==quote.discountPercent)throw Error('SUPPLY_QUOTE_CHANGED');
-   // Avoid a market rollover while the native request is being dispatched.
-   const clock=(await this.page.locator('#fuelMain').innerText()).match(/PRICE CHANGE\s+(\d{2}):(\d{2}):(\d{2})/i);
-   if(!clock||Number(clock[1])*3600+Number(clock[2])*60+Number(clock[3])<10)throw Error('SUPPLY_PRICE_ROLLOVER');
+   // A stuck zero clock requires independently refreshed, server-backed quotes.
+   await this.verifyPriceWindow(kind,quantity,before,quote);
    const response=this.page.waitForResponse(r=>{
     const u=new URL(r.url());return u.origin==='https://www.airlinemanager.com'&&u.pathname===`/${kind}.php`&&u.searchParams.get('mode')==='do'&&u.searchParams.get('amount')===String(quantity);
    },{timeout:this.timeout}).catch(()=>null);
