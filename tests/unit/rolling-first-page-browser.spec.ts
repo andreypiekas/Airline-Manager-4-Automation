@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { inspectFirstPageReadOnly } from '../../demand/rolling-first-page';
+import { inspectIndividualFirstPage } from '../../demand/rolling-individual-preflight';
 import { observeRollingFirstPage } from '../../demand/rolling-first-page-cycle';
 
 type Card = { id:number; state:'ready'|'inflight'|'unavailable' };
@@ -91,6 +92,36 @@ test('maintenance-style short window is observed without claiming full fleet int
   expect(report.stopReason).toBe('NO_NEW_READY');
   expect(report.totalKnownAircraft).toBe(19);
   expect(report.mutationAuthorized).toBe(false);
+  expect(await page.evaluate(()=>(window as any).nextClicks)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+// Regression #1252: two confirmed departures were followed by an incomplete
+// native first-page observation. Recheck once without authorizing a click.
+test('short first page with no ready cards gets one read-only recovery to a stable empty window',async({page})=>{
+  const short=first('unavailable').slice(0,19);
+  const stable=first('unavailable');
+  await changingFleet(page,[short,stable]);
+  const report=await inspectIndividualFirstPage(page,{timeout:1500,maxCandidates:20});
+  expect(report.window).toBe('STABLE');
+  expect(report.routeTotal).toBe(142);
+  expect(report.readyCandidates).toBe(0);
+  expect(report.verified).toBe(0);
+  expect(report.holds).toEqual([]);
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).nextClicks)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+
+test('repeated short no-ready first pages stay unverified, never treated as complete',async({page})=>{
+  const short=first('unavailable').slice(0,19);
+  await changingFleet(page,[short,short]);
+  const report=await inspectIndividualFirstPage(page,{timeout:1500,maxCandidates:20});
+  expect(report.window).toBe('SHORT_PAGE');
+  expect(report.routeTotal).toBe(142);
+  expect(report.readyCandidates).toBe(0);
+  expect(report.verified).toBe(0);
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
   expect(await page.evaluate(()=>(window as any).nextClicks)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
