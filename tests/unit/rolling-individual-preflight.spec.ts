@@ -45,7 +45,8 @@ test('inflight-only window is safe with no scans of other pages or any departure
   const r=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:2});
   expect(r).toMatchObject({mode:'read-only-individual',mutationAuthorized:false,inspected:0,verified:0,readyCandidates:0});
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
-  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+  // A short no-ready window now receives exactly one read-only native refresh.
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
 });
 test('transient missing native Routes heading gets one fresh UI retry without departure',async({page})=>{
   await fixture(page,[[plane(1,false)],[plane(1,false)]],1);
@@ -236,7 +237,9 @@ test('already-open first page with no ready aircraft remains read-only and scope
   await page.locator('#mapRoutes').click();
   const preflight=await inspectIndividualFirstPage(page,{timeout:500,maxCandidates:20});
   expect(preflight).toMatchObject({window:'SHORT_PAGE',routeTotal:173,inspected:0,readyCandidates:0,verified:0,mutationAuthorized:false});
-  expect(await page.evaluate(()=>(window as any).opens)).toBe(1);
+  // Even after the bounded recovery, a short window is NOT a verified no-ready page.
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
 
 test('native first-page Ajax may refresh an existing DOM container only with verified response',async({page})=>{
