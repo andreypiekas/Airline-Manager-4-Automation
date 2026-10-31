@@ -46,8 +46,15 @@ export async function inspectIndividualFirstPage(
   // Ajax list refreshes. Recover ONCE, read-only, only after a fresh native
   // first-page request. Neither the initial partial snapshot nor an outdated
   // cursor can authorize a departure: all independent candidate checks remain.
-  if(['UI_UNVERIFIED','IDENTITY_UNVERIFIED','UNSTABLE'].includes(first.status)&&budget()){
-    const prior=first.status;
+  // Run #1252: after two natively confirmed flights, the next first page
+  // could be SHORT_PAGE with zero ready cards while Routes(N) still advertised
+  // more cards. That is NOT proof of idleness: a missing card may be ready.
+  // Permit one fresh, read-only native first-page request, then keep all
+  // existing stable-window and individual identity gates unchanged.
+  const shortWithoutReady=first.status==='SHORT_PAGE'&&first.ready===0;
+  if((['UI_UNVERIFIED','IDENTITY_UNVERIFIED','UNSTABLE'].includes(first.status)||
+      shortWithoutReady)&&budget()){
+    const prior=shortWithoutReady?'SHORT_PAGE_NO_READY':first.status;
     console.warn('[RollingPreflightRecovery] '+JSON.stringify({
       status:'RETRY_FIRST_PAGE_UNVERIFIED',reason:prior,
       globalComplete:false,mutationAuthorized:false
