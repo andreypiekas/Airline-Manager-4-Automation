@@ -119,6 +119,10 @@ export class PlaywrightDeparturePort implements DeparturePort {
         }));
         throw Error('ROLLING_FIRST_PAGE_PREFLIGHT_FAILED');
       });
+      const shortNoReadyObserved=pilot.window==='SHORT_PAGE' && pilot.readyCandidates===0 &&
+        pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0 &&
+        pilot.windowObservedAircraft.length>0 &&
+        pilot.windowObservedAircraft.every(a=>a.state!=='ready');
       const noReadyVerified=pilot.window==='STABLE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
       const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
@@ -139,6 +143,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
         complete:false,expectedRoutes:pilot.routeTotal,
         observationScope:(verifiedWindow||noReadyVerified)?'native-individual-first-page' as const:undefined,
         windowNoReadyVerified:noReadyVerified,
+        windowShortNoReadyObserved:shortNoReadyObserved,
+        windowObservedAircraft:pilot.windowObservedAircraft,
         windowReadyCandidates:pilot.readyCandidates,
         warnings:(verifiedWindow||noReadyVerified)?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
       };

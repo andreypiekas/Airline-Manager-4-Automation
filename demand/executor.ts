@@ -4,6 +4,7 @@ import type { AdaptiveThreshold } from './adaptive-threshold';
 import { estimatedGrossTicketRevenue } from './revenue';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { orderVerifiedDepartureCandidates } from './rolling-first-page-priority';
+import { verifiedPostDispatchShortTail } from './rolling-tail-reconciliation';
 
 export interface CurrentRouteFuelEvidence {
   aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -67,6 +68,8 @@ export interface ExecutionReport {
   entries: ExecutionEntry[];
   /** True if any observed current-page ready target lacked a fresh identity/control proof. */
   rollingWindowUnverified?: boolean;
+  /** A post-dispatch short tail was reconciled only with current-run confirmed IDs; not global idle. */
+  postDispatchShortTailReconciled?: boolean;
   /** Verified complete native first-page observation contained no ready aircraft. */
   firstPageNoReadyVerified?: boolean;
 }
@@ -511,6 +514,19 @@ export class IndividualDepartureExecutor {
       throw Error('ROLLING_NEXT_WINDOW_COLLECTION_FAILED');
     }
     if(!verifiedRollingWindow(nextWindow)){
+      const confirmed=new Set(report.entries.filter(e=>e.status==='departed')
+        .map(e=>e.aircraftId+':'+e.routeId));
+      if(!report.halted && report.summary.unknown===0 &&
+         verifiedPostDispatchShortTail(initial,nextWindow,confirmed)){
+        report.postDispatchShortTailReconciled=true;
+        console.log('[RollingFirstPageCycle] '+JSON.stringify({
+          status:'CONFIRMED_DEPARTED_CARDS_EXPLAIN_SHORT_TAIL',
+          pass:rollingPass+1,scope:'PREVIOUSLY_VERIFIED_FIRST_PAGE_ONLY',
+          missingCardsConfirmed:true,globalComplete:false,
+          mutationAuthorized:false,globalFleetScans:0
+        }));
+        break;
+      }
       report.rollingWindowUnverified=true;
       console.warn('[RollingFirstPageCycle] '+JSON.stringify({
         status:'HOLD_NEXT_WINDOW_UNVERIFIED',pass:rollingPass+1,
