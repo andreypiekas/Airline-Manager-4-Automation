@@ -9,7 +9,7 @@ const card=(n:number,state:'ready'|'inflight'|'unavailable'='inflight')=>({
  aircraftId:String(2000+n),routeId:String(3000+n),registration:'PP-'+n,state
 });
 const aircraft=(n:number):AircraftSnapshot=>({
- ...card(n,'ready'),routeLabel:'GRU - XAP',from:'GRU',to:'XAP',
+ ...card(n,'ready'),routeLabel:n===1?'GRU - XAP':'XAP - DTW',from:n===1?'GRU':'XAP',to:n===1?'XAP':'DTW',
  capacity:{Y:100,J:0,F:0},remaining:{Y:100,J:0,F:0},
  dailyTotal:{Y:200,J:0,F:0},observedAt:new Date().toISOString()
 });
@@ -26,7 +26,6 @@ const shortTail=(ids:number[]):CollectionResult=>({
  windowObservedAircraft:ids.map(n=>card(n,'inflight'))
 });
 const fullIds=Array.from({length:20},(_,i)=>i+1);
-const confirmed=(...ids:number[])=>new Set(ids.map(n=>'200'+(n<10?'':'')+n+':'+(3000+n)));
 
 test('production #1320/#1321: missing card is one of the confirmed departures',()=>{
  const before=baseline([1,2]);
