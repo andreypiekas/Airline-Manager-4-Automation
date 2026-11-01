@@ -1,6 +1,7 @@
 import { Page } from '@playwright/test';
 import { DeparturePort, type CurrentRouteFuelEvidence } from './executor';
 import { calibrateDemandLabelOnCurrentRoutes } from '../optimization/demand-label-calibration';
+import { selectVerifiedRollingFuelTarget,readVerifiedRollingCurrentRouteFuel } from '../optimization/individual-current-route-fuel';
 import { loadReference, type AirportCatalog } from '../optimization/reference-data';
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
@@ -87,6 +88,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private prepared:{aircraft:AircraftSnapshot;handler:string}|null=null;
   private verifiedRouteCount:number|null=null;
   private lastCompleteFleet:CollectionResult|null=null;
+  private lastRollingWindow:CollectionResult|null=null;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
   navigationMetrics(){return {...this.metrics};}
   constructor(private readonly page:Page,private readonly timeout=15000,
@@ -96,6 +98,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
   async collect(){
     this.prepared=null;
     this.lastCompleteFleet=null;
+    this.lastRollingWindow=null;
     const collectStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:collect');
     if(this.rollingIndividualMode){
@@ -131,7 +134,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         mutationAuthorizedByWindowAlone:false
       }));
       this.metrics.dispatchCollectMs=Date.now()-collectStarted;
-      return {
+      const rolling:CollectionResult={
         aircraft:verifiedWindow?pilot.verifiedAircraft:[],
         complete:false,expectedRoutes:pilot.routeTotal,
         observationScope:(verifiedWindow||noReadyVerified)?'native-individual-first-page' as const:undefined,
@@ -139,6 +142,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
         windowReadyCandidates:pilot.readyCandidates,
         warnings:(verifiedWindow||noReadyVerified)?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
       };
+      this.lastRollingWindow=verifiedWindow?rolling:null;
+      return rolling;
     }
     await openFleetList(this.page,this.timeout);
     // Read only the freshly rendered Fleet count. The earlier complete inventory
@@ -189,6 +194,20 @@ export class PlaywrightDeparturePort implements DeparturePort {
    */
   async readCurrentRouteFuelQuote(expected:AircraftSnapshot):Promise<CurrentRouteFuelEvidence|null>{
     this.prepared=null;
+    if(this.rollingIndividualMode){
+      const collection=this.lastRollingWindow;
+      const target=selectVerifiedRollingFuelTarget(collection,expected);
+      if(!target||!collection?.expectedRoutes)return null;
+      await assertNoInteractiveChallenge(this.page,'departure:rolling-fuel:catalog');
+      let airports:AirportCatalog;
+      try{
+        airports=await loadReference<AirportCatalog>('airports.json');
+        if(!airports.license||!airports.source)return null;
+      }catch{return null;}
+      return readVerifiedRollingCurrentRouteFuel(
+        this.page,target,airports,collection.expectedRoutes,Math.min(this.timeout,10000)
+      );
+    }
     const inventory=this.lastCompleteFleet;
     if(!inventory?.complete||inventory.expectedRoutes!==inventory.aircraft.length||
        inventory.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
