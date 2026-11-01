@@ -43,7 +43,10 @@ export function verifiedPostDispatchShortTail(
   // Every originally ready card must have an independently confirmed departure.
   const beforeReady=before.windowObservedAircraft.filter(a=>a.state==='ready');
   if(beforeReady.length===0||beforeReady.length!==before.aircraft.length||
-     beforeReady.some(a=>!confirmedDepartures.has(key(a))))return false;
+     before.windowReadyCandidates!==beforeReady.length||
+     beforeReady.some(a=>!confirmedDepartures.has(key(a)))||
+     before.aircraft.some(a=>!beforeReady.some(b=>key(b)===key(a)&&
+       b.registration===a.registration&&a.state==='ready'&&!a.issue)))return false;
   const observed=new Set<string>();
   const observedRoutes=new Set<string>();
   for(const a of after.windowObservedAircraft){
