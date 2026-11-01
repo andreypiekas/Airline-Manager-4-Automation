@@ -231,3 +231,42 @@ test('Telegram does not describe complete verified fleet as partial',async()=>{
   expect(summary).toContain('Decolagens: 2/3 confirmadas');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('Telegram omits unknown first-page metrics and never presents a skipped purchase as bought',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-unknown-'));
+ try{
+  await writeFile(join(dir,'company-dashboard.json'),JSON.stringify({
+   fleet:{scope:'FIRST_PAGE_ONLY',collectionComplete:false,seen:17,ready:null,inflight:null},
+   demand:{evaluated:null,sufficient:null,insufficient:null,unavailable:null},
+   departures:{evaluated:0,departed:0,held:0,unknown:0},
+   routes:{rerouted:null,reviewDecisions:{},demandTriggered:{}},
+   supplies:{fuel:{status:'skipped',reason:'PRICE_ABOVE_LIMIT',pricePer1000:700,quantity:999999},co2:{status:'skipped',reason:'PRICE_ABOVE_LIMIT',pricePer1000:140}},
+   campaign:{status:'not_observed',evidence:null,departureAuthorized:null}
+  }));
+  const summary=runSummaryMessage(dir,'success');
+  expect(summary).toContain('COBERTURA PARCIAL');
+  expect(summary).toContain('Aeronaves avaliadas nas janelas: 17');
+  expect(summary).toContain('Fuel: não comprado');
+  expect(summary).not.toContain('qtd 999,999');
+  expect(summary).not.toContain('n/d');
+  expect(summary).not.toContain('Demanda:');
+  expect(summary).not.toContain('Campanhas:');
+  expect(summary).not.toContain('Receita bruta estimada');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Telegram marks dry-run departures as simulated and does not show estimated real revenue',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-dryrun-'));
+ try{
+  await writeFile(join(dir,'company-dashboard.json'),JSON.stringify({
+   run:{mode:'simulation'},departures:{evaluated:3,departed:3,held:0,unknown:0}
+  }));
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({dryRun:true,summary:{departed:3},entries:[{status:'departed',estimatedGrossTicketRevenue:99999}]}));
+  const summary=runSummaryMessage(dir,'success');
+  expect(summary).toContain('SIMULAÇÃO');
+  expect(summary).toContain('Partidas simuladas: 3/3 avaliadas');
+  expect(summary).not.toContain('3/3 confirmadas');
+  expect(summary).not.toContain('Receita bruta estimada');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
