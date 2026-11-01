@@ -171,49 +171,77 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   const semi=semiAutomaticMessage(dir);
   if(semi)return semi;
   const d=read(dir,'company-dashboard.json');
-  const status=d?.run?.stale?'IGNORADA':botResult==='success'?'SUCESSO':botResult==='failure'?'FALHA':botResult==='skipped'?'IGNORADA':String(botResult||'DESCONHECIDO').toUpperCase();
-  const n=v=>Number.isSafeInteger(v)?String(v):'n/d';
-  const fmt=v=>Number.isSafeInteger(v)?v.toLocaleString('en-US'):'n/d';
-  const lines=['✈️ AM4 • '+status+(process.env.GITHUB_RUN_NUMBER?' • run #'+process.env.GITHUB_RUN_NUMBER:'')];
-  if(Array.isArray(d?.bases?.effective)&&d.bases.effective.length)lines.push('Bases: '+d.bases.effective.join(', ')+(d.bases.status==='observed'?' • live':' • fallback'));
-  if(d?.fleet)lines.push('Frota: '+n(d.fleet.seen)+' | voo '+n(d.fleet.inflight)+' | prontas '+n(d.fleet.ready));
-  if(d?.demand)lines.push('Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes | insuf. '+n(d.demand.insufficient)+' | indispon. '+n(d.demand.unavailable));
-  if(d?.departures){
-    lines.push('Decolagens: '+n(d.departures.departed)+'/'+n(d.departures.evaluated)+' confirmadas | retidas '+n(d.departures.held)+' | incertas '+n(d.departures.unknown));
-    if((d.departures.quarantineHeld||0)+(d.departures.quarantineReconciledReadOnly||0)>0)
-      lines.push('Quarentena decolagens: '+n(d.departures.quarantineHeld)+' pendente(s), '+
-        n(d.departures.quarantineReconciledReadOnly)+' reconciliada(s) SEM clique; desbloqueio apenas proxima run');
-    lines.push(departureValueMessage(dir));
+  const stale=d?.run?.stale===true;
+  const status=stale?'IGNORADA':botResult==='success'?'SUCESSO':botResult==='failure'?'FALHA':botResult==='skipped'?'IGNORADA':String(botResult||'DESCONHECIDO').toUpperCase();
+  const n=v=>Number.isSafeInteger(v)&&v>=0?String(v):'n/d';
+  const fmt=v=>Number.isSafeInteger(v)&&v>=0?v.toLocaleString('en-US'):'n/d';
+  const partial=d?.fleet?.scope==='FIRST_PAGE_ONLY'||d?.fleet?.collectionComplete===false;
+  const lines=['✈️ AIRLINE MANAGER 4'+(process.env.GITHUB_RUN_NUMBER?'  •  #'+process.env.GITHUB_RUN_NUMBER:''),
+    (stale?'⏭️':status==='SUCESSO'?'✅':status==='FALHA'?'❌':'ℹ️')+' '+status+(partial?'  |  COBERTURA PARCIAL':'')];
+  const section=(name,items)=>{
+    const rows=items.filter(Boolean);
+    if(rows.length)lines.push('',name,...rows);
+  };
+  if(partial)lines.push('⚠️ Apenas janelas verificadas. Frota global não auditada.');
+  if(Array.isArray(d?.bases?.effective)&&d.bases.effective.length)
+    lines.push('Bases observadas: '+d.bases.effective.join(', ')+(d.bases.status==='observed'?'':' (origem não confirmada)'));
+  const fleet=d?.fleet;
+  if(fleet){
+    const fleetLine=partial?'Aeronaves avaliadas nas janelas: '+n(fleet.seen)
+      :'Frota: '+n(fleet.seen)+' | voo '+n(fleet.inflight)+' | prontas '+n(fleet.ready);
+    section('📍 VISÃO OPERACIONAL',[fleetLine,
+      d?.demand?'Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes | insuf. '+n(d.demand.insufficient)+' | indispon. '+n(d.demand.unavailable):null]);
+  }else if(d?.demand){
+    section('📍 VISÃO OPERACIONAL',['Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes']);
   }
-  const shared=sharedRouteMessage(dir);
-  if(shared)lines.push(shared);
-  if(d?.pricing)lines.push('Pricing: '+n(d.pricing.adjusted)+' ajustadas | '+n(d.pricing.unchanged)+' no alvo | incertas '+n(d.pricing.unknown));
+  if(d?.departures){
+    const dep=d.departures;
+    section('🛫 DECOLAGENS',[
+      'Decolagens: '+n(dep.departed)+'/'+n(dep.evaluated)+' confirmadas | retidas '+n(dep.held)+' | incertas '+n(dep.unknown),
+      (dep.quarantineHeld||0)+(dep.quarantineReconciledReadOnly||0)>0
+        ?'Quarentena decolagens: '+n(dep.quarantineHeld)+' pendente(s), '+n(dep.quarantineReconciledReadOnly)+' reconciliada(s) SEM clique; desbloqueio apenas proxima run':null,
+      departureValueMessage(dir)
+    ]);
+  }
+  const financial=[];
+  if(d?.pricing)financial.push('Pricing: '+n(d.pricing.adjusted)+' ajustadas | '+n(d.pricing.unchanged)+' no alvo | incertas '+n(d.pricing.unknown));
   if(d?.routes){
     const r=d.routes.reviewDecisions||{},dr=d.routes.demandTriggered||{};
-    lines.push('Rotas: '+n(d.routes.rerouted)+' reroutes | revisão KEEP '+n(r.keep)+' / HOLD '+n(r.hold)+' / candidato '+n(r.wouldReroute)+
-      ' | demanda→pesquisa '+n(dr.observed)+'/'+n(dr.eligible));
+    financial.push('Rotas: '+n(d.routes.rerouted)+' reroutes | KEEP '+n(r.keep)+' / HOLD '+n(r.hold)+
+      ' / candidato '+n(r.wouldReroute)+' | pesquisa '+n(dr.observed)+'/'+n(dr.eligible));
   }
+  section('📊 OTIMIZAÇÃO',financial);
   const supply=(label,x)=>{
     if(!x)return label+': n/d';
-    const bits=[x.status];
-    if(Number.isSafeInteger(x.pricePer1000))bits.push(fmt(x.pricePer1000)+'/1k');
+    const state=String(x.status||'n/d');
+    const known={purchased:'comprado ✅',skipped:'não comprado',would_buy:'compra sugerida',held:'retido',failed:'falha ❌'};
+    const bits=[known[state]||state];
+    if(Number.isSafeInteger(x.pricePer1000))bits.push('$'+fmt(x.pricePer1000)+'/1k');
     if(Number.isSafeInteger(x.quantity)&&x.quantity>0)bits.push('qtd '+fmt(x.quantity));
     return label+': '+bits.join(' • ');
   };
-  if(d?.supplies)lines.push('Suprimentos: '+supply('Fuel',d.supplies.fuel)+' | '+supply('CO₂',d.supplies.co2));
-  if(d?.postDispatchSupplies?.observed)
-    lines.push('Reposição após decolagens: '+
-      supply('Fuel',d.postDispatchSupplies.fuel)+' | '+supply('CO₂',d.postDispatchSupplies.co2));
-  const fuelForecastLine=fuelWindowMessage(d?.fuelPriceWindow);
-  if(fuelForecastLine)lines.push(fuelForecastLine);
+  if(d?.supplies||d?.postDispatchSupplies?.observed){
+    section('⛽ SUPRIMENTOS',[
+      d?.supplies?supply('Fuel',d.supplies.fuel):null,
+      d?.supplies?supply('CO₂',d.supplies.co2):null,
+      d?.postDispatchSupplies?.observed?'Pós-voos: '+supply('Fuel',d.postDispatchSupplies.fuel)+' | '+supply('CO₂',d.postDispatchSupplies.co2):null
+    ]);
+  }
+  const forecast=fuelWindowMessage(d?.fuelPriceWindow);
+  if(forecast)lines.push(forecast);
+  const shared=sharedRouteMessage(dir);
+  if(shared)section('🔁 ROTAS COMPARTILHADAS',[shared]);
+  const safety=[];
   if(d?.campaign){
     const eco=d.campaign.evidence?.ecoFriendly?.verifiedActive===true?'✅':d.campaign.evidence?.ecoFriendly?'❌':'n/d';
     const rep=d.campaign.evidence?.airlineReputation?.required===false?'n/a':d.campaign.evidence?.airlineReputation?.verifiedActive===true?'✅':d.campaign.evidence?.airlineReputation?'❌':'n/d';
     const gate=d.campaign.departureAuthorized===true?'✅':d.campaign.departureAuthorized===false?'⛔':'n/d';
-    lines.push('Campanhas: Eco '+eco+' | Reputation '+rep+' | decolagens '+gate);
+    safety.push('Campanhas: Eco '+eco+' | Reputation '+rep+' | decolagens '+gate);
   }
-  if(d?.quarantines)lines.push('Segurança: quarentenas D'+n(d.quarantines.departure)+' R'+n(d.quarantines.route)+' P'+n(d.quarantines.pricingRoute)+' S'+n(d.quarantines.supplyKinds)+' | UI '+(d.uiHealth?.status||'n/d'));
-  if(process.env.RUN_URL)lines.push('Run: '+process.env.RUN_URL);
+  if(d?.quarantines)safety.push('Segurança: quarentenas D'+n(d.quarantines.departure)+' R'+n(d.quarantines.route)+
+    ' P'+n(d.quarantines.pricingRoute)+' S'+n(d.quarantines.supplyKinds)+' | UI '+(d.uiHealth?.status||'n/d'));
+  section('🛡️ SEGURANÇA',safety);
+  if(process.env.RUN_URL)lines.push('', 'Detalhes: '+process.env.RUN_URL);
   return lines.join('\n').slice(0,3500);
 }
 
