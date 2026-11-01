@@ -167,6 +167,17 @@ function semiAutomaticMessage(dir){
   return lines.join('\n').slice(0,3500);
 }
 
+function clipTelegramAtLineBreak(value,limit){
+  if(limit<=0)return '';
+  if(value.length<=limit)return value;
+  const suffix='\n… Mais detalhes no GitHub Actions.';
+  if(limit<=suffix.length+4)return value.slice(0,limit);
+  let prefix=value.slice(0,limit-suffix.length);
+  const boundary=prefix.lastIndexOf('\n');
+  if(boundary>0)prefix=prefix.slice(0,boundary);
+  return prefix+suffix;
+}
+
 function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_RESULT){
   const semi=semiAutomaticMessage(dir);
   if(semi)return semi;
@@ -253,7 +264,7 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
     ' P'+n(d.quarantines.pricingRoute)+' S'+n(d.quarantines.supplyKinds)+(d.uiHealth?.status&&d.uiHealth.status!=='not_observed'?' | UI '+d.uiHealth.status:''));
   section('🛡️ SEGURANÇA',safety);
   if(process.env.RUN_URL)lines.push('', 'Detalhes: '+process.env.RUN_URL);
-  return lines.join('\n').slice(0,3500);
+  return clipTelegramAtLineBreak(lines.join('\n'),3500);
 }
 
 async function main() {
@@ -262,9 +273,9 @@ async function main() {
   if (!token || !chatId) { console.log('[Demand] Telegram nao configurado.'); return; }
   const summary = runSummaryMessage('test-results/demand',process.env.BOT_RESULT);
   const alert = importantMessage('test-results/demand',process.env.BOT_RESULT);
-  const alertText=alert?alert.slice(0,1400):'';
+  const alertText=alert?clipTelegramAtLineBreak(alert,1400):'';
   const maxSummary=Math.max(0,3900-alertText.length-(alertText?2:0));
-  const text=summary.slice(0,maxSummary)+(alertText?'\n\n'+alertText:'');
+  const text=clipTelegramAtLineBreak(summary,maxSummary)+(alertText?'\n\n'+alertText:'');
   const payload={chat_id:chatId,text};
   if(process.env.AUTOMATION_MODE==='semi-automatic'&&/^https:\/\/github\.com\//.test(process.env.WORKFLOW_URL||'')){
     payload.reply_markup={inline_keyboard:[[{text:'Abrir GitHub Actions',url:process.env.WORKFLOW_URL}]]};
@@ -298,4 +309,4 @@ if (require.main === module) main().catch(error => {
   process.exitCode = 1;
 });
 
-module.exports = { message, importantMessage, runSummaryMessage, fuelWindowMessage, sharedRouteMessage, departureValueMessage };
+module.exports = { message, importantMessage, runSummaryMessage, fuelWindowMessage, sharedRouteMessage, departureValueMessage, clipTelegramAtLineBreak };
