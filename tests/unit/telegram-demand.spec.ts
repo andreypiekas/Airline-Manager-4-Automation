@@ -177,3 +177,56 @@ test('Telegram summary includes both shared planes and the gross value',async()=
   expect(summary).toContain('Receita bruta estimada das decolagens: $1,700');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('Telegram first-page report does not imply full fleet coverage or invent missing metrics',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-partial-'));
+ try{
+  await writeFile(join(dir,'company-dashboard.json'),JSON.stringify({
+   fleet:{seen:17,ready:0,inflight:0,collectionComplete:false,scope:'FIRST_PAGE_ONLY'},
+   departures:{departed:0,evaluated:17,held:17,unknown:0},
+   demand:{evaluated:null,sufficient:null,insufficient:null,unavailable:null},
+   pricing:{adjusted:null,unchanged:null,unknown:null},
+   routes:{rerouted:null,reviewDecisions:{}},
+   supplies:{fuel:{status:'skipped',reason:'PRICE_ABOVE_LIMIT',pricePer1000:700,quantity:999999},co2:{status:'skipped',reason:'PRICE_ABOVE_LIMIT',pricePer1000:140}},
+   campaign:{status:'not_observed',evidence:null,departureAuthorized:null}
+  }));
+  const summary=runSummaryMessage(dir,'success');
+  expect(summary).toContain('frota global NÃO auditada');
+  expect(summary).toContain('Aeronaves avaliadas: 17');
+  expect(summary).toContain('Decolagens: 0 confirmadas | 17 retidas | 0 incertas');
+  expect(summary).toContain('Fuel: não comprado (acima do teto) • $700/1k');
+  expect(summary).not.toContain('qtd 999,999');
+  expect(summary).not.toContain('prontas 0');
+  expect(summary).not.toContain('n/d');
+  expect(summary).not.toContain('Demanda:');
+  expect(summary).not.toContain('Campanhas:');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Telegram clearly separates simulation from real confirmed departures',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'am4-telegram-synthetic-'));
+ try{
+  await writeFile(join(dir,'company-dashboard.json'),JSON.stringify({
+   run:{mode:'simulation'},departures:{departed:3,evaluated:3,held:0,unknown:0}
+  }));
+  await writeFile(join(dir,'execution-report.json'),JSON.stringify({
+   dryRun:true,summary:{departed:3},entries:[{status:'departed',estimatedGrossTicketRevenue:9999}]
+  }));
+  const summary=runSummaryMessage(dir,'success');
+  expect(summary).toContain('SIMULAÇÃO');
+  expect(summary).toContain('Partidas simuladas: 3 avaliadas');
+  expect(summary).not.toContain('3 confirmadas');
+  expect(summary).not.toContain('Receita bruta estimada');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Telegram alert is retained within message size limit without mid-line clipping',()=>{
+ const {combineTelegramSummaryAndAlert}=require('../../scripts/telegram-demand.cjs');
+ const summary=['AM4 SUCESSO',...Array.from({length:200},(_,i)=>'Linha '+i+' '+('x'.repeat(65)))].join('\n');
+ const alert='AM4 alerta: decolagem com resultado incerto: 1';
+ const output=combineTelegramSummaryAndAlert(summary,alert);
+ expect(output.length).toBeLessThanOrEqual(4000);
+ expect(output).toContain(alert);
+ expect(output).toContain('Mais detalhes no GitHub Actions');
+});
