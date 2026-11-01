@@ -69,7 +69,7 @@ async function quoteRestoreFixture(page:Page,variant:'already-open'|'reopen'|'no
     <button id="mapRoutes" onclick="hideAllWhenClick();menuFleet('Routes');">Fleet</button>
     <div id="routeAction" style="display:${variant==='already-open'?'block':'none'}"></div>
     <div id="newRouteInfo">
-      ${variant==='no-back'?'':`<button id="native-back" onclick="goBack()">Back</button>`}
+      ${variant==='no-back'?'<span>Current route quote</span>':`<button id="native-back" onclick="goBack()">Back</button>`}
     </div>
     <script>
       window.departClicks=0;window.fleetClicks=0;window.backClicks=0;
