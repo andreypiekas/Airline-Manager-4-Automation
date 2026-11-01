@@ -74,20 +74,29 @@ Credenciais, cookies e tokens não devem ser armazenados como evidência.
 
 Quando os Secrets estão configurados, o notifier usa a mesma consolidação do dashboard para evitar divergência entre GitHub e mensagem.
 
-Exemplo genérico:
+Exemplo de resumo de uma execução com cobertura parcial (valores ilustrativos):
 
 ```text
-✈️ AM4 • SUCESSO
-Bases: AAA, BBB • live
-Frota: 12 | voo 9 | prontas 3
-Demanda: 2/3 suficientes | insuf. 1
-Decolagens: 2 confirmadas | retidas 1 | incertas 0
-Pricing: 1 ajustada | 2 no alvo
-Rotas: KEEP 1 | HOLD 1 | reroutes 0 | demanda→pesquisa 1/1
-Suprimentos: Fuel purchased | CO₂ skipped
-Campanhas: Eco ✅ | Reputation ✅ | decolagens ✅
-Segurança: sem resultado incerto | UI healthy
+✈️ AIRLINE MANAGER 4  •  #1329
+✅ SUCESSO  |  COBERTURA PARCIAL
+⚠️ Apenas janelas verificadas. Frota global não auditada.
+
+📍 VISÃO OPERACIONAL
+Aeronaves avaliadas nas janelas: 17
+Demanda: 15/17 suficientes | insuf. 2 | indispon. 0
+
+🛫 DECOLAGENS
+Decolagens: 15/17 confirmadas | retidas 2 | incertas 0
+Receita bruta estimada das decolagens: $15,000 (15 confirmadas; nao e lucro nem receita contabil)
+
+⛽ SUPRIMENTOS
+Fuel: não comprado • $900/1k
+CO₂: não comprado • $200/1k
+
+🛡️ SEGURANÇA
+Segurança: quarentenas D3 R0 P0 S0 | UI healthy
 ```
+Quando o dashboard registra `FIRST_PAGE_ONLY` ou `collectionComplete=false`, o Telegram **nunca afirma que a frota inteira foi verificada**. `SUCESSO` descreve o encerramento da execução, e não uma garantia de cobertura global. Os alertas operacionais são apresentados em linhas separadas, sem ocultar falhas de segurança.
 
 O resumo não deve incluir:
 
