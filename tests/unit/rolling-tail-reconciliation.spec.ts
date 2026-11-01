@@ -56,7 +56,7 @@ test('unknown, new, ambiguous, changed and unconfirmed cards stay unsafe',()=>{
    expect(verifiedPostDispatchShortTail(before,after,good)).toBe(false);
  expect(verifiedPostDispatchShortTail(before,valid,new Set(['2002:3002']))).toBe(false);
  expect(verifiedPostDispatchShortTail({...before,windowObservedAircraft:before.windowObservedAircraft?.slice(1)},valid,good)).toBe(false);
- expect(verifiedPostDispatchShortTail({...before,windowReadyCandidates:3},valid,good)).toBe(true);
+ expect(verifiedPostDispatchShortTail({...before,windowReadyCandidates:3},valid,good)).toBe(false);
  // With no fresh native roster evidence, do not infer what disappeared.
  expect(verifiedPostDispatchShortTail(before,{...valid,windowObservedAircraft:undefined},good)).toBe(false);
 });
