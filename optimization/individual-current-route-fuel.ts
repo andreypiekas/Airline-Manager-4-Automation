@@ -2,7 +2,6 @@ import type { Page } from '@playwright/test';
 import type { AircraftSnapshot, CollectionResult } from '../demand/types';
 import { inspectFirstPageReadOnly } from '../demand/rolling-first-page';
 import { DemandReader } from '../demand/reader';
-import { openFleetList } from '../demand/navigation';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 import type { AirportCatalog } from './reference-data';
 import { readOpenCandidateQuoteAfterVerifiedAjax } from './quote-reader';
@@ -47,6 +46,35 @@ export function selectVerifiedRollingFuelTarget(
   return matches.length===1?matches[0]:null;
 }
 
+/** Return from the native Reroute quote before reopening Fleet.
+ * The live quote can overlay or hide the Fleet controls. A direct Fleet
+ * open while #newRouteInfo remains visible caused #1317/#1318 to halt.
+ * This performs navigation ONLY and never clicks Depart/Create route.
+ */
+export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Promise<void>{
+  await assertNoInteractiveChallenge(page,'departure:rolling-fuel:restore-start');
+  const quote=page.locator('#newRouteInfo');
+  if(await quote.count()>1)throw Error('ROLLING_FUEL_QUOTE_PANEL_AMBIGUOUS');
+  if(await quote.count()===1&&await quote.isVisible()){
+    const back=quote.getByRole('button',{name:/Back$/});
+    if(await back.count()!==1||!await back.isVisible()||!await back.isEnabled())
+      throw Error('ROLLING_FUEL_NATIVE_BACK_UNVERIFIED');
+    // AM4's own Back control returns from the quote. Do not fabricate a
+    // dismiss endpoint, call Create route, or retry an uncertain mutation.
+    await back.click({timeout});
+    if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
+  }
+  // The existing first-page inspector handles already-open Fleet, native
+  // routes.php in-place refresh, and a new Fleet menu open. Its two full
+  // identity/cursor samples are evidence, never departure authorization.
+  const observation=await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true});
+  if(!['STABLE','SHORT_PAGE'].includes(observation.status)||
+     observation.mutationAuthorized!==false||
+     !await page.locator('#routeAction').isVisible()||
+     await quote.isVisible())
+    throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
+}
+
 /**
  * Native, read-only JIT fuel quote for a single rolling first-page target.
  * Does not manufacture a complete Fleet snapshot or bypass the existing
@@ -68,6 +96,7 @@ export async function readVerifiedRollingCurrentRouteFuel(
   if(ids.length!==1)return null;
   await assertNoInteractiveChallenge(page,'departure:rolling-fuel:before');
   let challengeDetected=false;
+  let rerouteNavigationAttempted=false;
   try{
     const first=await inspectFirstPageReadOnly(page,timeout);
     if(!['STABLE','SHORT_PAGE'].includes(first.status)||
@@ -85,6 +114,7 @@ export async function readVerifiedRollingCurrentRouteFuel(
     if(await reroute.count()!==1||!await reroute.isVisible()||
       !await reroute.isEnabled()||!match||match[1]!==fresh.aircraftId)
       return null;
+    rerouteNavigationAttempted=true;
     await reroute.click({timeout});
     await page.locator('#flightInfoContainer #introSuggest').waitFor({state:'visible',timeout});
     const url='new_route_info.php?id='+fresh.aircraftId+'&airportId='+ids[0]+'&ferry=0';
@@ -115,14 +145,22 @@ export async function readVerifiedRollingCurrentRouteFuel(
   }finally{
     // A detected CAPTCHA must never trigger another UI action, even for
     // restoration. The executor will halt rather than risk a click.
-    if(!challengeDetected){
+    if(!challengeDetected&&rerouteNavigationAttempted){
       try{
-        await assertNoInteractiveChallenge(page,'departure:rolling-fuel:before-restore');
-        await openFleetList(page,timeout);
+        await restoreRollingFuelFirstPage(page,timeout);
         await assertNoInteractiveChallenge(page,'departure:rolling-fuel:after');
       }catch(error){
         if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')
           throw error;
+        // Only allowlisted stage codes: never persist DOM, URLs or callback text.
+        const reason=error instanceof Error&&[
+          'ROLLING_FUEL_QUOTE_PANEL_AMBIGUOUS','ROLLING_FUEL_NATIVE_BACK_UNVERIFIED',
+          'ROLLING_FUEL_QUOTE_NOT_CLOSED','ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED',
+          'RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
+          'FLEET_REFRESH_NATIVE_RESPONSE_UNVERIFIED'
+        ].includes(error.message)?error.message:'NAVIGATION_OR_UI_TIMEOUT';
+        console.warn('[DepartureFuelQuoteRestore] '+JSON.stringify({status:'UNVERIFIED',reason,
+          mutationAuthorized:false,globalFleetScans:0}));
         // Do not continue to a Depart click from an unverified UI context.
         throw new Error('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED');
       }
