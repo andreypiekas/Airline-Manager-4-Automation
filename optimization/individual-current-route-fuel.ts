@@ -13,7 +13,8 @@ export interface IndividualCurrentRouteFuelQuote {
 
 const sameTarget=(a:AircraftSnapshot,b:AircraftSnapshot)=>a.aircraftId===b.aircraftId&&
   a.routeId===b.routeId&&a.registration===b.registration&&
-  a.from===b.from&&a.to===b.to&&a.state==='ready'&&!a.issue;
+  a.from===b.from&&a.to===b.to&&a.state==='ready'&&b.state==='ready'&&
+  !a.issue&&!b.issue;
 
 /**
  * First-page identity is NOT a complete Fleet inventory. This independent
