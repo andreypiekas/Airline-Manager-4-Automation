@@ -175,9 +175,11 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   const status=stale?'IGNORADA':botResult==='success'?'SUCESSO':botResult==='failure'?'FALHA':botResult==='skipped'?'IGNORADA':String(botResult||'DESCONHECIDO').toUpperCase();
   const n=v=>Number.isSafeInteger(v)&&v>=0?String(v):'n/d';
   const fmt=v=>Number.isSafeInteger(v)&&v>=0?v.toLocaleString('en-US'):'n/d';
+  const verified=v=>Number.isSafeInteger(v)&&v>=0;
+  const simulated=d?.run?.mode==='simulation'||read(dir,'execution-report.json')?.dryRun===true;
   const partial=d?.fleet?.scope==='FIRST_PAGE_ONLY'||d?.fleet?.collectionComplete===false;
   const lines=['✈️ AIRLINE MANAGER 4'+(process.env.GITHUB_RUN_NUMBER?'  •  #'+process.env.GITHUB_RUN_NUMBER:''),
-    (stale?'⏭️':status==='SUCESSO'?'✅':status==='FALHA'?'❌':'ℹ️')+' '+status+(partial?'  |  COBERTURA PARCIAL':'')];
+    (stale?'⏭️':status==='SUCESSO'?'✅':status==='FALHA'?'❌':'ℹ️')+' '+status+(simulated?' | SIMULAÇÃO':'')+(partial?'  |  COBERTURA PARCIAL':'')];
   const section=(name,items)=>{
     const rows=items.filter(Boolean);
     if(rows.length)lines.push('',name,...rows);
@@ -187,37 +189,45 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
     lines.push('Bases observadas: '+d.bases.effective.join(', ')+(d.bases.status==='observed'?'':' (origem não confirmada)'));
   const fleet=d?.fleet;
   if(fleet){
-    const fleetLine=partial?'Aeronaves avaliadas nas janelas: '+n(fleet.seen)
-      :'Frota: '+n(fleet.seen)+' | voo '+n(fleet.inflight)+' | prontas '+n(fleet.ready);
-    section('📍 VISÃO OPERACIONAL',[fleetLine,
-      d?.demand?'Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes | insuf. '+n(d.demand.insufficient)+' | indispon. '+n(d.demand.unavailable):null]);
-  }else if(d?.demand){
+    const fleetLine=verified(fleet.seen)?(partial?'Aeronaves avaliadas nas janelas: '+n(fleet.seen)
+      :'Frota: '+n(fleet.seen)+(verified(fleet.inflight)?' | voo '+n(fleet.inflight):'')+(verified(fleet.ready)?' | prontas '+n(fleet.ready):'')):null;
+    const demand=d?.demand;
+    const demandLine=verified(demand?.evaluated)&&verified(demand?.sufficient)&&demand.evaluated>0
+      ?'Demanda: '+n(demand.sufficient)+'/'+n(demand.evaluated)+' suficientes'+(verified(demand.insufficient)?' | insuf. '+n(demand.insufficient):'')+(verified(demand.unavailable)&&demand.unavailable>0?' | indispon. '+n(demand.unavailable):''):null;
+    section('📍 VISÃO OPERACIONAL',[fleetLine,demandLine]);
+  }else if(verified(d?.demand?.evaluated)&&verified(d?.demand?.sufficient)&&d.demand.evaluated>0){
     section('📍 VISÃO OPERACIONAL',['Demanda: '+n(d.demand.sufficient)+'/'+n(d.demand.evaluated)+' suficientes']);
   }
   if(d?.departures){
     const dep=d.departures;
     section('🛫 DECOLAGENS',[
-      'Decolagens: '+n(dep.departed)+'/'+n(dep.evaluated)+' confirmadas | retidas '+n(dep.held)+' | incertas '+n(dep.unknown),
+      (verified(dep.departed)&&verified(dep.evaluated)?(simulated?'Partidas simuladas: ':'Decolagens: ')+n(dep.departed)+'/'+n(dep.evaluated)+(simulated?' avaliadas':' confirmadas')+(verified(dep.held)?' | retidas '+n(dep.held):'')+(verified(dep.unknown)?' | incertas '+n(dep.unknown):''):null),
       (dep.quarantineHeld||0)+(dep.quarantineReconciledReadOnly||0)>0
         ?'Quarentena decolagens: '+n(dep.quarantineHeld)+' pendente(s), '+n(dep.quarantineReconciledReadOnly)+' reconciliada(s) SEM clique; desbloqueio apenas proxima run':null,
-      departureValueMessage(dir)
+      !simulated&&verified(dep.departed)&&dep.departed>0?departureValueMessage(dir).replace(': n/d',': não estimável'):null
     ]);
   }
   const financial=[];
-  if(d?.pricing)financial.push('Pricing: '+n(d.pricing.adjusted)+' ajustadas | '+n(d.pricing.unchanged)+' no alvo | incertas '+n(d.pricing.unknown));
+  if(d?.pricing&&(verified(d.pricing.adjusted)||verified(d.pricing.unchanged)||verified(d.pricing.unknown)))
+    financial.push('Pricing: '+(verified(d.pricing.adjusted)?n(d.pricing.adjusted)+' ajustadas':'sem ajustes verificados')+(verified(d.pricing.unchanged)?' | '+n(d.pricing.unchanged)+' no alvo':'')+(verified(d.pricing.unknown)&&d.pricing.unknown>0?' | incertas '+n(d.pricing.unknown):''));
   if(d?.routes){
     const r=d.routes.reviewDecisions||{},dr=d.routes.demandTriggered||{};
-    financial.push('Rotas: '+n(d.routes.rerouted)+' reroutes | KEEP '+n(r.keep)+' / HOLD '+n(r.hold)+
-      ' / candidato '+n(r.wouldReroute)+' | pesquisa '+n(dr.observed)+'/'+n(dr.eligible));
+    const parts=[];
+    if(verified(d.routes.rerouted))parts.push(n(d.routes.rerouted)+' reroutes');
+    if(verified(r.keep))parts.push('KEEP '+n(r.keep));
+    if(verified(r.hold))parts.push('HOLD '+n(r.hold));
+    if(verified(r.wouldReroute))parts.push('candidato '+n(r.wouldReroute));
+    if(verified(dr.observed)&&verified(dr.eligible))parts.push('pesquisa '+n(dr.observed)+'/'+n(dr.eligible));
+    if(parts.length)financial.push('Rotas: '+parts.join(' | '));
   }
   section('📊 OTIMIZAÇÃO',financial);
   const supply=(label,x)=>{
-    if(!x)return label+': n/d';
-    const state=String(x.status||'n/d');
+    if(!x||typeof x.status!=='string')return null;
+    const state=x.status;
     const known={purchased:'comprado ✅',skipped:'não comprado',would_buy:'compra sugerida',held:'retido',failed:'falha ❌'};
     const bits=[known[state]||state];
     if(Number.isSafeInteger(x.pricePer1000))bits.push('$'+fmt(x.pricePer1000)+'/1k');
-    if(Number.isSafeInteger(x.quantity)&&x.quantity>0)bits.push('qtd '+fmt(x.quantity));
+    if(state==='purchased'&&Number.isSafeInteger(x.quantity)&&x.quantity>0)bits.push('qtd '+fmt(x.quantity));
     return label+': '+bits.join(' • ');
   };
   if(d?.supplies||d?.postDispatchSupplies?.observed){
@@ -233,13 +243,14 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   if(shared)section('🔁 ROTAS COMPARTILHADAS',[shared]);
   const safety=[];
   if(d?.campaign){
-    const eco=d.campaign.evidence?.ecoFriendly?.verifiedActive===true?'✅':d.campaign.evidence?.ecoFriendly?'❌':'n/d';
-    const rep=d.campaign.evidence?.airlineReputation?.required===false?'n/a':d.campaign.evidence?.airlineReputation?.verifiedActive===true?'✅':d.campaign.evidence?.airlineReputation?'❌':'n/d';
-    const gate=d.campaign.departureAuthorized===true?'✅':d.campaign.departureAuthorized===false?'⛔':'n/d';
-    safety.push('Campanhas: Eco '+eco+' | Reputation '+rep+' | decolagens '+gate);
+    const eco=d.campaign.evidence?.ecoFriendly?.verifiedActive===true?'✅':d.campaign.evidence?.ecoFriendly?'❌':null;
+    const rep=d.campaign.evidence?.airlineReputation?.required===false?'n/a':d.campaign.evidence?.airlineReputation?.verifiedActive===true?'✅':d.campaign.evidence?.airlineReputation?'❌':null;
+    const gate=d.campaign.departureAuthorized===true?'✅':d.campaign.departureAuthorized===false?'⛔':null;
+    if(eco!==null&&rep!==null&&gate!==null)safety.push('Campanhas: Eco '+eco+' | Reputation '+rep+' | decolagens '+gate);
   }
-  if(d?.quarantines)safety.push('Segurança: quarentenas D'+n(d.quarantines.departure)+' R'+n(d.quarantines.route)+
-    ' P'+n(d.quarantines.pricingRoute)+' S'+n(d.quarantines.supplyKinds)+' | UI '+(d.uiHealth?.status||'n/d'));
+  if(d?.quarantines&&[d.quarantines.departure,d.quarantines.route,d.quarantines.pricingRoute,d.quarantines.supplyKinds].every(verified))
+    safety.push('Segurança: quarentenas D'+n(d.quarantines.departure)+' R'+n(d.quarantines.route)+
+    ' P'+n(d.quarantines.pricingRoute)+' S'+n(d.quarantines.supplyKinds)+(d.uiHealth?.status&&d.uiHealth.status!=='not_observed'?' | UI '+d.uiHealth.status:''));
   section('🛡️ SEGURANÇA',safety);
   if(process.env.RUN_URL)lines.push('', 'Detalhes: '+process.env.RUN_URL);
   return lines.join('\n').slice(0,3500);
