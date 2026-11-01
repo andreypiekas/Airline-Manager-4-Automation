@@ -66,6 +66,10 @@ export interface CollectionResult {
   windowReadyCandidates?: number;
   /** Stable complete CURRENT page with zero ready cards; not a global observation. */
   windowNoReadyVerified?: boolean;
+  /** Read-only identities from the entire double-verified first window, including inflight cards. */
+  windowObservedAircraft?: Array<{aircraftId:string;routeId:string;registration:string;state:AircraftState}>;
+  /** A double-read short native page with no ready targets; NOT a complete page. */
+  windowShortNoReadyObserved?: boolean;
   aircraft: AircraftSnapshot[];
   complete: boolean;
   expectedRoutes: number | null;
