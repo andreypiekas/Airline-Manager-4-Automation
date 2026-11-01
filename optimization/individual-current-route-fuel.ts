@@ -67,6 +67,7 @@ export async function readVerifiedRollingCurrentRouteFuel(
   const ids=[...new Set(refs.flatMap(a=>a.sourceIds).filter(id=>Number.isSafeInteger(id)&&id>0))];
   if(ids.length!==1)return null;
   await assertNoInteractiveChallenge(page,'departure:rolling-fuel:before');
+  let challengeDetected=false;
   try{
     const first=await inspectFirstPageReadOnly(page,timeout);
     if(!['STABLE','SHORT_PAGE'].includes(first.status)||
@@ -106,16 +107,25 @@ export async function readVerifiedRollingCurrentRouteFuel(
     return {aircraftId:fresh.aircraftId,routeId:fresh.routeId,from:fresh.from,
       to:fresh.to,fuelLbs:q.fuelLbs,observedAt:q.observedAt};
   }catch(error){
-    if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')
+    if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP'){
+      challengeDetected=true;
       throw error;
+    }
     return null;
   }finally{
-    try{
-      await openFleetList(page,timeout);
-      await assertNoInteractiveChallenge(page,'departure:rolling-fuel:after');
-    }catch{
-      // Do not continue to a Depart click from an unverified UI context.
-      throw new Error('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED');
+    // A detected CAPTCHA must never trigger another UI action, even for
+    // restoration. The executor will halt rather than risk a click.
+    if(!challengeDetected){
+      try{
+        await assertNoInteractiveChallenge(page,'departure:rolling-fuel:before-restore');
+        await openFleetList(page,timeout);
+        await assertNoInteractiveChallenge(page,'departure:rolling-fuel:after');
+      }catch(error){
+        if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')
+          throw error;
+        // Do not continue to a Depart click from an unverified UI context.
+        throw new Error('DEPARTURE_FUEL_QUOTE_UI_RESTORE_FAILED');
+      }
     }
   }
 }
