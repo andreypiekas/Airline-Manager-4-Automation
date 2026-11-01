@@ -270,3 +270,13 @@ test('Telegram marks dry-run departures as simulated and does not show estimated
   expect(summary).not.toContain('Receita bruta estimada');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('Telegram trims long reports at complete lines and keeps the Actions pointer',()=>{
+ const {clipTelegramAtLineBreak}=require('../../scripts/telegram-demand.cjs');
+ const text=['AM4 SUCESSO',...Array.from({length:180},(_,i)=>'linha '+i+' '+('X'.repeat(60)))].join('\n');
+ const clipped=clipTelegramAtLineBreak(text,3500);
+ expect(clipped.length).toBeLessThanOrEqual(3500);
+ expect(clipped).toContain('Mais detalhes no GitHub Actions');
+ expect(clipped.split('\n').at(-2)).toMatch(/^linha \d+ X+$/);
+});
