@@ -174,7 +174,8 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   const status=d?.run?.stale?'IGNORADA':botResult==='success'?'SUCESSO':botResult==='failure'?'FALHA':botResult==='skipped'?'IGNORADA':String(botResult||'DESCONHECIDO').toUpperCase();
   const n=v=>Number.isSafeInteger(v)&&v>=0?String(v):null;
   const fmt=v=>Number.isSafeInteger(v)&&v>=0?v.toLocaleString('en-US'):null;
-  const lines=['✈️ AM4 • '+status+(process.env.GITHUB_RUN_NUMBER?' • #'+process.env.GITHUB_RUN_NUMBER:'')];
+  const simulated=d?.run?.mode==='simulation'||read(dir,'execution-report.json')?.dryRun===true;
+  const lines=['✈️ AM4 • '+(simulated?'SIMULAÇÃO • ':'')+status+(process.env.GITHUB_RUN_NUMBER?' • #'+process.env.GITHUB_RUN_NUMBER:'')];
   const partial=d?.fleet?.collectionComplete===false||d?.fleet?.scope==='FIRST_PAGE_ONLY'||d?.fleet?.scope==='GLOBAL_PARTIAL';
   if(d?.run?.stale)lines.push('⚠️ Execução ignorada: versão obsoleta.');
   if(Array.isArray(d?.bases?.effective)&&d.bases.effective.length)
@@ -182,10 +183,10 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
   if(partial)lines.push('🔎 Escopo: janelas verificadas • frota global NÃO auditada');
   if(d?.departures){
     const departed=n(d.departures.departed),held=n(d.departures.held),unknown=n(d.departures.unknown);
-    if(departed!==null)lines.push('🛫 Decolagens: '+departed+' confirmadas'+(held!==null?' | '+held+' retidas':'')+(unknown!==null?' | '+unknown+' incertas':''));
+    if(departed!==null)lines.push('🛫 '+(simulated?'Partidas simuladas: ':'Decolagens: ')+departed+(simulated?' avaliadas':' confirmadas')+(held!==null?' | '+held+' retidas':'')+(unknown!==null?' | '+unknown+' incertas':''));
     if((d.departures.quarantineHeld||0)+(d.departures.quarantineReconciledReadOnly||0)>0)
       lines.push('⚠️ Quarentena: '+(n(d.departures.quarantineHeld)||'0')+' pendentes | '+(n(d.departures.quarantineReconciledReadOnly)||'0')+' reconciliadas sem clique (liberação na próxima run)');
-    if(d.departures.departed>0){
+    if(d.departures.departed>0&&!simulated){
       const revenue=departureValueMessage(dir);
       lines.push('💰 '+revenue.replace(': n/d',': não estimável'));
     }
@@ -258,14 +259,17 @@ function runSummaryMessage(dir='test-results/demand',botResult=process.env.BOT_R
 }
 
 function fitTelegramLines(value,limit){
+  if(limit<=0)return '';
   if(value.length<=limit)return value;
+  const suffix='\n… Mais detalhes no GitHub Actions.';
+  if(limit<=suffix.length+4)return value.slice(0,limit);
   const lines=value.split('\n'),kept=[];
   let length=0;
   for(const line of lines){
-    if(length+line.length+(kept.length?1:0)+24>limit)break;
+    if(length+line.length+(kept.length?1:0)+suffix.length>limit)break;
     kept.push(line);length+=line.length+(kept.length>1?1:0);
   }
-  return kept.join('\n')+'\n… Mais detalhes no GitHub Actions.';
+  return kept.join('\n')+suffix;
 }
 
 function combineTelegramSummaryAndAlert(summary,alert){
@@ -316,4 +320,4 @@ if (require.main === module) main().catch(error => {
   process.exitCode = 1;
 });
 
-module.exports = { message, importantMessage, runSummaryMessage, fuelWindowMessage, sharedRouteMessage, departureValueMessage };
+module.exports = { message, importantMessage, runSummaryMessage, fuelWindowMessage, sharedRouteMessage, departureValueMessage, combineTelegramSummaryAndAlert };
