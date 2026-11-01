@@ -4,6 +4,7 @@ import { DemandReader } from './reader';
 import { verifiedDepartureHandler } from './departure-port';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 import type { AircraftSnapshot } from './types';
+import type { FirstPageAircraft } from './rolling-first-page';
 
 /**
  * Independent target proof. It never describes the 20-card window as a
@@ -19,6 +20,8 @@ export interface IndividualPreflight {
   verified:number;
   readyCandidates:number;
   verifiedAircraft:AircraftSnapshot[];
+  /** Double-verified native window card identities; observation only. */
+  windowObservedAircraft:FirstPageAircraft[];
   holds: Array<{code:
     'TARGET_MOVED_OR_CHANGED'|'TARGET_NOT_READY'|'TARGET_DETAILS_UNVERIFIED'|
     'TARGET_HANDLER_UNVERIFIED'|'TIME_BUDGET'|'WINDOW_UNVERIFIED'}>;
@@ -35,7 +38,7 @@ export async function inspectIndividualFirstPage(
     throw Error('INDIVIDUAL_PREFLIGHT_SETTINGS_INVALID');
   const report:IndividualPreflight={
     schemaVersion:1,mode:'read-only-individual',mutationAuthorized:false,
-    window:'UNVERIFIED',routeTotal:null,inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],holds:[]
+    window:'UNVERIFIED',routeTotal:null,inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],windowObservedAircraft:[],holds:[]
   };
   const budget=()=>deadline===undefined||Date.now()+Math.max(5000,timeout*2)<deadline;
   if(!budget()){report.window='TIME_BUDGET';return report;}
@@ -66,6 +69,7 @@ export async function inspectIndividualFirstPage(
   }
   report.window=first.status as 'STABLE'|'SHORT_PAGE';
   report.routeTotal=first.routeTotal;
+  report.windowObservedAircraft=first.aircraft.map(a=>({...a}));
   const candidates=first.aircraft.filter(a=>a.state==='ready');
   report.readyCandidates=candidates.length;
   for(const candidate of candidates.slice(0,limit)){
