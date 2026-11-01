@@ -251,7 +251,9 @@ async function main() {
   if (!token || !chatId) { console.log('[Demand] Telegram nao configurado.'); return; }
   const summary = runSummaryMessage('test-results/demand',process.env.BOT_RESULT);
   const alert = importantMessage('test-results/demand',process.env.BOT_RESULT);
-  const alertText=alert?alert.slice(0,1400):'';\n  const maxSummary=Math.max(0,3900-alertText.length-(alertText?2:0));\n  const text=summary.slice(0,maxSummary)+(alertText?'\n\n'+alertText:'');
+  const alertText=alert?alert.slice(0,1400):'';
+  const maxSummary=Math.max(0,3900-alertText.length-(alertText?2:0));
+  const text=summary.slice(0,maxSummary)+(alertText?'\n\n'+alertText:'');
   const payload={chat_id:chatId,text};
   if(process.env.AUTOMATION_MODE==='semi-automatic'&&/^https:\/\/github\.com\//.test(process.env.WORKFLOW_URL||'')){
     payload.reply_markup={inline_keyboard:[[{text:'Abrir GitHub Actions',url:process.env.WORKFLOW_URL}]]};
