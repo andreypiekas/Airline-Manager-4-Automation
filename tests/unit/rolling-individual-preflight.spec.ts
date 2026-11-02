@@ -453,3 +453,46 @@ test('run #1221 safety: invalid native aircraft callback on passive inflight car
   expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
+
+ 
+// Production #1374: one native inflight-confirmed departure was followed by a
+// short zero-ready page (178ish routes). The runner must allow the game's native
+// first page to settle, without ever visiting Next or clicking Depart.
+test('run #1374: bounded post-departure recovery reaches a full zero-ready native first page',async({page})=>{
+  const short=Array.from({length:19},(_,i)=>plane(i+1,false));
+  const stable=Array.from({length:20},(_,i)=>plane(i+1,false));
+  await fixture(page,[short,short,short,stable],177);
+  const report=await inspectIndividualFirstPage(page,{
+    timeout:1200,maxCandidates:20,postDepartureShortPageRetries:3
+  });
+  expect(report).toMatchObject({
+    window:'STABLE',routeTotal:177,inspected:0,readyCandidates:0,
+    verified:0,mutationAuthorized:false,holds:[]
+  });
+  expect(report.windowObservedAircraft).toHaveLength(20);
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(4);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+test('persistent post-departure short page is never promoted to full no-ready proof',async({page})=>{
+  const short=Array.from({length:19},(_,i)=>plane(i+1,false));
+  await fixture(page,[short],177);
+  const report=await inspectIndividualFirstPage(page,{
+    timeout:1200,maxCandidates:20,postDepartureShortPageRetries:3
+  });
+  expect(report).toMatchObject({
+    window:'SHORT_PAGE',routeTotal:177,inspected:0,readyCandidates:0,
+    verified:0,mutationAuthorized:false,holds:[]
+  });
+  expect(report.windowObservedAircraft).toHaveLength(19);
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(5);
+  expect(await page.evaluate(()=>(window as any).detailsOpened)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+});
+test('preflight rejects unbounded post-departure retries without touching UI',async({page})=>{
+  await fixture(page,[[plane(1,false)]],177);
+  await expect(inspectIndividualFirstPage(page,{
+    postDepartureShortPageRetries:4
+  })).rejects.toThrow('INDIVIDUAL_PREFLIGHT_SETTINGS_INVALID');
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(0);
+});
