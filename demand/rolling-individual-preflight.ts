@@ -29,11 +29,15 @@ export interface IndividualPreflight {
 
 export async function inspectIndividualFirstPage(
   page:Page,
-  options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number}={}
+  options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;
+    /** Extra read-only Fleet-first-page checks only after native in-flight confirmation. */
+    postDepartureShortPageRetries?:number}={}
 ):Promise<IndividualPreflight>{
   const timeout=options.timeout??4000,limit=options.maxCandidates??2,deadline=options.deadlineEpochMs;
+  const postRetries=options.postDepartureShortPageRetries??0;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>30000||
     !Number.isSafeInteger(limit)||limit<1||limit>20||
+    !Number.isSafeInteger(postRetries)||postRetries<0||postRetries>3||
     (deadline!==undefined&&(!Number.isSafeInteger(deadline)||deadline<1)))
     throw Error('INDIVIDUAL_PREFLIGHT_SETTINGS_INVALID');
   const report:IndividualPreflight={
@@ -63,6 +67,26 @@ export async function inspectIndividualFirstPage(
       globalComplete:false,mutationAuthorized:false
     }));
     first=await inspectFirstPageReadOnly(page,timeout);
+  }
+  // #1374: after a confirmed Depart, AM4 can temporarily show a short
+  // first page with no READY cards while its native AJAX list is settling.
+  // Opt-in from the departure port ONLY after a native inflight observation:
+  // bounded read-only refreshes, no pagination and no extra Depart attempt.
+  // If the final window is still short/ambiguous, all original HOLD gates stand.
+  for(let recovery=0;recovery<postRetries&&budget()&&
+      first.status==='SHORT_PAGE'&&first.ready===0;recovery++){
+    await assertNoInteractiveChallenge(page,'individual-preflight:post-departure-short-tail');
+    await page.waitForTimeout(300);
+    const beforeCount=first.routeTotal;
+    const refreshed=await inspectFirstPageReadOnly(page,timeout);
+    console.warn('[RollingPostDepartureFirstPageRecovery] '+JSON.stringify({
+      attempt:recovery+1,status:refreshed.status,
+      routeCountStable:refreshed.routeTotal===beforeCount,
+      ready:refreshed.ready,mutationAuthorized:false,globalFleetScans:0
+    }));
+    // Changed native Routes(N) is not an authorization from previous roster.
+    // Downstream checks will independently validate all refreshed targets.
+    first=refreshed;
   }
   if(!['STABLE','SHORT_PAGE'].includes(first.status)){
     report.holds.push({code:'WINDOW_UNVERIFIED'});return report;

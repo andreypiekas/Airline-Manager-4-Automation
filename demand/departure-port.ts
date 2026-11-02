@@ -89,6 +89,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private verifiedRouteCount:number|null=null;
   private lastCompleteFleet:CollectionResult|null=null;
   private lastRollingWindow:CollectionResult|null=null;
+  /** Native in-flight proof since previous collection; permits read-only settling only. */
+  private nativeInflightSincePreviousCollection=false;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
   navigationMetrics(){return {...this.metrics};}
   constructor(private readonly page:Page,private readonly timeout=15000,
@@ -102,9 +104,12 @@ export class PlaywrightDeparturePort implements DeparturePort {
     const collectStarted=Date.now();
     await assertNoInteractiveChallenge(this.page,'departure:collect');
     if(this.rollingIndividualMode){
+      const postDepartureRecovery=this.nativeInflightSincePreviousCollection;
+      this.nativeInflightSincePreviousCollection=false;
       const pilot=await inspectIndividualFirstPage(this.page,{
         timeout:Math.min(this.timeout,8000),
-        maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs
+        maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+        postDepartureShortPageRetries:postDepartureRecovery?3:0
       }).catch((error:unknown)=>{
         const message=error instanceof Error?error.message:'';
         if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
@@ -355,7 +360,10 @@ export class PlaywrightDeparturePort implements DeparturePort {
         await openFleetList(this.page,this.timeout);
         await findFleetRoute(this.page,expected,this.timeout);
         last=await new DemandReader(this.page,this.timeout,true).readAircraftDetails(expected);
-        if(last.state==='inflight')return last;
+        if(last.state==='inflight'){
+          if(this.rollingIndividualMode)this.nativeInflightSincePreviousCollection=true;
+          return last;
+        }
       }catch(error){
         // Read-only retry only. Persist a fixed category, never a raw browser error.
         console.warn('[DepartureConfirmRead] '+JSON.stringify({
