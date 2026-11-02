@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { firstPageOnlyEnabled, assertScopedFirstPageOutcome } from '../../utils/first-page-only-policy';
+import { firstPageOnlyEnabled, assertScopedFirstPageOutcome, scopedFirstPageOutcomeDiagnostic } from '../../utils/first-page-only-policy';
 import type { ExecutionReport } from '../../demand/executor';
 
 const entry=(status:'departed'|'held',reason:string)=>({
@@ -78,4 +78,34 @@ test('run #1227: durable read-only reconciliation of a prior uncertain flight is
   r.summary.unknown=1;
   expect(()=>assertScopedFirstPageOutcome(r))
     .toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});
+
+ 
+test('production #1373: operational diagnostic groups Fuel, demand and quarantine without identities',()=>{
+ const r=report('held','FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY');
+ r.entries=[
+  {...entry('held','FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY'),aircraftId:'sensitive-1'},
+  {...entry('held','PERSISTED_UNCERTAIN_DEPARTURE_BLOCK'),aircraftId:'sensitive-2'},
+  {...entry('held','local demand message containing private info'),aircraftId:'sensitive-3',
+    demand:{decision:'hold_insufficient'} as NonNullable<ExecutionReport['entries'][number]['demand']>}
+ ];
+ r.summary={evaluated:3,departed:0,held:3,unknown:0,simulated:0};
+ const summary=scopedFirstPageOutcomeDiagnostic(r);
+ expect(summary.byCause).toEqual({
+  FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY:1,
+  PERSISTED_UNCERTAIN_DEPARTURE_BLOCK:1,
+  VERIFIED_DEMAND_HOLD:1
+ });
+ expect(JSON.stringify(summary)).not.toContain('sensitive');
+ expect(JSON.stringify(summary)).not.toContain('private info');
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});
+
+test('production #1374: confirmed departure plus unverifiable next window remains red',()=>{
+ const r=report('departed','NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED');
+ r.rollingWindowUnverified=true;
+ const d=scopedFirstPageOutcomeDiagnostic(r);
+ expect(d.byCause).toEqual({CONFIRMED_DEPARTURE:1});
+ expect(d.windowUnverified).toBe(true);
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
 });
