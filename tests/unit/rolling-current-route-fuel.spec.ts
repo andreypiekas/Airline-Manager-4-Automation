@@ -63,7 +63,7 @@ test('missing or ambiguous destination source IDs hold before touching browser',
 
 /** Fake DOM includes only native-navigation callbacks. There are never live
  * credentials, endpoint calls, route mutations, or Depart clicks. */
-async function quoteRestoreFixture(page:Page,variant:'already-open'|'reopen'|'no-back'|'stuck-back'){
+async function quoteRestoreFixture(page:Page,variant:'already-open'|'reopen'|'no-back'|'stuck-back'|'late-quote'){
   await page.route('**/*',r=>r.abort());
   await page.setContent(`
     <button id="mapRoutes" onclick="hideAllWhenClick();menuFleet('Routes');">Fleet</button>
@@ -82,6 +82,8 @@ async function quoteRestoreFixture(page:Page,variant:'already-open'|'reopen'|'no
           '<span id="acRegList24701144">PP-194</span> - aircraft</a>'+
           '<button id="listDepart37181887" onclick="window.departClicks++">Depart</button></div></div>';
         document.getElementById('routeAction').style.display='block';
+        if('${variant}'==='late-quote'&&window.fleetClicks===1&&window.backClicks===1)
+          document.getElementById('newRouteInfo').style.display='block';
       };
       window.menuFleet=function(){window.fleetClicks++;window.makeFleet();};
       window.goBack=function(){
@@ -124,4 +126,17 @@ test('quote restore fails closed when native Back is absent or did not close ove
     expect(await page.evaluate(()=>(window as any).departClicks)).toBe(0);
     expect(await page.evaluate(()=>(window as any).fleetClicks)).toBe(0);
   }
+});
+
+ 
+test('run #1375: late native quote AJAX overlay gets one additional verified Back only',async({page})=>{
+  await quoteRestoreFixture(page,'late-quote');
+  await restoreRollingFuelFirstPage(page,1500);
+  expect(await page.evaluate(()=>({
+    backs:(window as any).backClicks,
+    fleet:(window as any).fleetClicks,
+    departed:(window as any).departClicks
+  }))).toEqual({backs:2,fleet:1,departed:0});
+  expect(await page.locator('#routeAction').isVisible()).toBe(true);
+  expect(await page.locator('#newRouteInfo').isVisible()).toBe(false);
 });
