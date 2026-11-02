@@ -54,25 +54,57 @@ export function selectVerifiedRollingFuelTarget(
 export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Promise<void>{
   await assertNoInteractiveChallenge(page,'departure:rolling-fuel:restore-start');
   const quote=page.locator('#newRouteInfo');
-  if(await quote.count()>1)throw Error('ROLLING_FUEL_QUOTE_PANEL_AMBIGUOUS');
-  if(await quote.count()===1&&await quote.isVisible()){
-    const back=quote.getByRole('button',{name:/Back$/});
-    if(await back.count()!==1||!await back.isVisible()||!await back.isEnabled())
-      throw Error('ROLLING_FUEL_NATIVE_BACK_UNVERIFIED');
-    // AM4's own Back control returns from the quote. Do not fabricate a
-    // dismiss endpoint, call Create route, or retry an uncertain mutation.
-    await back.click({timeout});
+  const closeNativeQuote=async()=>{
+    if(await quote.count()>1)throw Error('ROLLING_FUEL_QUOTE_PANEL_AMBIGUOUS');
+    if(await quote.count()===1&&await quote.isVisible()){
+      await assertNoInteractiveChallenge(page,'departure:rolling-fuel:before-native-back');
+      const back=quote.getByRole('button',{name:/Back$/});
+      if(await back.count()!==1||!await back.isVisible()||!await back.isEnabled())
+        throw Error('ROLLING_FUEL_NATIVE_BACK_UNVERIFIED');
+      await back.click({timeout});
+      if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
+    }
+  };
+  await closeNativeQuote();
+  // #1375: delayed AM4 route-quote AJAX can render the quote again during the
+  // first native Fleet refresh, after the first verified Back hid it.
+  // Only in that exact case may we press a fresh, UNIQUE native Back once more.
+  // It is navigation, never reroute/Create/Depart. No blind click or retry on
+  // missing proof; the Fleet page is still independently verified afterward.
+  for(let attempt=0;attempt<2;attempt++){
+    await assertNoInteractiveChallenge(page,'departure:rolling-fuel:restore-first-page');
+    let quoteReappeared=false;
+    try{
+      const observation=await inspectFirstPageReadOnly(
+        page,timeout,{allowAlreadyOpen:true}
+      );
+      if(!['STABLE','SHORT_PAGE'].includes(observation.status)||
+         observation.mutationAuthorized!==false||
+         !await page.locator('#routeAction').isVisible()||
+         await quote.isVisible())
+        throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
+      return;
+    }catch(error){
+      if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')
+        throw error;
+      // A quote still open on the first pass is the ONLY allowed recovery.
+      // All other failures (identity, cursor, Fleet control, network) remain
+      // a hard HOLD; never silently proceed to an individually prepared click.
+      quoteReappeared=attempt===0&&await quote.count()===1&&
+        await quote.isVisible()&&error instanceof Error&&
+        ['RESEARCH_QUOTE_NOT_CLOSED','ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED']
+          .includes(error.message);
+      if(!quoteReappeared)throw error;
+    }
+    console.warn('[DepartureFuelQuoteRestore] '+JSON.stringify({
+      status:'REOPENED_QUOTE_REQUIRES_NATIVE_BACK',attempt:attempt+1,
+      mutationAuthorized:false,globalFleetScans:0
+    }));
+    await closeNativeQuote();
+    await page.waitForTimeout(250);
     if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
   }
-  // The existing first-page inspector handles already-open Fleet, native
-  // routes.php in-place refresh, and a new Fleet menu open. Its two full
-  // identity/cursor samples are evidence, never departure authorization.
-  const observation=await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true});
-  if(!['STABLE','SHORT_PAGE'].includes(observation.status)||
-     observation.mutationAuthorized!==false||
-     !await page.locator('#routeAction').isVisible()||
-     await quote.isVisible())
-    throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
+  throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
 }
 
 /**
