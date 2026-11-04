@@ -65,15 +65,14 @@ export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Prom
       if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
     }
   };
-  await closeNativeQuote();
-  // #1375: delayed AM4 route-quote AJAX can render the quote again during the
-  // first native Fleet refresh, after the first verified Back hid it.
-  // Only in that exact case may we press a fresh, UNIQUE native Back once more.
-  // It is navigation, never reroute/Create/Depart. No blind click or retry on
-  // missing proof; the Fleet page is still independently verified afterward.
-  for(let attempt=0;attempt<2;attempt++){
+  // #1455-#1459: multiple delayed native quote responses can reopen the
+  // overlay after Back AND after the following Fleet refresh. Allow only a
+  // bounded sequence of freshly verified native Back navigation; every pass
+  // must independently prove the first-page UI. Never click Depart/Reroute.
+  const MAX_NATIVE_QUOTE_RESTORES=4;
+  for(let attempt=0;attempt<MAX_NATIVE_QUOTE_RESTORES;attempt++){
     await assertNoInteractiveChallenge(page,'departure:rolling-fuel:restore-first-page');
-    let quoteReappeared=false;
+    await closeNativeQuote();
     try{
       const observation=await inspectFirstPageReadOnly(
         page,timeout,{allowAlreadyOpen:true}
@@ -83,26 +82,27 @@ export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Prom
          !await page.locator('#routeAction').isVisible()||
          await quote.isVisible())
         throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
+      // A delayed Ajax callback may reopen the native quote immediately
+      // after both Fleet samples. Require a bounded quiet interval, then
+      // check the challenge guard and UI again before returning.
+      await page.waitForTimeout(400);
+      await assertNoInteractiveChallenge(page,'departure:rolling-fuel:after-settle');
+      if(await quote.isVisible())throw Error('RESEARCH_QUOTE_NOT_CLOSED');
       return;
     }catch(error){
       if(error instanceof Error&&error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')
         throw error;
-      // A quote still open on the first pass is the ONLY allowed recovery.
-      // All other failures (identity, cursor, Fleet control, network) remain
-      // a hard HOLD; never silently proceed to an individually prepared click.
-      quoteReappeared=attempt===0&&await quote.count()===1&&
-        await quote.isVisible()&&error instanceof Error&&
+      const quoteReappeared=attempt<MAX_NATIVE_QUOTE_RESTORES-1&&
+        await quote.count()===1&&await quote.isVisible()&&
+        error instanceof Error&&
         ['RESEARCH_QUOTE_NOT_CLOSED','ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED']
           .includes(error.message);
       if(!quoteReappeared)throw error;
+      console.warn('[DepartureFuelQuoteRestore] '+JSON.stringify({
+        status:'REOPENED_QUOTE_REQUIRES_NATIVE_BACK',attempt:attempt+1,
+        mutationAuthorized:false,globalFleetScans:0
+      }));
     }
-    console.warn('[DepartureFuelQuoteRestore] '+JSON.stringify({
-      status:'REOPENED_QUOTE_REQUIRES_NATIVE_BACK',attempt:attempt+1,
-      mutationAuthorized:false,globalFleetScans:0
-    }));
-    await closeNativeQuote();
-    await page.waitForTimeout(250);
-    if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
   }
   throw Error('ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED');
 }
