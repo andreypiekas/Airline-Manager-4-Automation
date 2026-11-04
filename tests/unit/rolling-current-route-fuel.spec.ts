@@ -150,7 +150,7 @@ async function delayedQuoteReopenFixture(page:Page,reopens:number){
     w.goBack=()=>{
       nativeBack();
       if(w.backClicks<=limit){
-        window.setTimeout(()=>{
+        setTimeout(()=>{
           document.getElementById('newRouteInfo')!.style.display='block';
         },50);
       }
