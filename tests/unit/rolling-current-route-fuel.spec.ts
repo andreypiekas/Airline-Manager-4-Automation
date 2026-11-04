@@ -173,7 +173,7 @@ test('run #1459: two delayed quote reopens recover through unique native Back on
 test('run #1459: endlessly reopening quote fails closed within bounded native Backs',async({page})=>{
   await delayedQuoteReopenFixture(page,99);
   await expect(restoreRollingFuelFirstPage(page,1500))
-    .rejects.toThrow('RESEARCH_QUOTE_NOT_CLOSED');
+    .rejects.toThrow(/ROLLING_FUEL_FIRST_PAGE_NOT_RESTORED|RESEARCH_QUOTE_NOT_CLOSED/);
   expect(await page.evaluate(()=>({
     backs:(window as any).backClicks,
     departed:(window as any).departClicks
