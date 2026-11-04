@@ -140,3 +140,42 @@ test('run #1375: late native quote AJAX overlay gets one additional verified Bac
   expect(await page.locator('#routeAction').isVisible()).toBe(true);
   expect(await page.locator('#newRouteInfo').isVisible()).toBe(false);
 });
+
+/** Reproduces late native AJAX responses in a synthetic DOM only. No game calls. */
+async function delayedQuoteReopenFixture(page:Page,reopens:number){
+  await quoteRestoreFixture(page,'reopen');
+  await page.evaluate((limit)=>{
+    const w=window as any;
+    const nativeBack=w.goBack;
+    w.goBack=()=>{
+      nativeBack();
+      if(w.backClicks<=limit){
+        window.setTimeout(()=>{
+          document.getElementById('newRouteInfo')!.style.display='block';
+        },50);
+      }
+    };
+  },reopens);
+}
+
+test('run #1459: two delayed quote reopens recover through unique native Back only',async({page})=>{
+  await delayedQuoteReopenFixture(page,2);
+  await restoreRollingFuelFirstPage(page,1500);
+  expect(await page.evaluate(()=>({
+    backs:(window as any).backClicks,
+    departed:(window as any).departClicks,
+    fleet:(window as any).fleetClicks
+  }))).toEqual({backs:3,departed:0,fleet:1});
+  expect(await page.locator('#newRouteInfo').isVisible()).toBe(false);
+  expect(await page.locator('#routeAction').isVisible()).toBe(true);
+});
+
+test('run #1459: endlessly reopening quote fails closed within bounded native Backs',async({page})=>{
+  await delayedQuoteReopenFixture(page,99);
+  await expect(restoreRollingFuelFirstPage(page,1500))
+    .rejects.toThrow('RESEARCH_QUOTE_NOT_CLOSED');
+  expect(await page.evaluate(()=>({
+    backs:(window as any).backClicks,
+    departed:(window as any).departClicks
+  }))).toEqual({backs:4,departed:0});
+});
