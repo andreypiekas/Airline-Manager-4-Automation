@@ -200,10 +200,12 @@ export class IndividualDepartureExecutor {
         validDemandCabins(a.dailyTotal)&&
         ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
     let rollingWindowVerified=verifiedRollingWindow(initial);
-    if(this.settings.rollingIndividualMode&&initial.windowNoReadyVerified===true&&
+    if(this.settings.rollingIndividualMode&&
+       (initial.windowNoReadyVerified===true||initial.windowScanExhaustedVerified===true)&&
        initial.warnings.length===0&&initial.aircraft.length===0)
       report.firstPageNoReadyVerified=true;
-    if(this.settings.rollingIndividualMode && (initial.warnings.length>0 ||
+    if(this.settings.rollingIndividualMode && (initial.warnings.some(w=>
+       w!=='ROLLING_BATCH_REMAINDER_VERIFIED') ||
        (initial.windowReadyCandidates??0)>initial.aircraft.length))
       report.rollingWindowUnverified=true;
     if(this.settings.rollingIndividualMode){
@@ -568,7 +570,9 @@ export class IndividualDepartureExecutor {
         !this.attemptedAircraft.has(a.aircraftId) &&
         !this.attemptedRoutes.has(a.routeId));
     if(nextOrdered.length===0)break;
-    if(nextWindow.warnings.length>0 || (nextWindow.windowReadyCandidates??0)>nextWindow.aircraft.length)
+    if(nextWindow.warnings.some(w=>w!=='ROLLING_BATCH_REMAINDER_VERIFIED') ||
+       ((nextWindow.windowReadyCandidates??0)>nextWindow.aircraft.length &&
+         nextWindow.warnings.includes('ROLLING_WINDOW_PARTIAL_TARGETS')))
       report.rollingWindowUnverified=true;
     initial=nextWindow;rollingWindowVerified=true;
     ingestVerifiedWindow(nextWindow);
