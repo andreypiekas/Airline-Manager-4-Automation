@@ -78,7 +78,7 @@ export function verifiedPostDispatchShortTail(
     // Every new native card needs a unique identity and independent INFLIGHT
     // state proof. Do not accept invented IDs, renamed/rerouted old aircraft,
     // unavailable cards, or new READY aircraft that still need dispatch.
-    if(!/^[1-9]\\d*$/.test(a.aircraftId)||!/^[1-9]\\d*$/.test(a.routeId)||
+    if(!/^[1-9]\d*$/.test(a.aircraftId)||!/^[1-9]\d*$/.test(a.routeId)||
        !a.registration||a.state==='ready'||
        observed.has(key(a))||observedRoutes.has(a.routeId)||
        observedAircraftIds.has(a.aircraftId)||observedRegistrations.has(a.registration))
