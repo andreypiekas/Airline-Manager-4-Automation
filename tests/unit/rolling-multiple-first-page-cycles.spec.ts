@@ -261,3 +261,38 @@ test('run #1230: Recalled entry alone cannot authorize a departure',async({page}
   expect(report.entries[0].reason).toBe('FUEL_REQUIREMENT_UNVERIFIED');
   expect(clicks).toBe(0);
 });
+
+test('run #1568: after confirmed native flight, a double-read nonstandard last page stops safely as PARTIAL coverage, not a failed click',async()=>{
+ const a=aircraft('2001');
+ const terminal:CollectionResult={
+   aircraft:[],complete:false,expectedRoutes:187,
+   windowPageIndex:9,windowReadyCandidates:0,
+   windowTerminalNonstandardNoReadyObserved:true,
+   windowShortNoReadyObserved:true,
+   windowObservedAircraft:[{aircraftId:'777',routeId:'1777',registration:'TEST-777',state:'inflight'}],
+   warnings:['ROLLING_WINDOW_UNVERIFIED']
+ };
+ const r=await execute({windows:[native([a]),terminal],max:5});
+ expect(r.clicks).toBe(1);
+ expect(r.collects).toBe(2);
+ expect(r.report.summary).toMatchObject({departed:1,unknown:0});
+ expect(r.report).toMatchObject({
+   halted:false,rollingWindowUnverified:true,rollingTerminalPartialCoverage:true
+ });
+ expect(r.report.completedAt).toBeTruthy();
+});
+
+test('unverified last page with new READY or absent terminal proof cannot be classified partial',async()=>{
+ const a=aircraft('2001');
+ const terminal:CollectionResult={
+   aircraft:[],complete:false,expectedRoutes:187,
+   windowPageIndex:9,windowReadyCandidates:1,
+   windowTerminalNonstandardNoReadyObserved:false,
+   warnings:['ROLLING_WINDOW_UNVERIFIED']
+ };
+ const r=await execute({windows:[native([a]),terminal],max:5});
+ expect(r.report.summary.departed).toBe(1);
+ expect(r.report.rollingWindowUnverified).toBe(true);
+ expect(r.report.rollingTerminalPartialCoverage).not.toBe(true);
+ expect(r.clicks).toBe(1);
+});
