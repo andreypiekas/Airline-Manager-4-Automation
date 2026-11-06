@@ -163,13 +163,16 @@ export class PlaywrightDeparturePort implements DeparturePort {
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.windowObservedAircraft.length>0 &&
         pilot.windowObservedAircraft.every(a=>a.state!=='ready');
+      const scanExhaustedVerified=!unverifiedSkippedWindow&&
+        pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
+        pilot.verified===0&&pilot.holds.length===0;
       const noReadyVerified=pageIndex===0&&pilot.window==='STABLE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
-      const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
+      const verifiedWindow=scanExhaustedVerified||(['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
         pilot.verifiedAircraft.every(a=>a.state==='ready'&&!a.issue&&
-          !!a.capacity&&!!a.remaining&&!!a.dailyTotal);
+          !!a.capacity&&!!a.remaining&&!!a.dailyTotal));
       console.log('[RollingDispatchInventory] '+JSON.stringify({
         status:noReadyVerified?'NO_READY_ON_VERIFIED_FIRST_PAGE':verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
         nativePage:pageIndex+1,batchLimit:10,priorPageGap:unverifiedSkippedWindow,
@@ -185,14 +188,16 @@ export class PlaywrightDeparturePort implements DeparturePort {
         observationScope:(verifiedWindow||noReadyVerified)?(pageIndex===0?
           'native-individual-first-page' as const:'native-individual-page' as const):undefined,
         windowPageIndex:pageIndex,
+        windowScanExhaustedVerified:scanExhaustedVerified,
         windowNoReadyVerified:noReadyVerified,
         windowShortNoReadyObserved:shortNoReadyObserved,
         windowObservedAircraft:pilot.windowObservedAircraft,
         windowReadyCandidates:pilot.readyCandidates,
         warnings:(verifiedWindow||noReadyVerified)?
           (unverifiedSkippedWindow?['ROLLING_EARLIER_NATIVE_PAGE_INCOMPLETE']:
-            pilot.holds.length||pilot.readyCandidates>pilot.verified?
-              ['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):
+           pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:
+           pilot.readyCandidates>pilot.verified&&!scanExhaustedVerified?
+             ['ROLLING_BATCH_REMAINDER_VERIFIED']:[]):
           ['ROLLING_WINDOW_UNVERIFIED']
       };
       this.lastRollingWindow=verifiedWindow?rolling:null;
