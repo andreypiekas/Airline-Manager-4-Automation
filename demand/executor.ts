@@ -11,6 +11,8 @@ export interface CurrentRouteFuelEvidence {
 }
 export interface DeparturePort {
   collect(): Promise<CollectionResult>;
+  /** Only a verified indexed-page implementation can continue without departures. */
+  hasUnassessedNativePages?(): boolean;
   /** Optional bounded, read-only exact-current-route quote; no departure or reroute mutation. */
   readCurrentRouteFuelQuote?(expected:AircraftSnapshot):Promise<CurrentRouteFuelEvidence|null>;
   /** Fresh identity/layout/demand AND a strictly verified native departure control. */
@@ -253,6 +255,7 @@ export class IndividualDepartureExecutor {
     // mode, after confirmed flights new ready planes can occupy page one;
     // rescan in the SAME executor to preserve attempt, fuel and demand journals.
     while(true){
+    const departedBeforePass=report.summary.departed;
     for(const expected of ordered) {
       const targetKey=expected.aircraftId+':'+expected.routeId;
       if(seenWindowTargets.has(targetKey))continue;
@@ -514,7 +517,8 @@ export class IndividualDepartureExecutor {
       await persist();
     }
     if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=100 ||
-       // A held-only batch cannot prove later pages are idle.
+       (report.summary.departed===departedBeforePass&&
+        this.port.hasUnassessedNativePages?.()!==true) ||
        (this.settings.maxDepartures!=='all'&&
         this.attemptedAircraft.size>=this.settings.maxDepartures))break;
     // Bounded by confirmed new targets, unique attempts, a conservative pass cap\n    // and the real mutation deadline; never read all pages of the Fleet.\n    // Refresh only after real confirmed departures, with enough time left for
