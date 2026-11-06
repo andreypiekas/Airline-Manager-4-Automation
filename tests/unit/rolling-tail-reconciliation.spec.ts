@@ -85,3 +85,29 @@ test('confirmed two flights and reconciled short tail finish scoped success, no 
  expect(collects).toBe(2);
  expect(departClicks).toBe(2);
 });
+
+test('run #1557: exact short native baseline can reconcile confirmed departures without global claim',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,19)};
+ const after=shortTail(Array.from({length:19},(_,i)=>i+1).filter(n=>n!==1&&n!==2));
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']))).toBe(true);
+ expect(before.complete).toBe(false);
+ expect(after.complete).toBe(false);
+});
+
+test('run #1557: short baseline refuses missing unconfirmed inflight aircraft and reports safe reason',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,19)};
+ const after=shortTail(Array.from({length:19},(_,i)=>i+1).filter(n=>n!==3));
+ const codes:string[]=[];
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']),v=>codes.push(v))).toBe(false);
+ expect(codes).toEqual(['MISSING_CARDS_NOT_CONFIRMED']);
+ expect(after.complete).toBe(false);
+});
+
+test('run #1557: short baseline rejects any newly introduced or changed native card',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,19)};
+ const after=shortTail(Array.from({length:19},(_,i)=>i+1).filter(n=>n!==1));
+ const codes:string[]=[];
+ after.windowObservedAircraft![0]={...after.windowObservedAircraft![0],routeId:'99999'};
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']),v=>codes.push(v))).toBe(false);
+ expect(codes).toEqual(['AFTER_ROSTER_CHANGED']);
+});
