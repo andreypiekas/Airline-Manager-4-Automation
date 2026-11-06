@@ -40,3 +40,17 @@ partes podem estar reimplementadas na main, ou conter guardas anteriores e menos
 - Manter o relatório de auditoria mesmo após eliminar refs obsoletas; o histórico de commits continuará acessível pelo GitHub enquanto houver referências históricas.
 
 **Segurança:** nada nesta auditoria autoriza compras, decolagens, bypass de CAPTCHA, redução dos gates atuais ou exclusão da branch de runtime.
+
+## Encerramento após integração do PR #119
+
+O PR [#119](https://github.com/andreypiekas/Airline-Manager-4-Automation/pull/119) incorporou em `main` as três correções de integridade/status (detalhes indisponíveis, demanda totalmente indisponível e persistência após cancelamento). Os PRs antigos #90–#92 foram fechados como substituídos, com comentários e referência ao commit `2005dbe3685a9e7e328b5dd0786a425b3481dab6`.
+
+A segunda etapa utiliza o script [`scripts/retire-audited-branches.cjs`](../scripts/retire-audited-branches.cjs) e um **workflow separado, sem login no jogo**. A exclusão só ocorre após nova verificação dos SHAs, com três critérios exaustivos:
+
+1. branch de PR mesclado com SHA idêntico ao PR;
+2. branch comprovadamente ancestral da `main` pelo endpoint compare (ahead=0, behind>0);
+3. branch explicitamente revisada e listada no código por **nome e SHA exato**: #90–#92 (substituídos), auditoria antiga de 21/10 (SHA fixo inválido), manutenção com fallback inseguro e Telegram duplicado do #110.
+
+`main`, `am4-runtime-state`, `migration-stable` e `snapshot/rolling-dispatch-pr83-source-1035` são **explicitamente excluídas da seleção**. Branches com PR aberto, proteção, commits novos, divergência de SHA ou alterações na `main` durante o processamento não serão excluídas. Em modo normal, o script é somente `--dry-run`; a exclusão exige `--apply` e a permissão GitHub restrita para conteúdos.
+
+Este relatório registra a decisão de descarte das implementações legadas. O snapshot de rolling dispatch permanece como referência técnica; não se faz merge automático de versões antigas do executor.

@@ -391,7 +391,9 @@ O repositório separa três tipos de branch:
 - `am4-runtime-state` — histórico, checkpoints e quarentenas usados pelos workflows (deve permanecer);
 - `fix/*`, `feat/*`, `docs/*` e semelhantes — desenvolvimento temporário.
 
-A limpeza utiliza [scripts/prune-merged-branches.cjs](scripts/prune-merged-branches.cjs) e o workflow [Limpeza segura de branches mescladas](.github/workflows/prune-merged-branches.yml). São elegíveis **somente** branches com PR **mesclado** no próprio repositório e **SHA atual idêntico ao SHA do PR**. Não são removidas branches com PR aberto, com commits posteriores ao merge, sem PR mesclado, protegidas, `main`, `migration-stable` ou `am4-runtime-state`.
+A limpeza utiliza [scripts/prune-merged-branches.cjs](scripts/prune-merged-branches.cjs) e o workflow [Limpeza segura de branches mescladas](.github/workflows/prune-merged-branches.yml).
+
+A auditoria complementar de 06/11/2026 está em [docs/BRANCH_AUDIT_2026-11-06.md](docs/BRANCH_AUDIT_2026-11-06.md). O script [retire-audited-branches.cjs](scripts/retire-audited-branches.cjs) tem uma lista de SHA exatos para branches antigas revisadas e também reconhece branches comprovadamente ancestrais da `main`; ele é independente da rotina de limpeza de PRs mesclados. São elegíveis **somente** branches com PR **mesclado** no próprio repositório e **SHA atual idêntico ao SHA do PR**. Não são removidas branches com PR aberto, com commits posteriores ao merge, sem PR mesclado, protegidas, `main`, `migration-stable` ou `am4-runtime-state`.
 
 Por padrão, o script executa apenas uma auditoria sem excluir nada:
 
