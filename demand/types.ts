@@ -64,6 +64,8 @@ export interface CollectionResult {
   observationScope?: 'native-individual-first-page'|'native-individual-page';
   /** Zero-based native index, revalidated after navigation. */
   windowPageIndex?: number;
+  /** All bounded native pages observed with no NEW ready identities this run. */
+  windowScanExhaustedVerified?: boolean;
   /** The number of individually verified ready candidates on that window. */
   windowReadyCandidates?: number;
   /** Stable complete CURRENT page with zero ready cards; not a global observation. */
