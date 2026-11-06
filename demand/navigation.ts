@@ -7,6 +7,13 @@ export function routePageLimit(totalRoutes:number,pageSize=20){
   return Math.max(1,Math.ceil(totalRoutes/pageSize));
 }
 
+/** Passive check, never alters the native AJAX fragment. */
+export async function nativeFleetLoaderVisible(page:Page):Promise<boolean>{
+  return await page.locator('#routesContainer img[src*="loader"]').evaluateAll(
+    es=>es.some(e=>!!e.getClientRects().length)
+  );
+}
+
 /** Explicitly opens a fresh list: it does not pretend to preserve a previous pagination cursor. */
 /** Read-only UI progression codes; an optional observer lets callers locate
  * a timeout without persisting page URLs, HTML, registrations or credentials.
@@ -78,9 +85,7 @@ export async function openFleetList(
   // clear the DOM or call Ajax directly: the previous click/response and each
   // exact per-aircraft safety gate remain unchanged.
   onStage('WAIT_NATIVE_FRAGMENT_LOADER_CLEAR');
-  await expect.poll(()=>page.locator('#routesContainer img[src*="loader"]').evaluateAll(
-    es=>es.filter(e=>!!e.getClientRects().length).length
-  ),{timeout}).toBe(0);
+  await expect.poll(()=>nativeFleetLoaderVisible(page),{timeout}).toBe(false);
   onStage('VERIFY_QUOTE_CLOSED');
   if (await page.locator('#newRouteInfo').isVisible()) throw new Error('RESEARCH_QUOTE_NOT_CLOSED');
 }
