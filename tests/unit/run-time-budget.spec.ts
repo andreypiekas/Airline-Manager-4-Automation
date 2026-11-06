@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, assertFullFleetCoverageForGreenStatus, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
+import { evaluateRunPhaseBudget, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, hasDepartureBudgetStarvation, isSkippedDeparturePhaseFailure, hasUnreconciledReadyFleetDrift, assertFullFleetCoverageForGreenStatus, isAllDemandEvidenceUnavailable, MUTATION_COMPLETION_RESERVE_MS, MUTATION_PHASE_START_MINIMUM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../../utils/run-time-budget';
 
 test('phase budget allows work only when the full conservative window remains', () => {
   const allowed = evaluateRunPhaseBudget('ticket-pricing', 1_000, 181_000, 120_000);
@@ -129,4 +129,13 @@ test('run #1191: partial Fleet 172/173 with six confirmed departures must not be
   expect(()=>assertFullFleetCoverageForGreenStatus(false)).toThrow(
     'DEMAND_EXECUTION_INCOMPLETE_GLOBAL_FLEET_COVERAGE');
   expect(()=>assertFullFleetCoverageForGreenStatus(true)).not.toThrow();
+});
+
+test('legacy #1127: all unusable demand observations cannot become healthy zero demand',()=>{
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:0,unavailable:105})).toBe(true);
+  expect(isAllDemandEvidenceUnavailable({evaluated:0,sufficient:0,insufficient:0,unavailable:0})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:1,insufficient:0,unavailable:104})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:1,unavailable:104})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:105,sufficient:0,insufficient:0,unavailable:104})).toBe(false);
+  expect(isAllDemandEvidenceUnavailable({evaluated:1,sufficient:0,insufficient:0,unavailable:NaN})).toBe(false);
 });
