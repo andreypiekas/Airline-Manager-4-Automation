@@ -196,7 +196,7 @@ jobs:
         xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx playwright test --headed 2>&1 | tee test-results/bot.log
       
     - name: Persistir registro de retornos
-      if: always() && inputs.departure_mode != 'simulation' && steps.state_restore.outcome == 'success' && (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure')
+      if: always() && inputs.departure_mode != 'simulation' && steps.state_restore.outcome == 'success' && (steps.bot.outcome == 'success' || steps.bot.outcome == 'failure' || steps.bot.outcome == 'cancelled')
       env:
         GITHUB_TOKEN: ${{ github.token }}
         RETURN_JOURNAL_SCOPE: ${{ vars.RETURN_JOURNAL_SCOPE || 'am4-prod' }}

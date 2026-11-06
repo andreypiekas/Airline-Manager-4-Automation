@@ -14,7 +14,7 @@ import { serializeJsonDocument } from '../utils/json-document';
 import { loginForReadOnlyCollection } from '../utils/read-only-login';
 import { runInitialUiHealthCheck } from '../utils/ui-health';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
-import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, assertFullFleetCoverageForGreenStatus, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
+import { evaluateRunPhaseBudget, isSkippedDeparturePhaseFailure, isAllDemandEvidenceUnavailable, assertFullFleetCoverageForGreenStatus, pricingBudgetMinimumBeforeDepartures, deferOptionalPricingUntilAfterDepartures, MUTATION_PHASE_START_MINIMUM_MS, OPTIONAL_PRICING_DEPARTURE_HEADROOM_MS, LIVE_RUN_TIMEOUT_MS, LIVE_RUN_FINALIZATION_RESERVE_MS } from '../utils/run-time-budget';
 import { writeSemiAutomaticSummary } from '../utils/semi-automatic';
 import { test } from '@playwright/test';
 import { GeneralUtils } from '../utils/general.utils';
@@ -505,6 +505,18 @@ test('All Operations', async ({ page }) => {
       }));
       assertFullFleetCoverageForGreenStatus(false);
       return; // Unreachable for partial coverage; no global mutations permitted.
+    }
+    // #1127: all evaluated demand detail reads unavailable is NOT zero demand.
+    // Reporting-only fail-closed. Do not authorize reroute/pricing/departure.
+    if(!demandConfig.dryRun&&moduleEnabled('ENABLE_DEPART')&&
+       isAllDemandEvidenceUnavailable(simulation.report.summary)){
+      console.error('[DemandIntegrity] '+JSON.stringify({
+        status:'ALL_EVALUATED_DETAILS_UNAVAILABLE',
+        evaluated:simulation.report.summary.evaluated,
+        unavailable:simulation.report.summary.unavailable,
+        mutationAuthorized:false
+      }));
+      throw Error('DEMAND_ALL_EVALUATED_DETAILS_UNAVAILABLE');
     }
     let routeExecutionReport: Awaited<ReturnType<typeof runRouteExecution>> | null = null;
     let pricingExecutionReport: Awaited<ReturnType<typeof runTicketPricingExecution>> | null = null;

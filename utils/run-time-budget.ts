@@ -126,6 +126,17 @@ export function assertFullFleetCoverageForGreenStatus(globalComplete:boolean):vo
   if(globalComplete!==true)throw Error('DEMAND_EXECUTION_INCOMPLETE_GLOBAL_FLEET_COVERAGE');
 }
 
+/** A complete Fleet identity inventory is NOT proof of no demand if all
+ * detail reads were invalid. Check the evidence counts, not aircraft guesses. */
+export function isAllDemandEvidenceUnavailable(summary:{
+  evaluated:number;sufficient:number;insufficient:number;unavailable:number;
+}):boolean {
+  return [summary.evaluated,summary.sufficient,summary.insufficient,summary.unavailable]
+    .every(n=>Number.isSafeInteger(n)&&n>=0) &&
+    summary.evaluated>0 && summary.sufficient===0 && summary.insufficient===0 &&
+    summary.unavailable===summary.evaluated;
+}
+
 /** A skipped production departure phase with observed sufficient demand is operationally incomplete. */
 export function isSkippedDeparturePhaseFailure(enabled:boolean,allowed:boolean,sufficientDemand:number):boolean {
   return enabled && !allowed && Number.isSafeInteger(sufficientDemand) && sufficientDemand > 0;

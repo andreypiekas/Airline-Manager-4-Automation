@@ -1,3 +1,14 @@
+/** A fully observed collection is not healthy when every READY aircraft's
+ * individual native details timed out. Reporting-only: never retries a click. */
+export function hasAllReadyDepartureDetailsUnverified(
+  report:Pick<ExecutionReport,'entries'|'summary'>
+):boolean {
+  return report.summary.departed===0 && report.entries.length>0 &&
+    report.entries.every(e=>e.status==='held' &&
+      e.reason==='DEPARTURE_CONTROL_OR_FRESH_DETAILS_UNVERIFIED' &&
+      e.demand==null && e.prepareFailureCode==='UNCLASSIFIED');
+}
+
 export function hasIncompleteInitialDepartureCollection(report:ExecutionReport):boolean {
   return report.entries.some(e=>e.reason==='INITIAL_COLLECTION_INCOMPLETE');
 }
@@ -229,6 +240,16 @@ export async function runDemandExecution(
     console.log('[History] Decolagens confirmadas acrescentadas: '+added+'.');
     const uncertain=await appendUncertainDepartures(optimization.returnJournal.directory,optimization.returnJournal.scope,env.GITHUB_RUN_ID||'',report);
     console.log('[History] Tentativas incertas bloqueadas acrescentadas: '+uncertain+'.');
+  }
+  // #1075: all READY aircraft details failed, even though Fleet IDs existed.
+  // Keep durable checkpoints and fail status; no retry or extra authorization.
+  if(!settings.dryRun&&hasAllReadyDepartureDetailsUnverified(report)){
+    console.error('[DepartureDetails] '+JSON.stringify({
+      status:'INCOMPLETE_ALL_READY_DETAILS_UNVERIFIED',
+      evaluated:report.summary.evaluated,departed:report.summary.departed,
+      heldByUnverifiedDetails:report.entries.length,mutationAuthorized:false
+    }));
+    throw Error('DEMAND_EXECUTION_ALL_READY_DETAILS_UNVERIFIED');
   }
   // An incomplete second Fleet scan can hold every eligible aircraft without
   // a click; this is an operational failure, not a successful empty cycle.
