@@ -34,6 +34,7 @@ export async function inspectIndividualFirstPage(
   options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;pageIndex?:number;
     /** Expected native page-one identity/order from this discovery sweep. */
     expectedFirstPageFingerprint?:string;
+    expectedVisitedPageFingerprints?:ReadonlyMap<number,string>;
     excludedKeys?:ReadonlySet<string>;
     /** Extra read-only Fleet-first-page checks only after native in-flight confirmation. */
     postDepartureShortPageRetries?:number}={}
@@ -42,7 +43,8 @@ export async function inspectIndividualFirstPage(
   const pageIndex=options.pageIndex??0;
   const readPage=()=>pageIndex===0?inspectFirstPageReadOnly(page,timeout):
     inspectNativeIndexedPageReadOnly(
-      page,pageIndex,timeout,options.expectedFirstPageFingerprint);
+      page,pageIndex,timeout,options.expectedFirstPageFingerprint,
+      options.expectedVisitedPageFingerprints);
   const postRetries=options.postDepartureShortPageRetries??0;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>30000||
     !Number.isSafeInteger(limit)||limit<1||limit>20||
