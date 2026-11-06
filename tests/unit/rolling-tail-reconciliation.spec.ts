@@ -111,3 +111,65 @@ test('run #1557: short baseline rejects any newly introduced or changed native c
  expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']),v=>codes.push(v))).toBe(false);
  expect(codes).toEqual(['AFTER_ROSTER_CHANGED']);
 });
+
+test('run #1558: same 18 native cards remain after two confirmed READY to INFLIGHT transitions',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail(Array.from({length:18},(_,i)=>i+1));
+ const codes:string[]=[];
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']),v=>codes.push(v))).toBe(true);
+ expect(codes).toEqual([]);
+ expect(before.windowObservedAircraft).toHaveLength(18);
+ expect(after.windowObservedAircraft).toHaveLength(18);
+ expect(before.complete).toBe(false);
+ expect(after.complete).toBe(false);
+});
+
+test('run #1558: unchanged first-page length does not excuse unrelated native state drift',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail(Array.from({length:18},(_,i)=>i+1));
+ const codes:string[]=[];
+ after.windowObservedAircraft![2]={...after.windowObservedAircraft![2],state:'unavailable'};
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']),v=>codes.push(v))).toBe(false);
+ expect(codes).toEqual(['UNCONFIRMED_OR_INVALID_STATE_CHANGE']);
+});
+
+test('run #1558: no post-departure inflight proof for READY card must stay red',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail(Array.from({length:18},(_,i)=>i+1));
+ after.windowObservedAircraft![0]={...after.windowObservedAircraft![0],state:'unavailable'};
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']))).toBe(false);
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001']))).toBe(false);
+});
+
+test('run #1558: same roster with changed registration cannot be considered reconciled',()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail(Array.from({length:18},(_,i)=>i+1));
+ after.windowObservedAircraft![1]={...after.windowObservedAircraft![1],registration:'OTHER'};
+ expect(verifiedPostDispatchShortTail(before,after,new Set(['2001:3001','2002:3002']))).toBe(false);
+});
+
+test('run #1558: same roster is scoped-success only after two actual individual confirmations',async()=>{
+ const before={...baseline([1,2]),windowObservedAircraft:baseline([1,2]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail(Array.from({length:18},(_,i)=>i+1));
+ let collects=0,departClicks=0;
+ const port:DeparturePort={
+  collect:async()=>++collects===1?before:after,
+  prepare:async a=>({...a,observedAt:new Date().toISOString()}),
+  depart:async()=>{departClicks++;},
+  confirm:async a=>({...a,state:'inflight',onboard:{Y:70,J:0,F:0},
+   timing:flightCountdownObservation(a.aircraftId,a.routeId,'01:00:00',new Date().toISOString())})
+ };
+ const quotes=new Map(before.aircraft.map(a=>[a.aircraftId,{
+  aircraftId:a.aircraftId,routeId:a.routeId,from:a.from,to:a.to,
+  fuelLbs:12000,observedAt:new Date().toISOString()}]));
+ const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+  rollingIndividualMode:true,dryRun:false,maxDepartures:'all',
+  fuelHoldingLbsAtRunStart:150000,campaignVerified:true,currentRouteFuelEvidence:quotes
+ },async()=>{}).run();
+ expect(report.summary).toMatchObject({evaluated:2,departed:2,held:0,unknown:0});
+ expect(report.postDispatchShortTailReconciled).toBe(true);
+ expect(report.rollingWindowUnverified).not.toBe(true);
+ expect(report.halted).toBe(false);
+ expect(collects).toBe(2);
+ expect(departClicks).toBe(2);
+});
