@@ -507,3 +507,35 @@ test('run #1227: strictly verified ready aircraft on FIRST page resolves prior u
     reason:'STRICTLY_NEWER_VERIFIED_LIVE_STATE'
   });
 });
+
+test('run #1559: quarantine journal exposes fixed rejection reason without releasing aircraft',async()=>{
+  await reviewWithReturnJournal(input(),options(),now);
+  const {appendUncertainDepartures,appendResolvedUncertainFromVerifiedFirstPageTarget,
+    readUnresolvedDepartureKeys}=await import('../../optimization/return-journal');
+  const prior:any={entries:[{status:'outcome_unknown',aircraftId:'9',registration:'UNCERTAIN',
+    routeId:'99',from:'AAA',to:'BBB',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:UNCLASSIFIED'}]};
+  expect(await appendUncertainDepartures(directory,'company-test','1599',prior,now)).toBe(1);
+  const future=new Date('2026-09-30T11:20:00.000Z');
+  const good:any={aircraftId:'9',routeId:'99',registration:'UNCERTAIN',
+    routeLabel:'AAA - BBB',from:'AAA',to:'BBB',state:'ready',
+    capacity:{Y:100,J:0,F:0},remaining:{Y:70,J:0,F:0},
+    dailyTotal:{Y:1000,J:0,F:0},observedAt:'2026-09-30T11:15:00.000Z',
+    departureControlShape:"Ajax('route_depart.php?id=<value>','routeAction',this);"};
+  const codes:string[]=[];
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+    directory,'company-test',{...good,registration:'MISMATCH'},
+    future,c=>codes.push(c))).toBe(false);
+  expect(codes).toEqual(['JOURNAL_SOURCE_CONTEXT_MISMATCH']);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(true);
+  codes.length=0;
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+    directory,'company-test',{...good,observedAt:now.toISOString()},
+    future,c=>codes.push(c))).toBe(false);
+  expect(codes).toEqual(['LIVE_EVIDENCE_NOT_NEWER']);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(true);
+  codes.length=0;
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+    directory,'company-test',good,future,c=>codes.push(c))).toBe(true);
+  expect(codes).toEqual([]);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(false);
+});
