@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly } from './rolling-first-page';
 import { DemandReader } from './reader';
 import { verifiedDepartureHandler } from './departure-port';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
@@ -16,6 +16,8 @@ export interface IndividualPreflight {
   mutationAuthorized:false;
   window:'STABLE'|'SHORT_PAGE'|'UNVERIFIED'|'TIME_BUDGET';
   routeTotal:number|null;
+  /** Zero-based native page, never an inferred whole-Fleet scope. */
+  pageIndex:number;
   inspected:number;
   verified:number;
   readyCandidates:number;
@@ -29,26 +31,32 @@ export interface IndividualPreflight {
 
 export async function inspectIndividualFirstPage(
   page:Page,
-  options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;
+  options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;pageIndex?:number;
     /** Extra read-only Fleet-first-page checks only after native in-flight confirmation. */
     postDepartureShortPageRetries?:number}={}
 ):Promise<IndividualPreflight>{
   const timeout=options.timeout??4000,limit=options.maxCandidates??2,deadline=options.deadlineEpochMs;
+  const pageIndex=options.pageIndex??0;
+  const readPage=()=>pageIndex===0?inspectFirstPageReadOnly(page,timeout):
+    inspectNativeIndexedPageReadOnly(page,pageIndex,timeout);
   const postRetries=options.postDepartureShortPageRetries??0;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>30000||
     !Number.isSafeInteger(limit)||limit<1||limit>20||
+    !Number.isSafeInteger(pageIndex)||pageIndex<0||pageIndex>63||
     !Number.isSafeInteger(postRetries)||postRetries<0||postRetries>3||
     (deadline!==undefined&&(!Number.isSafeInteger(deadline)||deadline<1)))
     throw Error('INDIVIDUAL_PREFLIGHT_SETTINGS_INVALID');
   const report:IndividualPreflight={
     schemaVersion:1,mode:'read-only-individual',mutationAuthorized:false,
-    window:'UNVERIFIED',routeTotal:null,inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],windowObservedAircraft:[],holds:[]
+    window:'UNVERIFIED',routeTotal:null,pageIndex,inspected:0,verified:0,readyCandidates:0,verifiedAircraft:[],windowObservedAircraft:[],holds:[]
   };
   const budget=()=>deadline===undefined||Date.now()+Math.max(5000,timeout*2)<deadline;
   if(!budget()){report.window='TIME_BUDGET';return report;}
   // Runner already selected native Fleet page one. Reuse only for this
   // initial observation; every target below forces a NEW native Ajax read.
-  let first=await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true});
+  let first=pageIndex===0?
+    await inspectFirstPageReadOnly(page,timeout,{allowAlreadyOpen:true}):
+    await readPage();
   // A route can arrive or a card can briefly lose its identity while the
   // Ajax list refreshes. Recover ONCE, read-only, only after a fresh native
   // first-page request. Neither the initial partial snapshot nor an outdated
@@ -66,7 +74,7 @@ export async function inspectIndividualFirstPage(
       status:'RETRY_FIRST_PAGE_UNVERIFIED',reason:prior,
       globalComplete:false,mutationAuthorized:false
     }));
-    first=await inspectFirstPageReadOnly(page,timeout);
+    first=await readPage();
   }
   // #1374: after a confirmed Depart, AM4 can temporarily show a short
   // first page with no READY cards while its native AJAX list is settling.
@@ -78,7 +86,7 @@ export async function inspectIndividualFirstPage(
     await assertNoInteractiveChallenge(page,'individual-preflight:post-departure-short-tail');
     await page.waitForTimeout(300);
     const beforeCount=first.routeTotal;
-    const refreshed=await inspectFirstPageReadOnly(page,timeout);
+    const refreshed=await readPage();
     console.warn('[RollingPostDepartureFirstPageRecovery] '+JSON.stringify({
       attempt:recovery+1,status:refreshed.status,
       routeCountStable:refreshed.routeTotal===beforeCount,
@@ -103,7 +111,7 @@ export async function inspectIndividualFirstPage(
       // No stale pagination cursor is used: reopen first page each time and
       // require identical native route/aircraft/registration before opening
       // the sole target's current details.
-      const again=await inspectFirstPageReadOnly(page,timeout);
+      const again=await readPage();
       if(!['STABLE','SHORT_PAGE'].includes(again.status)){
         report.holds.push({code:'WINDOW_UNVERIFIED'});continue;
       }
