@@ -70,6 +70,9 @@ export interface ExecutionReport {
   entries: ExecutionEntry[];
   /** True if any observed current-page ready target lacked a fresh identity/control proof. */
   rollingWindowUnverified?: boolean;
+  /** Scoped outcome: confirmed departures, no unknown click, but final native
+   * page had zero READY with a nonstandard count; fleet coverage is INCOMPLETE. */
+  rollingTerminalPartialCoverage?: boolean;
   /** A post-dispatch short tail was reconciled only with current-run confirmed IDs; not global idle. */
   postDispatchShortTailReconciled?: boolean;
   /** Verified complete native first-page observation contained no ready aircraft. */
@@ -550,9 +553,33 @@ export class IndividualDepartureExecutor {
         }));
         break;
       }
+      const isTerminalPartial=nextWindow.windowTerminalNonstandardNoReadyObserved===true&&
+        nextWindow.windowReadyCandidates===0&&nextWindow.aircraft.length===0&&
+        nextWindow.windowObservedAircraft?.length!>0&&
+        report.summary.departed>0&&report.summary.unknown===0&&
+        report.rollingWindowUnverified!==true&&
+        !report.halted;
+      if(isTerminalPartial){
+        // The verified flights were completed. The incomplete last-page
+        // count is a separate COVERAGE WARNING, not a failed flight or
+        // evidence of fleet-wide idleness. No more Depart clicks this run.
+        report.rollingTerminalPartialCoverage=true;
+        report.rollingWindowUnverified=true;
+        console.warn('[RollingNativePageCoverage] '+JSON.stringify({
+          status:'PARTIAL_TERMINAL_PAGE_NONSTANDARD_NO_READY',
+          page:(nextWindow.windowPageIndex??0)+1,
+          observedCards:nextWindow.windowObservedAircraft!.length,
+          heading:nextWindow.expectedRoutes,
+          confirmedDepartures:report.summary.departed,globalComplete:false,
+          fleetWideCompletionClaim:false,mutationAuthorized:false
+        }));
+        break;
+      }
       if(nextWindow.windowShortNoReadyObserved){
         console.warn('[RollingShortTailDiagnostic] '+JSON.stringify({
-          status:'UNRECONCILED',reason:tailRejection??'UNVERIFIED_PREVIOUS_RESULT',
+          status:'UNRECONCILED',
+          reason:(initial.windowPageIndex??0)!==(nextWindow.windowPageIndex??0)
+            ?'DIFFERENT_NATIVE_PAGE_SCOPE':tailRejection??'UNVERIFIED_PREVIOUS_RESULT',
           beforeCards:initial.windowObservedAircraft?.length??null,
           afterCards:nextWindow.windowObservedAircraft?.length??null,
           beforeReady:initial.windowReadyCandidates??null,
