@@ -18,27 +18,39 @@ O projeto automatiza rotinas repetitivas da companhia aérea com uma abordagem *
 
 | Recurso | Estado |
 | --- | --- |
-| Login e leitura da frota | ✅ Produção |
+| Login e leitura da frota | ⚠️ Produção; interface nativa pode falhar ou ficar incompleta |
 | Descoberta automática de hubs/bases | ✅ Produção |
-| Demand Manager | ✅ Produção |
-| Decolagens individuais | ✅ Produção |
-| Cobertura de rotas em qualquer aeroporto | ✅ Produção |
+| Demand Manager | ✅ Ativo com validação individual e `HOLD` conservador |
+| Decolagens individuais | ⚠️ Ativas na primeira página; cobertura global não garantida |
+| Elegibilidade de rotas em qualquer aeroporto | ✅ Sem filtro por hub; não equivale a examinar toda a frota |
 | Compra de Fuel com preço ao vivo | ✅ Produção |
 | Compra de CO₂ | ✅ Produção |
 | Manutenção, A-check e reparos | ✅ Produção |
 | Campanhas de marketing | ✅ Produção |
 | Pricing automático PAX | ✅ Produção |
 | Pesquisa de rotas | ✅ Leitura |
-| Revisão de rota no retorno/diária | ✅ Produção |
-| Reroute automático | 🛡️ Fail-closed |
-| Histórico persistente por aeronave | ✅ Produção |
+| Revisão de rota no retorno/diária | 🛡️ Implementada; condicionada ao caminho operacional e a evidências |
+| Reroute automático | 🛡️ Fail-closed; não é garantido no despacho por primeira página |
+| Histórico e quarentenas persistentes | ✅ Produção; nunca apagar o estado para liberar partidas |
 | Threshold adaptativo de demanda | ✅ Produção |
 | Dashboard no GitHub Actions | ✅ Produção |
 | Notificações via Telegram | ✅ Produção |
 | Modo semiautomático com aprovação manual | ✅ Produção |
+| Renomeação de aeronaves | 🧰 Workflow manual separado | 
 | Compra automática de aeronaves | ❌ Fora do escopo |
 
 O estado técnico detalhado está em [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
+
+### Situação operacional verificada em 06/11/2026
+
+> [!IMPORTANT]
+> **Testes offline aprovados não significam que a operação real esteja estabilizada.** O modo padrão de produção analisa somente a **primeira página nativa da Fleet**, não todas as rotas. Uma execução verde representa apenas o escopo efetivamente verificado, nunca o processamento integral da frota.
+
+- Na execução [#1559](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/42221987958), **3 decolagens foram confirmadas**, 3 aeronaves ficaram em `HOLD` por demanda insuficiente e 1 foi bloqueada devido a uma **tentativa antiga com resultado incerto**. O workflow terminou em falha para não mascarar essa pendência.
+- Na [#1560](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/42226001875), a primeira página ficou curta e sem candidatos verificados, embora o cabeçalho indicasse **187 rotas**; não foi possível concluir que não havia aviões prontos nas outras páginas.
+- Nesses cenários, os limites de combustível, as confirmações pós-clique e as quarentenas foram mantidos. **Não use a cor verde/vermelha isoladamente para avaliar o número de voos realizados.** Confira `IndividualDepartures`, `ScopedFirstPageOutcome` e os artifacts.
+
+**Limitações pendentes:** cobertura integral da frota, recuperação de páginas incompletas, conciliação de partidas incertas e diagnóstico de manutenção com horas não verificadas.
 
 ---
 
@@ -74,6 +86,20 @@ Existe um **fallback configurável** para os hubs caso a descoberta live não po
 Assim, uma nova base pode ser reconhecida automaticamente sem precisar alterar o código do executor de decolagem.
 
 ---
+
+## Modo padrão: somente primeira página da Fleet
+
+Em produção, `DEMAND_FIRST_PAGE_ONLY` é **`true` por padrão**. O bot reabre a primeira página nativa, faz leituras independentes, verifica cada candidato READY individualmente, despacha apenas os autorizados e tenta observar novamente a primeira página após partidas confirmadas. Não percorre automaticamente todas as páginas da frota nesse modo.
+
+- `DISPATCH_ALL_READY` ou `maxDepartures=all` significa **todos os candidatos elegíveis alcançados pelo fluxo e pelo orçamento da execução**, não as 187 rotas do cabeçalho.
+- O jogo pode manter aviões que decolaram na lista, reordenar cartões ou mostrar uma página curta. A contagem de `Routes(N)` não comprova os cartões ausentes.
+- A reconciliação exige identidades e estados exatos. Não é permitido deduzir que um avião desaparecido decolou, nem repetir uma partida incerta.
+- `ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES` indica que o bot não conseguiu obter **candidatos verificados naquela página**, e **não** que a companhia inteira está parada.
+- Quarentenas persistidas podem gerar `FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED` mesmo depois de outras partidas reais e confirmadas.
+- Desabilitar `DEMAND_FIRST_PAGE_ONLY` muda para um caminho de coleta diferente; não use isso como correção improvisada para uma UI instável.
+
+> [!CAUTION]
+> Não apague a branch `am4-runtime-state`, não remova registros de quarentena e não reduza os requisitos de confirmação para transformar uma run vermelha em verde.
 
 ## Demand Manager
 
@@ -181,13 +207,15 @@ flowchart TD
     F --> G[Descoberta dinâmica de hubs]
     G --> H[Fuel / CO₂]
     H --> I[Manutenção / campanhas]
-    I --> J[Coleta da frota + demanda]
-    J --> K[Route research / review]
-    K --> L[Reroute fail-closed]
-    L --> M[Pricing PAX]
-    M --> N[Decolagens individuais]
-    N --> O[Persistência do journal]
-    O --> P[Dashboard + artifacts + Telegram]
+    I --> J{Modo operacional}
+    J -->|Primeira página padrão| K[Primeira janela nativa + identidade dupla]
+    K --> L[Demanda, Fuel, quarentenas e gates por aeronave]
+    L --> M[Depart individual + confirmação independente]
+    J -->|Caminho alternativo configurado| N[Coleta ampliada + módulos complementares]
+    N --> O[Pesquisa, revisão e pricing conforme gates]
+    O --> M
+    M --> P[Journal e checkpoints persistentes]
+    P --> Q[Summary + artifacts + Telegram]
 ```
 
 O workflow principal é:
@@ -299,7 +327,7 @@ Quando habilitado pela configuração avançada, o bot apenas analisa o cenário
 departure_mode=simulation
 ```
 
-> Uma run marcada como `success` significa que o workflow terminou de forma consistente. Não significa necessariamente que houve decolagens, compras, alterações de preço ou reroutes. Uma decisão de `HOLD` pode ser exatamente o resultado esperado.
+> Uma run `success` significa apenas que **as verificações exigidas para seu escopo foram satisfeitas**; não prova que toda a frota foi examinada. Uma run `failure` também pode ter decolagens reais e comprovadas, acompanhadas de quarentenas ou páginas incompletas. Sempre compare os logs operacionais com os artifacts.
 
 ---
 
@@ -353,7 +381,29 @@ O journal registra, entre outras evidências:
 - mutations incertas;
 - informações necessárias aos thresholds adaptativos.
 
-Não é recomendado apagar quarentenas apenas para liberar uma nova tentativa.
+**Nunca apague a branch `am4-runtime-state` nem suas quarentenas para forçar tentativas.** Uma decolagem anterior incerta só pode ser desbloqueada por nova evidência nativa e pela resolução persistida no journal; o avião não é reenviado na execução que o regulariza.
+
+### Política de branches e limpeza
+
+O repositório separa três tipos de branch:
+
+- `main` — código de produção e documentação;
+- `am4-runtime-state` — histórico, checkpoints e quarentenas usados pelos workflows (deve permanecer);
+- `fix/*`, `feat/*`, `docs/*` e semelhantes — desenvolvimento temporário.
+
+A limpeza utiliza [scripts/prune-merged-branches.cjs](scripts/prune-merged-branches.cjs) e o workflow [Limpeza segura de branches mescladas](.github/workflows/prune-merged-branches.yml). São elegíveis **somente** branches com PR **mesclado** no próprio repositório e **SHA atual idêntico ao SHA do PR**. Não são removidas branches com PR aberto, com commits posteriores ao merge, sem PR mesclado, protegidas, `main`, `migration-stable` ou `am4-runtime-state`.
+
+Por padrão, o script executa apenas uma auditoria sem excluir nada:
+
+```bash
+# Autoteste sem token
+node scripts/prune-merged-branches.cjs --self-test
+
+# Auditoria por GitHub API, sem exclusão
+GITHUB_REPOSITORY=SEU_USUARIO/SEU_REPO GITHUB_TOKEN=SEU_TOKEN node scripts/prune-merged-branches.cjs --dry-run
+```
+
+Para exclusão, use o workflow com aprovação explícita (`apply=true`) ou o argumento `--apply` com token de escopo restrito e permissão `Contents: write`. O workflow também realiza a limpeza quando o script ou a configuração de manutenção é incorporada à `main` **deste repositório**, com relatório auditável no GitHub Actions.
 
 ---
 
@@ -394,7 +444,19 @@ docs/                documentação técnica
 
 **A run ficou verde, mas nenhum avião decolou**
 
-Isso pode ser normal. Consulte o Summary e `execution-report.md`. Demanda insuficiente, quarentena, falta de evidência ou limites operacionais podem resultar em `HOLD`.
+Consulte `IndividualDepartures`, `ScopedFirstPageOutcome` e `execution-report.md`. Um resultado concluído não significa que todas as aeronaves da frota foram observadas. Uma run `skipped` também não comprova operação.
+
+**A run ficou vermelha, mas aviões decolaram**
+
+Veja o relatório da execução: partidas confirmadas são preservadas. A validação pode permanecer vermelha por quarentena prévia não resolvida, identidade divergente ou próxima página incompleta. Não repita partidas incertas.
+
+**`PERSISTED_UNCERTAIN_DEPARTURE_BLOCK`**
+
+Uma tentativa de outra execução permaneceu sem confirmação conclusiva. O journal deve ser conciliado com nova observação READY estritamente posterior, identidade/rota/registro compatíveis e controle nativo válido. Não apague o histórico.
+
+**`ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES`**
+
+A primeira página nativa não forneceu candidatos READY verificáveis. Isso não demonstra ociosidade da frota; confira o cabeçalho, a integridade da página, os logs de recuperação e as demais execuções.
 
 **Fuel não foi comprado**
 

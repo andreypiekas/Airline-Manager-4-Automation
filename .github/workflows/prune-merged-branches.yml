@@ -1,0 +1,45 @@
+name: Limpeza segura de branches mescladas
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/prune-merged-branches.cjs
+      - .github/workflows/prune-merged-branches.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Excluir apenas branches de PRs mesclados, com SHA idêntico'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: safe-prune-merged-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    if: github.repository == 'andreypiekas/Airline-Manager-4-Automation'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Testar lista de exclusao sem acesso remoto
+        run: node scripts/prune-merged-branches.cjs --self-test
+      - name: Remover somente branches de PRs ja mesclados e com mesmo SHA
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ github.event_name == 'push' || inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            node scripts/prune-merged-branches.cjs --apply
+          else
+            node scripts/prune-merged-branches.cjs --dry-run
+          fi
