@@ -173,3 +173,80 @@ test('run #1558: same roster is scoped-success only after two actual individual 
  expect(collects).toBe(2);
  expect(departClicks).toBe(2);
 });
+
+test('production #1563: confirmed four departures may be replaced by new unique INFLIGHT cards',()=>{
+ const before={...baseline([1,2,3,4]),windowObservedAircraft:baseline([1,2,3,4]).windowObservedAircraft!.slice(0,18)};
+ const after=shortTail([...Array.from({length:14},(_,i)=>i+5),21,22,23,24]);
+ const confirmed=new Set([1,2,3,4].map(i=>'200'+i+':300'+i));
+ expect(before.windowObservedAircraft).toHaveLength(18);
+ expect(after.windowObservedAircraft).toHaveLength(18);
+ expect(verifiedPostDispatchShortTail(before,after,confirmed)).toBe(true);
+ expect(after.complete).toBe(false);
+});
+
+test('production #1563: new card cannot conceal unconfirmed disappearance, reroute, or invalid refill',()=>{
+ const before={...baseline([1,2,3,4]),windowObservedAircraft:baseline([1,2,3,4]).windowObservedAircraft!.slice(0,18)};
+ const good=shortTail([...Array.from({length:14},(_,i)=>i+5),21,22,23,24]);
+ const confirmed=new Set([1,2,3,4].map(i=>'200'+i+':300'+i));
+ const code: string[]=[];
+ const reject=(a:CollectionResult)=>verifiedPostDispatchShortTail(before,a,confirmed,x=>code.push(x));
+ // A non-ready aircraft disappears without confirmation.
+ expect(reject(shortTail([...Array.from({length:13},(_,i)=>i+6),21,22,23,24,25]))).toBe(false);
+ expect(code.at(-1)).toBe('MISSING_CARDS_NOT_CONFIRMED');
+ // A different native route or registration of an existing aircraft is not a fresh aircraft.
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,aircraftId:before.windowObservedAircraft![0].aircraftId}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,routeId:before.windowObservedAircraft![0].routeId}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,registration:before.windowObservedAircraft![0].registration}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,state:'unavailable' as const}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,aircraftId:'x'}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,routeId:'0'}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,aircraftId:good.windowObservedAircraft![15].aircraftId}:x)})).toBe(false);
+ expect(reject({...good,windowObservedAircraft:good.windowObservedAircraft!.map((x,i)=>
+   i===14?{...x,state:'ready' as const}:x)})).toBe(false);
+ expect(reject({...good,expectedRoutes:179})).toBe(false);
+ expect(reject({...good,windowShortNoReadyObserved:false})).toBe(false);
+ expect(reject({...good,warnings:[]})).toBe(false);
+ expect(reject({...good,windowReadyCandidates:1})).toBe(false);
+ expect(reject(good)).toBe(true);
+ expect(reject(good)).toBe(true);
+ expect(verifiedPostDispatchShortTail(before,good,new Set([...confirmed].slice(0,3)))).toBe(false);
+});
+
+test('production #1563: refilled roster completes verified window without clicking any new aircraft',async()=>{
+ const before={...baseline([1,2,3,4]),windowObservedAircraft:baseline([1,2,3,4]).windowObservedAircraft!.slice(0,18)};
+ // Each synthetic aircraft uses a distinct demand pool. Shared route demand
+ // must NOT be bypassed just to force a departure count in this regression.
+ const destinations=['GRU','DTW','LHR','JFK'];
+ before.aircraft=before.aircraft.map((a,i)=>({
+   ...a,from:'XAP',to:destinations[i],routeLabel:'XAP - '+destinations[i]
+ }));
+ const after=shortTail([...Array.from({length:14},(_,i)=>i+5),21,22,23,24]);
+ let collects=0,departClicks=0;
+ const port:DeparturePort={
+   collect:async()=>++collects===1?before:after,
+   prepare:async a=>({...a,observedAt:new Date().toISOString()}),
+   depart:async()=>{departClicks++;},
+   confirm:async a=>({...a,state:'inflight',onboard:{Y:70,J:0,F:0},
+     timing:flightCountdownObservation(a.aircraftId,a.routeId,'01:00:00',new Date().toISOString())})
+ };
+ const quotes=new Map(before.aircraft.map(a=>[a.aircraftId,{
+   aircraftId:a.aircraftId,routeId:a.routeId,from:a.from,to:a.to,
+   fuelLbs:12000,observedAt:new Date().toISOString()}]));
+ const report=await new IndividualDepartureExecutor(port,readDemandConfig({}),{
+   rollingIndividualMode:true,dryRun:false,maxDepartures:'all',
+   fuelHoldingLbsAtRunStart:150000,campaignVerified:true,currentRouteFuelEvidence:quotes
+ },async()=>{}).run();
+ expect(report.summary).toMatchObject({evaluated:4,departed:4,held:0,unknown:0});
+ expect(report.postDispatchShortTailReconciled).toBe(true);
+ expect(report.rollingWindowUnverified).not.toBe(true);
+ expect(report.halted).toBe(false);
+ expect(collects).toBe(2);
+ expect(departClicks).toBe(4);
+});
