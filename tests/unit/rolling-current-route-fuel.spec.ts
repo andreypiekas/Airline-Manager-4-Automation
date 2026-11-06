@@ -109,6 +109,26 @@ test('run #1318: native Back restores a verified first page; never presses Depar
   expect(await page.locator('#newRouteInfo').isVisible()).toBe(false);
 });
 
+test('run #1554: asynchronous native Back settles before first-page restoration',async({page})=>{
+  await quoteRestoreFixture(page,'reopen');
+  await page.evaluate(()=>{
+    const w=window as any;
+    w.goBack=()=>{
+      w.backClicks++;
+      setTimeout(()=>{
+        document.getElementById('newRouteInfo')!.style.display='none';
+      },120);
+    };
+  });
+  await restoreRollingFuelFirstPage(page,1500);
+  expect(await page.evaluate(()=>({
+    backs:(window as any).backClicks,
+    fleet:(window as any).fleetClicks,
+    departed:(window as any).departClicks
+  }))).toEqual({backs:1,fleet:1,departed:0});
+  expect(await page.locator('#newRouteInfo').isVisible()).toBe(false);
+});
+
 test('run #1318: quote Back followed by one native Fleet opening restores hidden page',async({page})=>{
   await quoteRestoreFixture(page,'reopen');
   await restoreRollingFuelFirstPage(page,1500);

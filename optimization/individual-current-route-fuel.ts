@@ -62,7 +62,16 @@ export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Prom
       if(await back.count()!==1||!await back.isVisible()||!await back.isEnabled())
         throw Error('ROLLING_FUEL_NATIVE_BACK_UNVERIFIED');
       await back.click({timeout});
-      if(await quote.isVisible())throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
+      // Native Back may complete its AJAX transition *after* Playwright's click
+      // resolves. Run #1552-#1554 aborted because the immediately-following
+      // isVisible() read saw the old overlay. Wait only for the SAME verified
+      // native panel to become hidden; never click Back a second time merely
+      // because the close is still in progress. An unclosed panel still HALTs.
+      try{
+        await quote.waitFor({state:'hidden',timeout:Math.min(timeout,2_000)});
+      }catch{
+        throw Error('ROLLING_FUEL_QUOTE_NOT_CLOSED');
+      }
     }
   };
   // #1455-#1459: multiple delayed native quote responses can reopen the
