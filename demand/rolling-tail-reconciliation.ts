@@ -6,8 +6,10 @@ import type { CollectionResult } from './types';
  * A formerly READY card may remain visible only when its exact aircraft/route
  * was confirmed airborne in this run and the native card is now INFLIGHT.
  * A missing card is acceptable only for the same confirmed departure.
- * A new card, identity change, unrelated state transition, previously inflight
- * missing card, unknown departure or absent proof remains unsafe.
+ * A new, uniquely identified INFLIGHT card may fill the slot vacated by an
+ * exactly confirmed departed READY card. This must NEVER hide disappearance
+ * of another inflight/unavailable card or any change in an original identity.
+ * Unknown departure, unverified new card or absent proof remains unsafe.
  *
  * This is a scoped termination decision, NOT a full-Fleet inventory claim,
  * a departure authorization, or evidence that later native pages are idle.
@@ -46,11 +48,16 @@ export function verifiedPostDispatchShortTail(
   const key=(a:{aircraftId:string;routeId:string})=>a.aircraftId+':'+a.routeId;
   const original=new Map<string,(typeof before.windowObservedAircraft)[number]>();
   const routes=new Set<string>();
+  const aircraftIds=new Set<string>();
+  const registrations=new Set<string>();
   for(const a of before.windowObservedAircraft){
     if(!/^[1-9]\d*$/.test(a.aircraftId)||!/^[1-9]\d*$/.test(a.routeId)||
        !a.registration||!['ready','inflight','unavailable'].includes(a.state)||
-       original.has(key(a))||routes.has(a.routeId))return reject('BASELINE_ROSTER_UNVERIFIED');
+       original.has(key(a))||routes.has(a.routeId)||
+       aircraftIds.has(a.aircraftId)||registrations.has(a.registration))
+      return reject('BASELINE_ROSTER_UNVERIFIED');
     original.set(key(a),a);routes.add(a.routeId);
+    aircraftIds.add(a.aircraftId);registrations.add(a.registration);
   }
   // Every originally ready card must have an independently confirmed departure.
   const beforeReady=before.windowObservedAircraft.filter(a=>a.state==='ready');
@@ -62,35 +69,50 @@ export function verifiedPostDispatchShortTail(
     return reject('BASELINE_READY_UNVERIFIED');
   const observed=new Set<string>();
   const observedRoutes=new Set<string>();
+  const observedAircraftIds=new Set<string>();
+  const observedRegistrations=new Set<string>();
   let confirmedNativeInflightTransitions=0;
+  let refillCards=0;
   for(const a of after.windowObservedAircraft){
     const known=original.get(key(a));
-    if(!known||a.registration!==known.registration||a.state==='ready'||
-       observed.has(key(a))||observedRoutes.has(a.routeId))
+    // Every new native card needs a unique identity and independent INFLIGHT
+    // state proof. Do not accept invented IDs, renamed/rerouted old aircraft,
+    // unavailable cards, or new READY aircraft that still need dispatch.
+    if(!/^[1-9]\\d*$/.test(a.aircraftId)||!/^[1-9]\\d*$/.test(a.routeId)||
+       !a.registration||a.state==='ready'||
+       observed.has(key(a))||observedRoutes.has(a.routeId)||
+       observedAircraftIds.has(a.aircraftId)||observedRegistrations.has(a.registration))
       return reject('AFTER_ROSTER_CHANGED');
-    // #1558: AM4 may keep a departed aircraft in the same native first-page
-    // slot. Its state change is valid only after this run independently
-    // confirmed the matching aircraft/route as airborne.
-    if(known.state==='ready'){
-      if(a.state!=='inflight'||!confirmedDepartures.has(key(a)))
+    if(!known){
+      if(a.state!=='inflight'||aircraftIds.has(a.aircraftId)||
+         routes.has(a.routeId)||registrations.has(a.registration))
+        return reject('AFTER_ROSTER_CHANGED');
+      refillCards++;
+    }else{
+      if(a.registration!==known.registration)
+        return reject('AFTER_ROSTER_CHANGED');
+      // A departed READY card may remain visible, but must be confirmed
+      // INFLIGHT for that same aircraft/route in this exact run.
+      if(known.state==='ready'){
+        if(a.state!=='inflight'||!confirmedDepartures.has(key(a)))
+          return reject('UNCONFIRMED_OR_INVALID_STATE_CHANGE');
+        confirmedNativeInflightTransitions++;
+      }else if(a.state!==known.state){
         return reject('UNCONFIRMED_OR_INVALID_STATE_CHANGE');
-      confirmedNativeInflightTransitions++;
-    }else if(a.state!==known.state){
-      // Never explain another aircraft's arrival, maintenance or navigation
-      // drift with one of our confirmed departures.
-      return reject('UNCONFIRMED_OR_INVALID_STATE_CHANGE');
+      }
     }
     observed.add(key(a));observedRoutes.add(a.routeId);
+    observedAircraftIds.add(a.aircraftId);observedRegistrations.add(a.registration);
   }
   const missing=[...original.keys()].filter(k=>!observed.has(k));
-  // Compare the exact, twice-verified roster, not an assumed 20-card page.
-  // This is scoped completion only; the rest of the Fleet remains unassessed.
-  if(missing.length!==before.windowObservedAircraft.length-after.windowObservedAircraft.length)
+  // A refill slot must be accounted for ONLY by a previously READY,
+  // independently confirmed departure. Missing non-READY cards stay unsafe.
+  if(missing.length!==before.windowObservedAircraft.length-
+       after.windowObservedAircraft.length+refillCards)
     return reject('AFTER_ROSTER_CHANGED');
-  // Never explain disappearance of an existing inflight/unavailable card by
-  // our own departures. All missing IDs must have been READY and confirmed.
   if(!missing.every(k=>original.get(k)?.state==='ready'&&confirmedDepartures.has(k)))
     return reject('MISSING_CARDS_NOT_CONFIRMED');
+  if(refillCards>missing.length)return reject('AFTER_ROSTER_CHANGED');
   if(missing.length===0&&confirmedNativeInflightTransitions===0)
     return reject('NO_CONFIRMED_ROSTER_CHANGE');
   return true;
