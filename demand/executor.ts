@@ -284,12 +284,22 @@ export class IndividualDepartureExecutor {
               !!fresh.remaining&&!!fresh.dailyTotal&&
               !!fresh.departureControlShape?.includes('route_depart.php?')&&
               Number.isFinite(age)&&age>=0&&age<=this.demand.maxAgeSeconds*1000;
-            if(verified&&await this.settings.reconcilePersistedUncertainReady(fresh)){
+            if(!verified){
+              console.warn('[DepartureQuarantine] '+JSON.stringify({
+                status:'FRESH_READY_EVIDENCE_UNVERIFIED',
+                departClicked:false,quarantineRetained:true,mutationAuthorized:false
+              }));
+            }else if(await this.settings.reconcilePersistedUncertainReady(fresh)){
               entry.reason='PERSISTED_UNCERTAIN_DEPARTURE_RECONCILED_READ_ONLY';
               console.warn('[DepartureQuarantine] '+JSON.stringify({
                 status:'RESOLVED_BY_STRICT_NEWER_READY_STATE',
                 departClicked:false,retryCurrentRun:false,
                 globalFleetScans:0,previousUncertaintyStillAudited:true
+              }));
+            }else{
+              console.warn('[DepartureQuarantine] '+JSON.stringify({
+                status:'JOURNAL_RECONCILIATION_REJECTED',
+                departClicked:false,quarantineRetained:true,mutationAuthorized:false
               }));
             }
           }catch(error){

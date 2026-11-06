@@ -200,7 +200,11 @@ export async function runDemandExecution(
     ...(settings.rollingIndividualMode&&optimization.returnJournal
       ?{reconcilePersistedUncertainReady:(fresh:AircraftSnapshot)=>
         appendResolvedUncertainFromVerifiedFirstPageTarget(
-          optimization.returnJournal!.directory,optimization.returnJournal!.scope,fresh
+          optimization.returnJournal!.directory,optimization.returnJournal!.scope,fresh,
+          new Date(),reason=>console.warn('[DepartureQuarantineJournal] '+JSON.stringify({
+            status:'RECONCILIATION_REJECTED',reason,
+            departClicked:false,quarantineRetained:true
+          }))
         )}:{ }),
     campaignVerified:!campaignGateRequired||campaignGateVerified,
     postReroutePricingBlockedAircraftIds:prerequisites.postReroutePricingBlockedAircraftIds,
