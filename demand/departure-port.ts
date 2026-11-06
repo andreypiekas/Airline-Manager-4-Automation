@@ -6,8 +6,8 @@ import { loadReference, type AirportCatalog } from '../optimization/reference-da
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
-import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly } from './rolling-first-page';
-import { inspectIndividualFirstPage } from './rolling-individual-preflight';
+import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly, firstPageFingerprint, nativeWindowFingerprint } from './rolling-first-page';
+import { inspectIndividualFirstPage, type IndividualPreflight } from './rolling-individual-preflight';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
 /** Complete handler grammar observed in Actions 36917592989/36918147380 on 2026-10-01.
@@ -93,7 +93,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private readonly discoveredRollingKeys=new Set<string>();
   /** Native in-flight proof since previous collection; permits read-only settling only. */
   private nativeInflightSincePreviousCollection=false;
-  private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
+  private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0,nativePageRebases:0};
   navigationMetrics(){return {...this.metrics};}
   hasUnassessedNativePages():boolean {
     const window=this.lastRollingWindow;
@@ -116,55 +116,142 @@ export class PlaywrightDeparturePort implements DeparturePort {
     if(this.rollingIndividualMode){
       const postDepartureRecovery=this.nativeInflightSincePreviousCollection;
       this.nativeInflightSincePreviousCollection=false;
-      let pageIndex=0;
-      let unverifiedSkippedWindow=false;
-      let pilot=await inspectIndividualFirstPage(this.page,{
-        timeout:Math.min(this.timeout,8000),
-        maxCandidates:10,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
-        excludedKeys:this.discoveredRollingKeys,
-        postDepartureShortPageRetries:postDepartureRecovery?3:0
-      }).catch((error:unknown)=>{
-        const message=error instanceof Error?error.message:'';
-        if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
-        // Fixed categories only. Playwright exception text can include private
-        // DOM, game URLs and session state, so never log the raw exception.
-        const code=['RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
-          'UI_CONTROL_OBSCURED'].includes(message)?message:
-          /timeout|waiting for|expect\(/i.test(message)?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
-        console.warn('[RollingDispatchInventory] '+JSON.stringify({
-          status:'FIRST_PAGE_READ_ONLY_COLLECTION_FAILED',code,
-          globalComplete:false,mutationAuthorized:false,fullFleetScans:0
-        }));
-        throw Error('ROLLING_FIRST_PAGE_PREFLIGHT_FAILED');
-      });
-      // Each native page contains at most 20 aircraft; inspect up to 10 READY
-      // targets. Empty pages require advancing to the next exact native cursor.
-      // A short page leaves an audit gap even when a later target is verifiable.
+      // Native offset pages are NOT stable when airplanes land while we scan.
+      // Anchor every later-page read to the SAME verified page-one identities,
+      // and reject a repeated aircraft/route across different native pages.
+      // Only read-only navigation is retried; attempts and confirmed departures
+      // remain under the executor's existing persistent safety gates.
+      let pageIndex=0,unverifiedSkippedWindow=false;
+      let pilot!:IndividualPreflight;
+      let scanRestarts=0;
+      const canRebase=()=>this.collectionRetryDeadlineEpochMs===undefined||
+        Date.now()+45000<this.collectionRetryDeadlineEpochMs;
+      for(let sweep=0;sweep<=2;sweep++){
+        pageIndex=0;unverifiedSkippedWindow=false;
+        pilot=await inspectIndividualFirstPage(this.page,{
+          timeout:Math.min(this.timeout,8000),
+          maxCandidates:10,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+          excludedKeys:this.discoveredRollingKeys,
+          postDepartureShortPageRetries:postDepartureRecovery?3:0
+        }).catch((error:unknown)=>{
+          const message=error instanceof Error?error.message:'';
+          if(message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+          const code=['RESEARCH_LIST_CONTROL_UNVERIFIED','RESEARCH_QUOTE_NOT_CLOSED',
+            'UI_CONTROL_OBSCURED'].includes(message)?message:
+            /timeout|waiting for|expect\(/i.test(message)?'UI_WAIT_TIMEOUT':'UNCLASSIFIED';
+          console.warn('[RollingDispatchInventory] '+JSON.stringify({
+            status:'NATIVE_PAGE_READ_ONLY_COLLECTION_FAILED',code,
+            globalComplete:false,mutationAuthorized:false,fullFleetScans:0
+          }));
+          throw Error('ROLLING_FIRST_PAGE_PREFLIGHT_FAILED');
+        });
+        const firstAnchor=pilot.routeTotal!==null&&
+          ['STABLE','SHORT_PAGE'].includes(pilot.window)&&
+          pilot.windowObservedAircraft.length>0
+          ?firstPageFingerprint({total:pilot.routeTotal,cards:pilot.windowObservedAircraft})
+          :null;
+        if(firstAnchor===null)break;
+        const observedPageFingerprints=new Map<number,string>();
+        const observedIds=new Map<string,{routeId:string;registration:string;page:number}>();
+        const observedRoutes=new Map<string,{aircraftId:string;page:number}>();
+        const recordPage=(value:IndividualPreflight,index:number):boolean=>{
+          for(const a of value.windowObservedAircraft){
+            const old=observedIds.get(a.aircraftId);
+            const oldRoute=observedRoutes.get(a.routeId);
+            if((old&&old.page!==index)||
+               (old&&(old.routeId!==a.routeId||old.registration!==a.registration))||
+               (oldRoute&&(oldRoute.page!==index||oldRoute.aircraftId!==a.aircraftId)))
+              return false;
+          }
+          for(const a of value.windowObservedAircraft){
+            observedIds.set(a.aircraftId,{routeId:a.routeId,registration:a.registration,page:index});
+            observedRoutes.set(a.routeId,{aircraftId:a.aircraftId,page:index});
+          }
+          if(value.routeTotal===null)return false;
+          observedPageFingerprints.set(index,firstPageFingerprint({
+            total:value.routeTotal,cards:value.windowObservedAircraft
+          }));
+          return true;
+        };
+        if(!recordPage(pilot,0)){unverifiedSkippedWindow=true;break;}
+        const boundedPages=Math.min(16,Math.ceil(pilot.routeTotal!/20));
+        let changedDuringSweep=false;
+        while(pageIndex+1<boundedPages&&
+          ['STABLE','SHORT_PAGE'].includes(pilot.window)&&
+          pilot.verified===0&&pilot.holds.length===0&&canRebase()){
+          if(pilot.window==='SHORT_PAGE')unverifiedSkippedWindow=true;
+          const previousTotal=pilot.routeTotal;
+          const nextIndex=pageIndex+1;
+          console.log('[RollingNativePageAdvance] '+JSON.stringify({
+            page:nextIndex+1,reason:'NO_NEW_VERIFIED_READY_IN_PREVIOUS_PAGE',
+            batchLimit:10,globalComplete:false,mutationAuthorized:false
+          }));
+          let next:IndividualPreflight;
+          try{
+            next=await inspectIndividualFirstPage(this.page,{
+              timeout:Math.min(this.timeout,8000),pageIndex:nextIndex,maxCandidates:10,
+              deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+              excludedKeys:this.discoveredRollingKeys,
+              expectedFirstPageFingerprint:firstAnchor,
+              expectedVisitedPageFingerprints:observedPageFingerprints
+            });
+          }catch(error){
+            if(error instanceof Error&&
+               error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+            changedDuringSweep=true;break;
+          }
+          if(next.routeTotal!==previousTotal||
+             !['STABLE','SHORT_PAGE'].includes(next.window)||
+             !recordPage(next,nextIndex)){
+            changedDuringSweep=true;break;
+          }
+          pageIndex=nextIndex;
+          pilot=next;
+        }
+        // A landing after the final page was read can change the index
+        // mapping without changing Routes(N). Check the original page-one
+        // anchor once more before calling the bounded sweep exhausted.
+        if(!changedDuringSweep&&pageIndex+1===boundedPages&&
+           pilot.verified===0&&pilot.holds.length===0){
+          if(!canRebase())changedDuringSweep=true;
+          else{
+            try{
+              const closing=await inspectFirstPageReadOnly(
+                this.page,Math.min(this.timeout,8000));
+              if(nativeWindowFingerprint(closing)!==firstAnchor)
+                changedDuringSweep=true;
+            }catch(error){
+              if(error instanceof Error&&
+                 error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+              changedDuringSweep=true;
+            }
+          }
+        }
+        if(changedDuringSweep){
+          if(sweep<2&&canRebase()){
+            scanRestarts++;
+            this.metrics.nativePageRebases++;
+            console.warn('[RollingNativePageRebase] '+JSON.stringify({
+              status:'RESTART_FROM_PAGE_ONE',restart:scanRestarts,maxRestarts:2,
+              reason:'ARRIVAL_OR_PAGINATION_IDENTITY_DRIFT',
+              priorPage:pageIndex+1,departClicked:false,
+              globalComplete:false,mutationAuthorized:false
+            }));
+            continue;
+          }
+          // No evidence from an incomplete/churning sweep can authorize Depart.
+          unverifiedSkippedWindow=true;
+          pilot={...pilot,window:'UNVERIFIED',verified:0,verifiedAircraft:[],
+            holds:[{code:'WINDOW_UNVERIFIED'}]};
+          console.warn('[RollingNativePageRebase] '+JSON.stringify({
+            status:'HOLD_CHURN_LIMIT',restarts:scanRestarts,maxRestarts:2,
+            departClicked:false,globalComplete:false,mutationAuthorized:false
+          }));
+        }
+        break;
+      }
       const boundedPages=pilot.routeTotal===null?1:
         Math.min(16,Math.ceil(pilot.routeTotal/20));
-      while(pageIndex+1<boundedPages&&
-        ['STABLE','SHORT_PAGE'].includes(pilot.window)&&
-        pilot.verified===0&&pilot.holds.length===0&&
-        (this.collectionRetryDeadlineEpochMs===undefined||
-          Date.now()+45000<this.collectionRetryDeadlineEpochMs)){
-        if(pilot.window==='SHORT_PAGE')unverifiedSkippedWindow=true;
-        const priorTotal=pilot.routeTotal;
-        pageIndex++;
-        console.log('[RollingNativePageAdvance] '+JSON.stringify({
-          page:pageIndex+1,reason:'NO_READY_IN_PREVIOUS_PAGE',
-          batchLimit:10,globalComplete:false,mutationAuthorized:false
-        }));
-        const next=await inspectIndividualFirstPage(this.page,{
-          timeout:Math.min(this.timeout,8000),pageIndex,maxCandidates:10,
-          deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
-          excludedKeys:this.discoveredRollingKeys
-        });
-        if(next.routeTotal!==priorTotal||
-           !['STABLE','SHORT_PAGE'].includes(next.window)){
-          unverifiedSkippedWindow=true;pilot=next;break;
-        }
-        pilot=next;
-      }
       for(const a of pilot.verifiedAircraft)
         this.discoveredRollingKeys.add(a.aircraftId+':'+a.routeId);
       const shortNoReadyObserved=pilot.window==='SHORT_PAGE' && pilot.readyCandidates===0 &&
@@ -172,10 +259,14 @@ export class PlaywrightDeparturePort implements DeparturePort {
         pilot.windowObservedAircraft.length>0 &&
         pilot.windowObservedAircraft.every(a=>a.state!=='ready');
       const scanExhaustedVerified=!unverifiedSkippedWindow&&
+        pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
         pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
         pilot.verified===0&&pilot.holds.length===0;
+      // Page one is not proof of idleness if there are additional native pages,
+      // including when the run budget expires before those pages can be read.
       const noReadyVerified=pageIndex===0&&pilot.window==='STABLE' && pilot.readyCandidates===0 &&
-        pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
+        pilot.holds.length===0 && pilot.routeTotal!==null &&
+        pilot.routeTotal>0&&pilot.routeTotal<=20;
       const verifiedWindow=scanExhaustedVerified||(['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
@@ -184,6 +275,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
       console.log('[RollingDispatchInventory] '+JSON.stringify({
         status:noReadyVerified?'NO_READY_ON_VERIFIED_FIRST_PAGE':verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
         nativePage:pageIndex+1,batchLimit:10,priorPageGap:unverifiedSkippedWindow,
+        sweepRestarts:scanRestarts,
         inspected:pilot.inspected,ready:pilot.readyCandidates,verified:pilot.verified,
         heldTargets:pilot.holds.length,
         heading:pilot.routeTotal,globalComplete:false,

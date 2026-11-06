@@ -39,6 +39,14 @@ export function firstPageFingerprint(sample: Pick<WindowSample, 'total' | 'cards
   ])]);
 }
 
+/** Read-only anchor for a native window. No cursor is saved or replayed. */
+export function nativeWindowFingerprint(observation:FirstPageObservation):string|null {
+  if(!['STABLE','SHORT_PAGE'].includes(observation.status)||
+     observation.routeTotal===null||observation.visible!==observation.aircraft.length)
+    return null;
+  return firstPageFingerprint({total:observation.routeTotal,cards:observation.aircraft});
+}
+
 async function sampleFirstPage(page: Page, timeout: number, pageIndex=0): Promise<WindowSample | null> {
   await assertNoInteractiveChallenge(page, 'first-page-pilot:sample');
   // A previously opened page can still be loading: a nonempty old roster
@@ -287,15 +295,30 @@ export async function inspectFirstPageReadOnly(
  * A page returned by this helper is a read-only observation, not a click gate.
  */
 export async function inspectNativeIndexedPageReadOnly(
-  page:Page,pageIndex:number,timeout=10000
+  page:Page,pageIndex:number,timeout=10000,
+  expectedFirstPageFingerprint?:string,
+  expectedVisitedPageFingerprints?:ReadonlyMap<number,string>
 ):Promise<FirstPageObservation>{
   if(!Number.isSafeInteger(pageIndex)||pageIndex<0||pageIndex>63)
     throw Error('NATIVE_PAGE_INDEX_INVALID');
-  if(pageIndex===0)return inspectFirstPageReadOnly(page,timeout);
+  if(pageIndex===0){
+    const first=await inspectFirstPageReadOnly(page,timeout);
+    return expectedFirstPageFingerprint!==undefined&&
+      nativeWindowFingerprint(first)!==expectedFirstPageFingerprint
+        ?{...first,status:'UNSTABLE',aircraft:[],ready:0}:first;
+  }
   const first=await inspectFirstPageReadOnly(page,timeout);
   const blank=(status:FirstPageObservation['status']):FirstPageObservation=>({
     status,routeTotal:first.routeTotal,visible:0,ready:0,aircraft:[],mutationAuthorized:false
   });
+  if(expectedFirstPageFingerprint!==undefined&&
+     nativeWindowFingerprint(first)!==expectedFirstPageFingerprint){
+    console.warn('[RollingNativePageDrift] '+JSON.stringify({
+      reason:'FIRST_PAGE_ANCHOR_CHANGED',targetPage:pageIndex+1,
+      globalComplete:false,mutationAuthorized:false
+    }));
+    return blank('UNSTABLE');
+  }
   if(!['STABLE','SHORT_PAGE'].includes(first.status)||first.routeTotal===null||
      first.routeTotal<=pageIndex*20)return blank('UI_UNVERIFIED');
   let previousId=first.aircraft[0]?.routeId;
@@ -319,6 +342,14 @@ export async function inspectNativeIndexedPageReadOnly(
     const sample=await sampleFirstPage(page,timeout,i+1);
     if(!sample||sample.invalid||!sample.cursorVerified||!sample.cards.length||
        sample.total!==first.routeTotal)return blank('UI_UNVERIFIED');
+    const anchored=expectedVisitedPageFingerprints?.get(i+1);
+    if(anchored!==undefined&&anchored!==firstPageFingerprint(sample)){
+      console.warn('[RollingNativePageDrift] '+JSON.stringify({
+        reason:'PREVIOUSLY_VISITED_PAGE_CHANGED',page:i+2,
+        targetPage:pageIndex+1,globalComplete:false,mutationAuthorized:false
+      }));
+      return blank('UNSTABLE');
+    }
     previousId=sample.cards[0].routeId;
   }
   const a=await sampleFirstPage(page,timeout,pageIndex);
