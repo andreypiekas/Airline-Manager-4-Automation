@@ -265,8 +265,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
       const terminalNonstandardNoReadyObserved=shortNoReadyObserved&&
         pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
         pageIndex+1===boundedPages&&pilot.windowObservedAircraft.length<=20&&
-        pilot.windowObservedAircraft.every(a=>/^[1-9]\\d*$/.test(a.aircraftId)&&
-          /^[1-9]\\d*$/.test(a.routeId)&&!!a.registration&&a.state!=='ready');
+        pilot.windowObservedAircraft.every(a=>/^[1-9]\d*$/.test(a.aircraftId)&&
+          /^[1-9]\d*$/.test(a.routeId)&&!!a.registration&&a.state!=='ready');
       const scanExhaustedVerified=!unverifiedSkippedWindow&&
         pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
         pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
