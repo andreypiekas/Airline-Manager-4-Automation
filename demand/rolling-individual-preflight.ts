@@ -32,6 +32,8 @@ export interface IndividualPreflight {
 export async function inspectIndividualFirstPage(
   page:Page,
   options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;pageIndex?:number;
+    /** Expected native page-one identity/order from this discovery sweep. */
+    expectedFirstPageFingerprint?:string;
     excludedKeys?:ReadonlySet<string>;
     /** Extra read-only Fleet-first-page checks only after native in-flight confirmation. */
     postDepartureShortPageRetries?:number}={}
@@ -39,7 +41,8 @@ export async function inspectIndividualFirstPage(
   const timeout=options.timeout??4000,limit=options.maxCandidates??2,deadline=options.deadlineEpochMs;
   const pageIndex=options.pageIndex??0;
   const readPage=()=>pageIndex===0?inspectFirstPageReadOnly(page,timeout):
-    inspectNativeIndexedPageReadOnly(page,pageIndex,timeout);
+    inspectNativeIndexedPageReadOnly(
+      page,pageIndex,timeout,options.expectedFirstPageFingerprint);
   const postRetries=options.postDepartureShortPageRetries??0;
   if(!Number.isSafeInteger(timeout)||timeout<100||timeout>30000||
     !Number.isSafeInteger(limit)||limit<1||limit>20||
