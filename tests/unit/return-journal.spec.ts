@@ -515,7 +515,8 @@ test('run #1559: quarantine journal exposes fixed rejection reason without relea
   const prior:any={entries:[{status:'outcome_unknown',aircraftId:'9',registration:'UNCERTAIN',
     routeId:'99',from:'AAA',to:'BBB',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:UNCLASSIFIED'}]};
   expect(await appendUncertainDepartures(directory,'company-test','1599',prior,now)).toBe(1);
-  const future=new Date('2026-09-30T11:20:00.000Z');
+  // A strictly fresh snapshot is required: the production resolver caps age at 30 s.
+  const future=new Date('2026-09-30T11:15:10.000Z');
   const good:any={aircraftId:'9',routeId:'99',registration:'UNCERTAIN',
     routeLabel:'AAA - BBB',from:'AAA',to:'BBB',state:'ready',
     capacity:{Y:100,J:0,F:0},remaining:{Y:70,J:0,F:0},
