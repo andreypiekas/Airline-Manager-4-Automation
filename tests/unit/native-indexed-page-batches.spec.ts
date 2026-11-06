@@ -38,16 +38,10 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
       "Ajax('routes.php?start="+(offset-20)+"&sort=','routeAction',this);");nav.append(prev);}
     if(offset+20<total){const next=document.createElement('a');next.textContent='Next';next.setAttribute('onclick',
       "Ajax('routes.php?start="+(badNext?999:offset+20)+"&sort=','routeAction',this);");nav.append(next);}
-    nav.addEventListener('click',event=>{
-      const e=event.target as HTMLElement;if(e.tagName==='A'){
-        event.preventDefault();
-        const callback=e.getAttribute('onclick')||'';
-        const m=callback.match(/start=(\d+)/);if(m)show(Number(m[1]));
-      }
-    });
     div.append(nav);document.getElementById('routeAction')!.append(div);
   };
   w.menuFleet=()=>show(0);
+  w.Ajax=(url:string)=>{const m=url.match(/start=(\\d+)/);if(m)show(Number(m[1]));};
  },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered});
 }
 
