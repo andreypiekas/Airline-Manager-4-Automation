@@ -2,7 +2,7 @@ import { test,expect,type Page } from '@playwright/test';
 import { inspectNativeIndexedPageReadOnly } from '../../demand/rolling-first-page';
 import { PlaywrightDeparturePort } from '../../demand/departure-port';
 
-async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean;churnMode?:'once'|'continuous'|'overlap'}={}){
+async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean;churnMode?:'once'|'continuous'|'overlap'|'last-once'}={}){
  const total=opts.total??47;
  await page.route('**/*',route=>route.abort());
  await page.setContent('<button id="mapRoutes" onclick="hideAllWhenClick();menuFleet(\'Routes\');">Fleet</button><div id="routeAction"></div>');
@@ -10,7 +10,8 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
   const w=window as any;w.pageReads=[];w.departCalls=0;w.churn=0;
   w.hideAllWhenClick=()=>{};
   const show=(offset:number)=>{
-    if(offset===20)w.churn++;
+    if(offset===20&&churnMode!=='last-once')w.churn++;
+    if(offset===40&&churnMode==='last-once'&&w.churn===0)w.churn=1;
     w.pageReads.push(offset);let index=offset/20;
     const prior=document.getElementById('routesContainer');
     prior?.remove();
@@ -126,6 +127,17 @@ test('middle page reorders but first page and Routes(N) stay fixed: still rebase
  expect(result).toMatchObject({complete:false,expectedRoutes:47,
    windowPageIndex:2,windowScanExhaustedVerified:true,
    observationScope:'native-individual-page',aircraft:[],warnings:[]});
+ expect(port.navigationMetrics().nativePageRebases).toBe(1);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
+
+test('landing after final native page read invalidates completion and rebases safely',async({page})=>{
+ await pages(page,{churnMode:'last-once'});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({complete:false,expectedRoutes:47,
+   windowPageIndex:2,windowScanExhaustedVerified:true,
+   observationScope:'native-individual-page',warnings:[]});
  expect(port.navigationMetrics().nativePageRebases).toBe(1);
  expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
 });
