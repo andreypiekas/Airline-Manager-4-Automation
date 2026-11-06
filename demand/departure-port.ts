@@ -95,6 +95,14 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private nativeInflightSincePreviousCollection=false;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
   navigationMetrics(){return {...this.metrics};}
+  hasUnassessedNativePages():boolean {
+    const window=this.lastRollingWindow;
+    if(!this.rollingIndividualMode||!window||
+       window.windowScanExhaustedVerified===true||window.expectedRoutes===null)
+      return false;
+    return window.expectedRoutes>(window.windowPageIndex??0)*20+20||
+      (window.windowReadyCandidates??0)>window.aircraft.length;
+  }
   constructor(private readonly page:Page,private readonly timeout=15000,
     private readonly collectionRetryDeadlineEpochMs?:number,
     private readonly verifiedEarlierFleet?:CollectionResult,
