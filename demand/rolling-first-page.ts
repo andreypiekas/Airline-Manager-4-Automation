@@ -296,7 +296,8 @@ export async function inspectFirstPageReadOnly(
  */
 export async function inspectNativeIndexedPageReadOnly(
   page:Page,pageIndex:number,timeout=10000,
-  expectedFirstPageFingerprint?:string
+  expectedFirstPageFingerprint?:string,
+  expectedVisitedPageFingerprints?:ReadonlyMap<number,string>
 ):Promise<FirstPageObservation>{
   if(!Number.isSafeInteger(pageIndex)||pageIndex<0||pageIndex>63)
     throw Error('NATIVE_PAGE_INDEX_INVALID');
@@ -341,6 +342,14 @@ export async function inspectNativeIndexedPageReadOnly(
     const sample=await sampleFirstPage(page,timeout,i+1);
     if(!sample||sample.invalid||!sample.cursorVerified||!sample.cards.length||
        sample.total!==first.routeTotal)return blank('UI_UNVERIFIED');
+    const anchored=expectedVisitedPageFingerprints?.get(i+1);
+    if(anchored!==undefined&&anchored!==firstPageFingerprint(sample)){
+      console.warn('[RollingNativePageDrift] '+JSON.stringify({
+        reason:'PREVIOUSLY_VISITED_PAGE_CHANGED',page:i+2,
+        targetPage:pageIndex+1,globalComplete:false,mutationAuthorized:false
+      }));
+      return blank('UNSTABLE');
+    }
     previousId=sample.cards[0].routeId;
   }
   const a=await sampleFirstPage(page,timeout,pageIndex);
