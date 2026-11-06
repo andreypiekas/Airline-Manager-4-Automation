@@ -237,8 +237,11 @@ export class PlaywrightDeparturePort implements DeparturePort {
         pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
         pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
         pilot.verified===0&&pilot.holds.length===0;
+      // Page one is not proof of idleness if there are additional native pages,
+      // including when the run budget expires before those pages can be read.
       const noReadyVerified=pageIndex===0&&pilot.window==='STABLE' && pilot.readyCandidates===0 &&
-        pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
+        pilot.holds.length===0 && pilot.routeTotal!==null &&
+        pilot.routeTotal>0&&pilot.routeTotal<=20;
       const verifiedWindow=scanExhaustedVerified||(['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
