@@ -532,7 +532,7 @@ test('run #1559: quarantine journal exposes fixed rejection reason without relea
   expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
     directory,'company-test',{...good,observedAt:now.toISOString()},
     future,c=>codes.push(c))).toBe(false);
-  expect(codes).toEqual(['LIVE_EVIDENCE_NOT_NEWER']);
+  expect(codes).toEqual(['LIVE_READY_EVIDENCE_INVALID']);
   expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(true);
   codes.length=0;
   expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
