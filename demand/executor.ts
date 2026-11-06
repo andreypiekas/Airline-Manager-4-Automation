@@ -4,7 +4,7 @@ import type { AdaptiveThreshold } from './adaptive-threshold';
 import { estimatedGrossTicketRevenue } from './revenue';
 import { MUTATION_COMPLETION_RESERVE_MS } from '../utils/run-time-budget';
 import { orderVerifiedDepartureCandidates } from './rolling-first-page-priority';
-import { verifiedPostDispatchShortTail } from './rolling-tail-reconciliation';
+import { verifiedPostDispatchShortTail, type ShortTailRejectionCode } from './rolling-tail-reconciliation';
 
 export interface CurrentRouteFuelEvidence {
   aircraftId:string;routeId:string;from:string;to:string;fuelLbs:number;observedAt:string;
@@ -516,8 +516,12 @@ export class IndividualDepartureExecutor {
     if(!verifiedRollingWindow(nextWindow)){
       const confirmed=new Set(report.entries.filter(e=>e.status==='departed')
         .map(e=>e.aircraftId+':'+e.routeId));
-      if(!report.halted && report.summary.unknown===0 &&
-         verifiedPostDispatchShortTail(initial,nextWindow,confirmed)){
+      let tailRejection:ShortTailRejectionCode|null=null;
+      const tailReconciled=!report.halted && report.summary.unknown===0 &&
+        verifiedPostDispatchShortTail(initial,nextWindow,confirmed,reason=>{
+          tailRejection=reason;
+        });
+      if(tailReconciled){
         report.postDispatchShortTailReconciled=true;
         console.log('[RollingFirstPageCycle] '+JSON.stringify({
           status:'CONFIRMED_DEPARTED_CARDS_EXPLAIN_SHORT_TAIL',
@@ -526,6 +530,16 @@ export class IndividualDepartureExecutor {
           mutationAuthorized:false,globalFleetScans:0
         }));
         break;
+      }
+      if(nextWindow.windowShortNoReadyObserved){
+        console.warn('[RollingShortTailDiagnostic] '+JSON.stringify({
+          status:'UNRECONCILED',reason:tailRejection??'UNVERIFIED_PREVIOUS_RESULT',
+          beforeCards:initial.windowObservedAircraft?.length??null,
+          afterCards:nextWindow.windowObservedAircraft?.length??null,
+          beforeReady:initial.windowReadyCandidates??null,
+          confirmedDepartures:confirmed.size,afterReady:nextWindow.windowReadyCandidates??null,
+          globalComplete:false,mutationAuthorized:false
+        }));
       }
       report.rollingWindowUnverified=true;
       console.warn('[RollingFirstPageCycle] '+JSON.stringify({
