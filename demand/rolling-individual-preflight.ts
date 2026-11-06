@@ -32,6 +32,7 @@ export interface IndividualPreflight {
 export async function inspectIndividualFirstPage(
   page:Page,
   options:{timeout?:number;maxCandidates?:number;deadlineEpochMs?:number;pageIndex?:number;
+    excludedKeys?:ReadonlySet<string>;
     /** Extra read-only Fleet-first-page checks only after native in-flight confirmation. */
     postDepartureShortPageRetries?:number}={}
 ):Promise<IndividualPreflight>{
@@ -104,7 +105,8 @@ export async function inspectIndividualFirstPage(
   report.windowObservedAircraft=first.aircraft.map(a=>({...a}));
   const candidates=first.aircraft.filter(a=>a.state==='ready');
   report.readyCandidates=candidates.length;
-  for(const candidate of candidates.slice(0,limit)){
+  for(const candidate of candidates.filter(a=>!options.excludedKeys?.has(
+    a.aircraftId+':'+a.routeId)).slice(0,limit)){
     if(!budget()){report.holds.push({code:'TIME_BUDGET'});break;}
     report.inspected++;
     try{
