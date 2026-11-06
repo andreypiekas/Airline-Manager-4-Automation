@@ -41,6 +41,7 @@ export function scopedFirstPageOutcomeDiagnostic(report:ExecutionReport){
   return {evaluated:report.summary.evaluated,departed:report.summary.departed,
     held:report.summary.held,unknown:report.summary.unknown,
     windowUnverified:report.rollingWindowUnverified===true,
+    partialTerminalCoverage:report.rollingTerminalPartialCoverage===true,
     postDispatchShortTailReconciled:report.postDispatchShortTailReconciled===true,
     byCause,globalFleetCompleteClaim:false};
 }
@@ -49,7 +50,12 @@ export function scopedFirstPageOutcomeDiagnostic(report:ExecutionReport){
  * it NEVER means the full fleet was inspected, idle or reconciled. */
 export function assertScopedFirstPageOutcome(report:ExecutionReport):void {
   console.log('[ScopedFirstPageOutcome] '+JSON.stringify(scopedFirstPageOutcomeDiagnostic(report)));
-  if(report.dryRun||report.halted||report.rollingWindowUnverified===true||!report.completedAt||report.summary.unknown>0||
+  const partial=report.rollingTerminalPartialCoverage===true&&
+    report.rollingWindowUnverified===true&&report.summary.departed>0&&
+    report.summary.unknown===0&&report.halted===false;
+  if(report.dryRun||report.halted||
+    (report.rollingWindowUnverified===true&&!partial)||!report.completedAt||
+    report.summary.unknown>0||
     (report.summary.evaluated===0&&report.firstPageNoReadyVerified!==true)||
     report.entries.length!==report.summary.evaluated)
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
@@ -65,4 +71,11 @@ export function assertScopedFirstPageOutcome(report:ExecutionReport):void {
     // unclear departure controls or unknown results cannot be green.
     throw Error('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
   }
+  // A confirmed-flight outcome can be safely completed in the native
+  // VERIFIED-WINDOW scope even when the later native page length differs
+  // from Routes(N). This is explicitly PARTIAL, never global completion.
+  // Only after all entries were checked for unknown or unverified holds.
+  if(partial)console.warn('::warning title=PARTIAL_NATIVE_FLEET_COVERAGE::'+
+    'Voos confirmados e nenhum resultado incerto. Ultima pagina sem READY, mas '+ 
+    'quantidade divergente; cobertura total da frota NAO verificada.');
 }

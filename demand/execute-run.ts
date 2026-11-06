@@ -163,6 +163,10 @@ export async function runDemandExecution(
     await writeFile(join(directory,'execution-report.md'),[
       `# Decolagens individuais — ${report.dryRun?'simulacao':'execucao real'}`,'',
       `Escopo: qualquer aeronave pronta em uma rota existente, independentemente do aeroporto/base atual. Avaliadas: ${report.summary.evaluated}; decolagens confirmadas: ${report.summary.departed}; simuladas: ${report.summary.simulated}; retidas: ${report.summary.held}; resultado incerto: ${report.summary.unknown}.`,'',
+      ...(report.rollingTerminalPartialCoverage?
+        ['**Cobertura parcial:** voos confirmados individualmente. A última página nativa tinha zero aeronaves READY verificadas, mas a contagem de cartões divergiu do cabeçalho. O estado das demais páginas permanece NÃO VERIFICADO.','']:
+        report.rollingWindowUnverified?
+          ['**Cobertura não verificada:** o resultado não comprova processamento de todas as páginas.','']:[]),
       '| Aeronave | Trecho | Estado | Motivo |','| --- | --- | --- | --- |',
       ...report.entries.map(e=>`| ${safe(e.registration)} | ${safe(e.from)} → ${safe(e.to)} | ${e.status} | ${safe(e.reason)} |`),'',
       'A cobertura por demanda nao e previsao de ocupacao. Embarque observado consta no JSON apos a decolagem.',

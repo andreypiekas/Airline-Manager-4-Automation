@@ -109,3 +109,46 @@ test('production #1374: confirmed departure plus unverifiable next window remain
  expect(d.windowUnverified).toBe(true);
  expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
 });
+
+test('production #1568: 25 verified departures and one demand hold with nonstandard terminal page is explicitly partial, not failed flights',()=>{
+ const r=report('departed','NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED');
+ r.entries=Array.from({length:25},(_,i)=>({
+   ...entry('departed','NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED'),
+   aircraftId:String(i+1),routeId:String(i+100)
+ }));
+ r.entries.push({
+   ...entry('held','Insufficient demand'),
+   aircraftId:'99',routeId:'999',
+   demand:{decision:'hold_insufficient'} as NonNullable<ExecutionReport['entries'][number]['demand']>
+ });
+ r.summary={evaluated:26,departed:25,held:1,unknown:0,simulated:0};
+ r.rollingWindowUnverified=true;
+ r.rollingTerminalPartialCoverage=true;
+ expect(scopedFirstPageOutcomeDiagnostic(r)).toMatchObject({
+   windowUnverified:true,partialTerminalCoverage:true,
+   globalFleetCompleteClaim:false,
+   byCause:{CONFIRMED_DEPARTURE:25,VERIFIED_DEMAND_HOLD:1}
+ });
+ expect(()=>assertScopedFirstPageOutcome(r)).not.toThrow();
+ // It NEVER accepts a new unknown click or an unverified ready target.
+ r.summary.unknown=1;
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+ r.summary.unknown=0;
+ r.entries[25].demand=null;
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+ r.entries.pop();
+ r.summary={evaluated:25,departed:25,held:0,unknown:0,simulated:0};
+ r.rollingTerminalPartialCoverage=false;
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});
+
+test('terminal page partial scope cannot turn a no-departure or halted run green',()=>{
+ const r=report('held','FUEL_STOCK_INSUFFICIENT_BY_VERIFIED_HISTORY');
+ r.rollingWindowUnverified=true;
+ r.rollingTerminalPartialCoverage=true;
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+ r.entries=[entry('departed','NATIVE_INFLIGHT_IDENTITY_COUNTDOWN_AND_ONBOARD_CONFIRMED')];
+ r.summary={evaluated:1,departed:1,held:0,unknown:0,simulated:0};
+ r.halted=true;
+ expect(()=>assertScopedFirstPageOutcome(r)).toThrow('FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED');
+});

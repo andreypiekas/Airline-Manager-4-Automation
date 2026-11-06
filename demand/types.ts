@@ -74,6 +74,9 @@ export interface CollectionResult {
   windowObservedAircraft?: Array<{aircraftId:string;routeId:string;registration:string;state:AircraftState}>;
   /** A double-read short native page with no ready targets; NOT a complete page. */
   windowShortNoReadyObserved?: boolean;
+  /** Final native page is double-read, all cards are non-READY, but native
+   * count differs from Routes(N); indicates PARTIAL coverage, never idle fleet. */
+  windowTerminalNonstandardNoReadyObserved?: boolean;
   aircraft: AircraftSnapshot[];
   complete: boolean;
   expectedRoutes: number | null;

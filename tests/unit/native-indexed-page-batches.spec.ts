@@ -2,11 +2,11 @@ import { test,expect,type Page } from '@playwright/test';
 import { inspectNativeIndexedPageReadOnly } from '../../demand/rolling-first-page';
 import { PlaywrightDeparturePort } from '../../demand/departure-port';
 
-async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean;churnMode?:'once'|'continuous'|'overlap'|'last-once'}={}){
+async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean;extraLast?:boolean;churnMode?:'once'|'continuous'|'overlap'|'last-once'}={}){
  const total=opts.total??47;
  await page.route('**/*',route=>route.abort());
  await page.setContent('<button id="mapRoutes" onclick="hideAllWhenClick();menuFleet(\'Routes\');">Fleet</button><div id="routeAction"></div>');
- await page.evaluate(({total,readyPage,badNext,reordered,churnMode})=>{
+ await page.evaluate(({total,readyPage,badNext,reordered,churnMode,extraLast})=>{
   const w=window as any;w.pageReads=[];w.departCalls=0;w.churn=0;
   w.hideAllWhenClick=()=>{};
   const show=(offset:number)=>{
@@ -18,7 +18,7 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
     const div=document.createElement('div');div.id='routesContainer';
     const heading=document.createElement('button');
     heading.textContent='Routes ('+total+')';div.append(heading);
-    const count=Math.min(20,total-offset);
+    const count=Math.min(20,total-offset)+(extraLast&&offset+20>=total?1:0);
     const sequence=Array.from({length:count},(_,i)=>offset+i+1);
     if(churnMode&&churnMode!=='overlap'&&index===0&&w.churn>0){
       const rotation=churnMode==='continuous'?w.churn%20:1;
@@ -49,7 +49,7 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
   };
   w.menuFleet=()=>show(0);
   w.Ajax=(url:string)=>{const m=url.match(/start=(\d+)/);if(m)show(Number(m[1]));};
- },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered,churnMode:opts.churnMode??null});
+ },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered,churnMode:opts.churnMode??null,extraLast:!!opts.extraLast});
 }
 
 test('native pagination discovers page two of a 47-aircraft roster without any Depart click',async({page})=>{
@@ -139,5 +139,19 @@ test('landing after final native page read invalidates completion and rebases sa
    windowPageIndex:2,windowScanExhaustedVerified:true,
    observationScope:'native-individual-page',warnings:[]});
  expect(port.navigationMetrics().nativePageRebases).toBe(1);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
+
+test('run #1568: stable terminal 8-card response to Routes(47) is a scoped warning with no READY, never complete Fleet',async({page})=>{
+ await pages(page,{extraLast:true});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({
+   expectedRoutes:47,windowPageIndex:2,complete:false,
+   windowReadyCandidates:0,windowTerminalNonstandardNoReadyObserved:true,
+   windowScanExhaustedVerified:false,aircraft:[],
+   warnings:['ROLLING_WINDOW_UNVERIFIED']
+ });
+ expect(port.navigationMetrics().fullFleetScans).toBe(0);
  expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
 });
