@@ -34,9 +34,9 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
       div.append(row);
     }
     const nav=document.createElement('ul');nav.className='pagination';
-    if(offset>0){const prev=document.createElement('a');prev.textContent='Previous';prev.setAttribute('onclick',
+    if(offset>0){const prev=document.createElement('a');prev.href='#';prev.textContent='Previous';prev.setAttribute('onclick',
       "Ajax('routes.php?start="+(offset-20)+"&sort=','routeAction',this);");nav.append(prev);}
-    if(offset+20<total){const next=document.createElement('a');next.textContent='Next';next.setAttribute('onclick',
+    if(offset+20<total){const next=document.createElement('a');next.href='#';next.textContent='Next';next.setAttribute('onclick',
       "Ajax('routes.php?start="+(badNext?999:offset+20)+"&sort=','routeAction',this);");nav.append(next);}
     div.append(nav);document.getElementById('routeAction')!.append(div);
   };
