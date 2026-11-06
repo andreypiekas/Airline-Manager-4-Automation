@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { AircraftSnapshot, CollectionResult } from '../demand/types';
-import { inspectFirstPageReadOnly } from '../demand/rolling-first-page';
+import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly } from '../demand/rolling-first-page';
 import { DemandReader } from '../demand/reader';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 import type { AirportCatalog } from './reference-data';
@@ -24,7 +24,7 @@ export function selectVerifiedRollingFuelTarget(
   collection:CollectionResult|null,expected:AircraftSnapshot
 ):AircraftSnapshot|null {
   if(!collection||collection.complete!==false||
-    collection.observationScope!=='native-individual-first-page'||
+    !['native-individual-first-page','native-individual-page'].includes(collection.observationScope||'')||
     collection.expectedRoutes===null||!Number.isSafeInteger(collection.expectedRoutes)||
     collection.expectedRoutes<collection.aircraft.length||
     collection.aircraft.length<1||collection.aircraft.length>20||
@@ -125,10 +125,11 @@ export async function restoreRollingFuelFirstPage(page:Page,timeout:number):Prom
  */
 export async function readVerifiedRollingCurrentRouteFuel(
   page:Page,expected:AircraftSnapshot,airports:AirportCatalog,
-  expectedRouteTotal:number,timeout=10000
+  expectedRouteTotal:number,timeout=10000,pageIndex=0
 ):Promise<IndividualCurrentRouteFuelQuote|null>{
   if(!Number.isSafeInteger(timeout)||timeout<1||timeout>30000||
     !Number.isSafeInteger(expectedRouteTotal)||expectedRouteTotal<1||
+    !Number.isSafeInteger(pageIndex)||pageIndex<0||pageIndex>63||
     ![1,2].includes(airports.schemaVersion)||!Array.isArray(airports.airports))
     return null;
   const refs=airports.airports.filter(a=>a.iata===expected.to&&!a.conflict&&
@@ -139,7 +140,7 @@ export async function readVerifiedRollingCurrentRouteFuel(
   let challengeDetected=false;
   let rerouteNavigationAttempted=false;
   try{
-    const first=await inspectFirstPageReadOnly(page,timeout);
+    const first=await inspectNativeIndexedPageReadOnly(page,pageIndex,timeout);
     if(!['STABLE','SHORT_PAGE'].includes(first.status)||
       first.routeTotal!==expectedRouteTotal||
       first.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
