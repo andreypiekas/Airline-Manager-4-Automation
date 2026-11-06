@@ -1,4 +1,4 @@
-import { type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { aircraftIdFromDetailsControl } from './identity';
 import { openFleetList, nativeFleetLoaderVisible } from './navigation';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
@@ -39,7 +39,7 @@ export function firstPageFingerprint(sample: Pick<WindowSample, 'total' | 'cards
   ])]);
 }
 
-async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSample | null> {
+async function sampleFirstPage(page: Page, timeout: number, pageIndex=0): Promise<WindowSample | null> {
   await assertNoInteractiveChallenge(page, 'first-page-pilot:sample');
   // A previously opened page can still be loading: a nonempty old roster
   // cannot be used as an independent stable identity observation.
@@ -136,9 +136,14 @@ async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSampl
   }
   const next = page.locator('#routesContainer .pagination').getByRole('link', { name:'Next', exact:true });
   const nextCount = await next.count();
-  const cursorVerified = total <= 20 ? nextCount === 0 : nextCount === 1 &&
-    (await next.getAttribute('onclick') || '').replace(/\s/g, '') ===
-      "Ajax('routes.php?start=20&sort=','routeAction',this);";
+  const nextCallback="Ajax('routes.php?start="+((pageIndex+1)*20)+"&sort=','routeAction',this);";
+  const previous=page.locator('#routesContainer .pagination').getByRole('link',{name:'Previous',exact:true});
+  const nextExpected=total>(pageIndex+1)*20;
+  const cursorVerified=(pageIndex===0?await previous.count()===0:
+    await previous.count()===1&&await previous.isVisible()) &&
+    (nextExpected?nextCount===1&&await next.isVisible()&&
+      (await next.getAttribute('onclick')||'').replace(/\s/g,'')===nextCallback
+      :nextCount===0);
   if(!cursorVerified)reject('FIRST_PAGE_CURSOR_UNVERIFIED');
   if(invalid||!cursorVerified)console.warn('[FirstPageReadOnlyDiagnostic] '+JSON.stringify({
     status:'HOLD_FIRST_PAGE_IDENTITY_OR_CURSOR',
@@ -273,6 +278,58 @@ export async function inspectFirstPageReadOnly(
     ready:first.cards.filter(a => a.state === 'ready').length,
     aircraft:first.cards, mutationAuthorized:false
   };
+}
+
+/**
+ * Bounded native page navigation: each request starts again at page 1.
+ * Clicks ONLY the game's exact Next(start=20,40,...) links and validates each
+ * transition from fresh DOM evidence. Never caches a cursor or clicks Depart.
+ * A page returned by this helper is a read-only observation, not a click gate.
+ */
+export async function inspectNativeIndexedPageReadOnly(
+  page:Page,pageIndex:number,timeout=10000
+):Promise<FirstPageObservation>{
+  if(!Number.isSafeInteger(pageIndex)||pageIndex<0||pageIndex>63)
+    throw Error('NATIVE_PAGE_INDEX_INVALID');
+  if(pageIndex===0)return inspectFirstPageReadOnly(page,timeout);
+  const first=await inspectFirstPageReadOnly(page,timeout);
+  const blank=(status:FirstPageObservation['status']):FirstPageObservation=>({
+    status,routeTotal:first.routeTotal,visible:0,ready:0,aircraft:[],mutationAuthorized:false
+  });
+  if(!['STABLE','SHORT_PAGE'].includes(first.status)||first.routeTotal===null||
+     first.routeTotal<=pageIndex*20)return blank('UI_UNVERIFIED');
+  let previousId=first.aircraft[0]?.routeId;
+  for(let i=0;i<pageIndex;i++){
+    await assertNoInteractiveChallenge(page,'native-indexed-page:before-next');
+    const next=page.locator('#routesContainer .pagination')
+      .getByRole('link',{name:'Next',exact:true});
+    const callback="Ajax('routes.php?start="+((i+1)*20)+"&sort=','routeAction',this);";
+    if(await next.count()!==1||!await next.isVisible()||
+       (await next.getAttribute('onclick')||'').replace(/\s/g,'')!==callback)
+      return blank('UI_UNVERIFIED');
+    await next.click({timeout});
+    await expect.poll(
+      ()=>page.locator('#routesContainer [id^="routeMainList"]')
+        .evaluateAll(es=>es.find(e=>!!e.getClientRects().length)?.id||''),
+      {timeout}
+    ).not.toBe('routeMainList'+previousId);
+    await expect.poll(
+      ()=>nativeFleetLoaderVisible(page),{timeout}
+    ).toBe(false);
+    const sample=await sampleFirstPage(page,timeout,i+1);
+    if(!sample||sample.invalid||!sample.cursorVerified||!sample.cards.length||
+       sample.total!==first.routeTotal)return blank('UI_UNVERIFIED');
+    previousId=sample.cards[0].routeId;
+  }
+  const a=await sampleFirstPage(page,timeout,pageIndex);
+  const b=await sampleFirstPage(page,timeout,pageIndex);
+  if(!a||!b||a.invalid||b.invalid||!a.cursorVerified||!b.cursorVerified||
+     a.total!==first.routeTotal||b.total!==first.routeTotal||
+     firstPageFingerprint(a)!==firstPageFingerprint(b))return blank('UNSTABLE');
+  const expected=Math.min(20,a.total-pageIndex*20);
+  return {status:a.cards.length===expected?'STABLE':'SHORT_PAGE',
+    routeTotal:a.total,visible:a.cards.length,
+    ready:a.cards.filter(x=>x.state==='ready').length,aircraft:a.cards,mutationAuthorized:false};
 }
 
 /** Pure safety bookkeeping for a future rolling scheduler, not a dispatcher. */
