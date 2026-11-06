@@ -429,6 +429,8 @@ test('All Operations', async ({ page }) => {
         evaluated:dispatch.summary.evaluated,departed:dispatch.summary.departed,
         held:dispatch.summary.held,unknown:dispatch.summary.unknown,
         fleetWideCompletionClaim:false,globalFleetScans:0,
+        partialTerminalCoverage:dispatch.rollingTerminalPartialCoverage===true,
+        windowUnverified:dispatch.rollingWindowUnverified===true,
         generatedAt:new Date().toISOString()};
       fs.writeFileSync(scopedReportFile,serializeJsonDocument(currentPageReport));
       console.log('[FirstPageOnlyResult] '+JSON.stringify(currentPageReport));
