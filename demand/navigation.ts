@@ -7,13 +7,21 @@ export function routePageLimit(totalRoutes:number,pageSize=20){
   return Math.max(1,Math.ceil(totalRoutes/pageSize));
 }
 
+/** Passive check, never alters the native AJAX fragment. */
+export async function nativeFleetLoaderVisible(page:Page):Promise<boolean>{
+  return await page.locator('#routesContainer img[src*="loader"]').evaluateAll(
+    es=>es.some(e=>!!e.getClientRects().length)
+  );
+}
+
 /** Explicitly opens a fresh list: it does not pretend to preserve a previous pagination cursor. */
 /** Read-only UI progression codes; an optional observer lets callers locate
  * a timeout without persisting page URLs, HTML, registrations or credentials.
  * No behavior change for existing production callers. */
 export type FleetOpenStage =
  'INSPECT_CONTROL'|'CLICK_CONTROL'|'WAIT_OLD_CONTAINER_DETACH'|
- 'WAIT_CONTAINER_VISIBLE'|'WAIT_ROUTE_CARDS_VISIBLE'|'VERIFY_QUOTE_CLOSED'|'VERIFY_INPLACE_NATIVE_RESPONSE';
+ 'WAIT_CONTAINER_VISIBLE'|'WAIT_ROUTE_CARDS_VISIBLE'|'WAIT_NATIVE_FRAGMENT_LOADER_CLEAR'|
+ 'VERIFY_QUOTE_CLOSED'|'VERIFY_INPLACE_NATIVE_RESPONSE';
 export async function openFleetList(
  page: Page, timeout: number, onStage: (stage:FleetOpenStage)=>void = () => {},
  options: {allowVerifiedInPlaceRefresh?: boolean} = {}
@@ -71,6 +79,13 @@ export async function openFleetList(
   await expect.poll(async()=>page.locator('#routesContainer [id^="routeMainList"]').evaluateAll(es =>
     es.filter(e=>!!e.getClientRects().length).length
   ),{timeout}).toBeGreaterThan(0);
+  // JavierOlmedo/AirlineManager4Bot (MIT, src/bot.py) demonstrates that
+  // route cards may coexist with the game's AJAX loader in a reused fragment.
+  // Count only VISIBLE loader images in the native Fleet container. Never
+  // clear the DOM or call Ajax directly: the previous click/response and each
+  // exact per-aircraft safety gate remain unchanged.
+  onStage('WAIT_NATIVE_FRAGMENT_LOADER_CLEAR');
+  await expect.poll(()=>nativeFleetLoaderVisible(page),{timeout}).toBe(false);
   onStage('VERIFY_QUOTE_CLOSED');
   if (await page.locator('#newRouteInfo').isVisible()) throw new Error('RESEARCH_QUOTE_NOT_CLOSED');
 }

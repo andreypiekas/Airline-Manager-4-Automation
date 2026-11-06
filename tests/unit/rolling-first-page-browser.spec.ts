@@ -125,3 +125,22 @@ test('repeated short no-ready first pages stay unverified, never treated as comp
   expect(await page.evaluate(()=>(window as any).nextClicks)).toBe(0);
   expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
 });
+
+test('already open Fleet roster with native loader is NOT reused as completed AJAX evidence',async({page})=>{
+  await changingFleet(page,[first('inflight'),first('ready')]);
+  await page.evaluate(()=>{
+    (window as any).menuFleet();
+    const loader=document.createElement('img');
+    loader.src='loader.gif';
+    loader.style.cssText='display:block;width:24px;height:24px';
+    document.getElementById('routesContainer')!.append(loader);
+  });
+  const observation=await inspectFirstPageReadOnly(page,1500,{allowAlreadyOpen:true});
+  expect(observation.status).toBe('STABLE');
+  expect(observation.ready).toBe(1);
+  expect(observation.mutationAuthorized).toBe(false);
+  // The old Fleet page was not reused: the native menu served a new snapshot.
+  expect(await page.evaluate(()=>(window as any).opens)).toBe(2);
+  expect(await page.evaluate(()=>(window as any).departures)).toBe(0);
+  expect(await page.evaluate(()=>(window as any).nextClicks)).toBe(0);
+});
