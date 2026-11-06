@@ -89,6 +89,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private verifiedRouteCount:number|null=null;
   private lastCompleteFleet:CollectionResult|null=null;
   private lastRollingWindow:CollectionResult|null=null;
+  /** Only a scheduling ledger; never a departure confirmation or authorization. */
+  private readonly discoveredRollingKeys=new Set<string>();
   /** Native in-flight proof since previous collection; permits read-only settling only. */
   private nativeInflightSincePreviousCollection=false;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
@@ -111,6 +113,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
       let pilot=await inspectIndividualFirstPage(this.page,{
         timeout:Math.min(this.timeout,8000),
         maxCandidates:10,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+        excludedKeys:this.discoveredRollingKeys,
         postDepartureShortPageRetries:postDepartureRecovery?3:0
       }).catch((error:unknown)=>{
         const message=error instanceof Error?error.message:'';
@@ -133,7 +136,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         Math.min(16,Math.ceil(pilot.routeTotal/20));
       while(pageIndex+1<boundedPages&&
         ['STABLE','SHORT_PAGE'].includes(pilot.window)&&
-        pilot.readyCandidates===0&&pilot.holds.length===0&&
+        pilot.verified===0&&pilot.holds.length===0&&
         (this.collectionRetryDeadlineEpochMs===undefined||
           Date.now()+45000<this.collectionRetryDeadlineEpochMs)){
         if(pilot.window==='SHORT_PAGE')unverifiedSkippedWindow=true;
@@ -145,7 +148,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
         }));
         const next=await inspectIndividualFirstPage(this.page,{
           timeout:Math.min(this.timeout,8000),pageIndex,maxCandidates:10,
-          deadlineEpochMs:this.collectionRetryDeadlineEpochMs
+          deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+          excludedKeys:this.discoveredRollingKeys
         });
         if(next.routeTotal!==priorTotal||
            !['STABLE','SHORT_PAGE'].includes(next.window)){
@@ -153,6 +157,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
         }
         pilot=next;
       }
+      for(const a of pilot.verifiedAircraft)
+        this.discoveredRollingKeys.add(a.aircraftId+':'+a.routeId);
       const shortNoReadyObserved=pilot.window==='SHORT_PAGE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.windowObservedAircraft.length>0 &&
