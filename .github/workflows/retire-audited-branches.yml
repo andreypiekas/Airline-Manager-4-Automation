@@ -1,0 +1,45 @@
+name: Encerrar branches legadas auditadas
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/retire-audited-branches.cjs
+      - .github/workflows/retire-audited-branches.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Confirmo exclusão somente das branches auditadas e validadas por SHA'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: safe-prune-merged-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    if: github.repository == 'andreypiekas/Airline-Manager-4-Automation'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar política sem rede e sem credenciais
+        run: node scripts/retire-audited-branches.cjs --self-test
+      - name: Verificar HEADs e limpar somente refs aprovadas
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ github.event_name == 'push' || inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            node scripts/retire-audited-branches.cjs --apply
+          else
+            node scripts/retire-audited-branches.cjs --dry-run
+          fi
