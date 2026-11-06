@@ -186,7 +186,8 @@ export class IndividualDepartureExecutor {
     let initial: CollectionResult;
     try { initial=await this.port.collect(); } catch { report.halted=true;await persist();throw new Error('EXECUTION_INITIAL_COLLECTION_FAILED'); }
     const verifiedRollingWindow=(candidate:CollectionResult)=>this.settings.rollingIndividualMode===true &&
-      candidate.complete===false && candidate.observationScope==='native-individual-first-page' &&
+      candidate.complete===false &&
+      ['native-individual-first-page','native-individual-page'].includes(candidate.observationScope||'') &&
       candidate.expectedRoutes!==null && Number.isSafeInteger(candidate.expectedRoutes) &&
       candidate.expectedRoutes>=candidate.aircraft.length &&
       candidate.windowReadyCandidates!==undefined &&
@@ -207,7 +208,8 @@ export class IndividualDepartureExecutor {
       report.rollingWindowUnverified=true;
     if(this.settings.rollingIndividualMode){
       console.log('[RollingDispatchCoverage] '+JSON.stringify({
-        scope:'FIRST_NATIVE_PAGE_ONLY',globalComplete:false,
+        scope:'BOUNDED_NATIVE_PAGES',nativePage:(initial.windowPageIndex??0)+1,batchLimit:10,
+        globalComplete:false,
         individualVerified:rollingWindowVerified,
         targets:initial.aircraft.length,
         remainingUnassessed:initial.expectedRoutes===null?null:
@@ -510,7 +512,9 @@ export class IndividualDepartureExecutor {
       await persist();
     }
     if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=100 ||
-       report.entries.filter(e=>e.status==='departed').length===departedBeforePass ||
+       // No departure on this page is NOT proof that later native pages are idle.
+       // Continue with a fresh, bounded page read; no target is retried.
+       false ||
        (this.settings.maxDepartures!=='all'&&
         this.attemptedAircraft.size>=this.settings.maxDepartures))break;
     // Bounded by confirmed new targets, unique attempts, a conservative pass cap\n    // and the real mutation deadline; never read all pages of the Fleet.\n    // Refresh only after real confirmed departures, with enough time left for
@@ -528,6 +532,7 @@ export class IndividualDepartureExecutor {
         .map(e=>e.aircraftId+':'+e.routeId));
       let tailRejection:ShortTailRejectionCode|null=null;
       const tailReconciled=!report.halted && report.summary.unknown===0 &&
+        (initial.windowPageIndex??0)===(nextWindow.windowPageIndex??0) &&
         verifiedPostDispatchShortTail(initial,nextWindow,confirmed,reason=>{
           tailRejection=reason;
         });
@@ -535,7 +540,7 @@ export class IndividualDepartureExecutor {
         report.postDispatchShortTailReconciled=true;
         console.log('[RollingFirstPageCycle] '+JSON.stringify({
           status:'CONFIRMED_DEPARTED_CARDS_EXPLAIN_SHORT_TAIL',
-          pass:rollingPass+1,scope:'PREVIOUSLY_VERIFIED_FIRST_PAGE_ONLY',
+          pass:rollingPass+1,scope:'PREVIOUSLY_VERIFIED_NATIVE_PAGE',
           missingCardsConfirmed:true,globalComplete:false,
           mutationAuthorized:false,globalFleetScans:0
         }));
