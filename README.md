@@ -21,7 +21,7 @@ O projeto automatiza rotinas repetitivas da companhia aérea com uma abordagem *
 | Login e leitura da frota | ⚠️ Produção; interface nativa pode falhar ou ficar incompleta |
 | Descoberta automática de hubs/bases | ✅ Produção |
 | Demand Manager | ✅ Ativo com validação individual e `HOLD` conservador |
-| Decolagens individuais | ⚠️ Ativas na primeira página; cobertura global não garantida |
+| Decolagens individuais | ⚠️ Lotes de até 10 candidatas com paginação nativa de 20; cobertura global não garantida |
 | Elegibilidade de rotas em qualquer aeroporto | ✅ Sem filtro por hub; não equivale a examinar toda a frota |
 | Compra de Fuel com preço ao vivo | ✅ Produção |
 | Compra de CO₂ | ✅ Produção |
@@ -44,7 +44,7 @@ O estado técnico detalhado está em [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEM
 ### Situação operacional verificada em 06/11/2026
 
 > [!IMPORTANT]
-> **Testes offline aprovados não significam que a operação real esteja estabilizada.** O modo padrão de produção analisa somente a **primeira página nativa da Fleet**, não todas as rotas. Uma execução verde representa apenas o escopo efetivamente verificado, nunca o processamento integral da frota.
+> **Testes offline aprovados não significam que a operação real esteja estabilizada.** O despachante de produção pode inspecionar páginas nativas sucessivas de até **20 aeronaves**, em lotes de **10 READY verificadas**. Cada alvo é novamente identificado antes de qualquer decolagem. Uma execução verde não representa automaticamente uma fotografia simultânea de toda a frota.
 
 - Na execução [#1559](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/42221987958), **3 decolagens foram confirmadas**, 3 aeronaves ficaram em `HOLD` por demanda insuficiente e 1 foi bloqueada devido a uma **tentativa antiga com resultado incerto**. O workflow terminou em falha para não mascarar essa pendência.
 - Na [#1560](https://github.com/andreypiekas/Airline-Manager-4-Automation/actions/runs/42226001875), a primeira página ficou curta e sem candidatos verificados, embora o cabeçalho indicasse **187 rotas**; não foi possível concluir que não havia aviões prontos nas outras páginas.
@@ -87,14 +87,14 @@ Assim, uma nova base pode ser reconhecida automaticamente sem precisar alterar o
 
 ---
 
-## Modo padrão: somente primeira página da Fleet
+## Modo padrão: paginação nativa em lotes de dez
 
-Em produção, `DEMAND_FIRST_PAGE_ONLY` é **`true` por padrão**. O bot reabre a primeira página nativa, faz leituras independentes, verifica cada candidato READY individualmente, despacha apenas os autorizados e tenta observar novamente a primeira página após partidas confirmadas. Não percorre automaticamente todas as páginas da frota nesse modo.
+Em produção, `DEMAND_FIRST_PAGE_ONLY` permanece **`true` como chave de compatibilidade** para o caminho seguro de decolagem individual. Esse caminho agora percorre páginas nativas verificadas (offsets de **20**) até encontrar novas candidatas, avalia até **10** por lote e reinicia a navegação desde a primeira página antes da próxima leitura. Não usa cursor antigo após decolagem, nem transforma páginas em uma coleta global completa. O limite operacional e o prazo da execução continuam valendo.
 
 - `DISPATCH_ALL_READY` ou `maxDepartures=all` significa **todos os candidatos elegíveis alcançados pelo fluxo e pelo orçamento da execução**, não as 187 rotas do cabeçalho.
 - O jogo pode manter aviões que decolaram na lista, reordenar cartões ou mostrar uma página curta. A contagem de `Routes(N)` não comprova os cartões ausentes.
 - A reconciliação exige identidades e estados exatos. Não é permitido deduzir que um avião desaparecido decolou, nem repetir uma partida incerta.
-- `ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES` indica que o bot não conseguiu obter **candidatos verificados naquela página**, e **não** que a companhia inteira está parada.
+- `ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES` indica que não foi possível comprovar candidatos no escopo percorrido, **não** que toda a frota esteja parada. Páginas curtas ou identidade incorreta continuam sinalizadas como cobertura incompleta.
 - Quarentenas persistidas podem gerar `FIRST_PAGE_DISPATCH_INCOMPLETE_OR_UNVERIFIED` mesmo depois de outras partidas reais e confirmadas.
 - Desabilitar `DEMAND_FIRST_PAGE_ONLY` muda para um caminho de coleta diferente; não use isso como correção improvisada para uma UI instável.
 
@@ -458,7 +458,7 @@ Uma tentativa de outra execução permaneceu sem confirmação conclusiva. O jou
 
 **`ROLLING_INDIVIDUAL_WINDOW_NO_VERIFIED_CANDIDATES`**
 
-A primeira página nativa não forneceu candidatos READY verificáveis. Isso não demonstra ociosidade da frota; confira o cabeçalho, a integridade da página, os logs de recuperação e as demais execuções.
+Nenhuma candidata READY pôde ser validada no escopo das páginas percorridas. Conferir `RollingNativePageAdvance`, índice da última página e qualquer lacuna de identidade/DOM. Uma página inicial vazia, isoladamente, já não encerra a descoberta.
 
 **Fuel não foi comprado**
 
