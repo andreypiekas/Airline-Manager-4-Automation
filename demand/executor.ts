@@ -253,7 +253,6 @@ export class IndividualDepartureExecutor {
     // mode, after confirmed flights new ready planes can occupy page one;
     // rescan in the SAME executor to preserve attempt, fuel and demand journals.
     while(true){
-    const departedBeforePass=report.entries.filter(e=>e.status==='departed').length;
     for(const expected of ordered) {
       const targetKey=expected.aircraftId+':'+expected.routeId;
       if(seenWindowTargets.has(targetKey))continue;
@@ -515,9 +514,7 @@ export class IndividualDepartureExecutor {
       await persist();
     }
     if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=100 ||
-       // No departure on this page is NOT proof that later native pages are idle.
-       // Continue with a fresh, bounded page read; no target is retried.
-       false ||
+       // A held-only batch cannot prove later pages are idle.
        (this.settings.maxDepartures!=='all'&&
         this.attemptedAircraft.size>=this.settings.maxDepartures))break;
     // Bounded by confirmed new targets, unique attempts, a conservative pass cap\n    // and the real mutation deadline; never read all pages of the Fleet.\n    // Refresh only after real confirmed departures, with enough time left for
