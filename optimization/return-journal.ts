@@ -542,9 +542,19 @@ export async function appendResolvedUncertainDepartures(directory:string,scope:s
  * two stable page reads and a separate read-only exact-target prepare.
  * This function NEVER accesses the game or authorizes a departure.
  * The uncertain event remains append-only and auditable. */
+export type FirstPageUncertainResolutionRejection=
+  'LIVE_READY_EVIDENCE_INVALID'|'UNRESOLVED_EVENT_NOT_UNIQUE'|
+  'JOURNAL_SOURCE_CONTEXT_MISMATCH'|'LIVE_EVIDENCE_NOT_NEWER'|
+  'RESOLUTION_EVENT_INVALID'|'RESOLUTION_EVENT_ALREADY_EXISTS';
+
+/** Fixed rejection categories only; never expose IDs, routes, or journal contents in logs. */
 export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
-  directory:string,scope:string,fresh:AircraftSnapshot,now=new Date()
+  directory:string,scope:string,fresh:AircraftSnapshot,now=new Date(),
+  onRejected?:(reason:FirstPageUncertainResolutionRejection)=>void
 ):Promise<boolean>{
+  const reject=(reason:FirstPageUncertainResolutionRejection):false=>{
+    onRejected?.(reason);return false;
+  };
   const stamp=Date.parse(fresh?.observedAt||'');
   const cabinOk=(v:AircraftSnapshot['capacity']):boolean=>
     !!v&&(['Y','J','F'] as const).every(k=>Number.isSafeInteger(v[k])&&v[k]>=0);
@@ -559,7 +569,7 @@ export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
        fresh.remaining![k]<=fresh.dailyTotal![k])||
      !fresh.departureControlShape?.includes('route_depart.php?')||
      !Number.isFinite(stamp)||stamp>now.getTime()||
-     now.getTime()-stamp>30_000)return false;
+     now.getTime()-stamp>30_000)return reject('LIVE_READY_EVIDENCE_INVALID');
   const root=resolve(directory);
   return withRunLock(async()=>{
     const filename=join(root,'return-journal.json');
@@ -575,12 +585,14 @@ export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
       e.aircraftId===fresh.aircraftId&&e.routeId===fresh.routeId);
     // Multiple unresolved attempts or changed registration/direction are
     // not safely recoverable from a single first-page observation.
-    if(relevant.length!==1)return false;
+    if(relevant.length!==1)return reject('UNRESOLVED_EVENT_NOT_UNIQUE');
     const uncertain=relevant[0];
     const pairMatches=[fresh.from,fresh.to].sort().join(':')===
       [uncertain.from,uncertain.to].sort().join(':');
-    if(fresh.registration!==uncertain.registration||!pairMatches||
-       stamp<=Date.parse(uncertain.observedAt))return false;
+    if(fresh.registration!==uncertain.registration||!pairMatches)
+      return reject('JOURNAL_SOURCE_CONTEXT_MISMATCH');
+    if(stamp<=Date.parse(uncertain.observedAt))
+      return reject('LIVE_EVIDENCE_NOT_NEWER');
     const event:ResolvedUncertainDepartureEvent={
       eventId:'res_'+uncertain.sourceRunId+'_'+uncertain.aircraftId+'_'+uncertain.routeId,
       type:'departure-uncertain-resolved',uncertainEventId:uncertain.eventId,
@@ -589,8 +601,10 @@ export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
       observedAt:fresh.observedAt,result:'live_state_verified',
       liveState:'ready',reason:'STRICTLY_NEWER_VERIFIED_LIVE_STATE'
     };
-    if(!validResolvedUncertainDepartureEvent(event,now))return false;
-    if(events.some(e=>e.eventId===event.eventId))return false;
+    if(!validResolvedUncertainDepartureEvent(event,now))
+      return reject('RESOLUTION_EVENT_INVALID');
+    if(events.some(e=>e.eventId===event.eventId))
+      return reject('RESOLUTION_EVENT_ALREADY_EXISTS');
     if(events.length>=100000)throw Error('JOURNAL_FULL');
     events.push(event);data.events=events;
     const temporary=join(root,'return-journal.'+randomUUID()+'.tmp');
