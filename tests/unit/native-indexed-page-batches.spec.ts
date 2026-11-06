@@ -118,3 +118,14 @@ test('cross-page duplicate aircraft is a detected pagination drift',async({page}
  expect(port.navigationMetrics().nativePageRebases).toBe(2);
  expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
 });
+
+test('middle page reorders but first page and Routes(N) stay fixed: still rebase',async({page})=>{
+ await pages(page,{reordered:true});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({complete:false,expectedRoutes:47,
+   windowPageIndex:2,windowScanExhaustedVerified:true,
+   observationScope:'native-individual-page',aircraft:[],warnings:[]});
+ expect(port.navigationMetrics().nativePageRebases).toBe(1);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
