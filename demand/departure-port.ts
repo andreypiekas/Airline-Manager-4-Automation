@@ -6,7 +6,7 @@ import { loadReference, type AirportCatalog } from '../optimization/reference-da
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
-import { inspectFirstPageReadOnly } from './rolling-first-page';
+import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly } from './rolling-first-page';
 import { inspectIndividualFirstPage } from './rolling-individual-preflight';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
@@ -89,10 +89,20 @@ export class PlaywrightDeparturePort implements DeparturePort {
   private verifiedRouteCount:number|null=null;
   private lastCompleteFleet:CollectionResult|null=null;
   private lastRollingWindow:CollectionResult|null=null;
+  /** Only a scheduling ledger; never a departure confirmation or authorization. */
+  private readonly discoveredRollingKeys=new Set<string>();
   /** Native in-flight proof since previous collection; permits read-only settling only. */
   private nativeInflightSincePreviousCollection=false;
   private readonly metrics={pageReuses:0,fullListNavigations:0,fullFleetScans:0,dispatchCollectMs:0,targetPreparationMs:0};
   navigationMetrics(){return {...this.metrics};}
+  hasUnassessedNativePages():boolean {
+    const window=this.lastRollingWindow;
+    if(!this.rollingIndividualMode||!window||
+       window.windowScanExhaustedVerified===true||window.expectedRoutes===null)
+      return false;
+    return window.expectedRoutes>(window.windowPageIndex??0)*20+20||
+      (window.windowReadyCandidates??0)>window.aircraft.length;
+  }
   constructor(private readonly page:Page,private readonly timeout=15000,
     private readonly collectionRetryDeadlineEpochMs?:number,
     private readonly verifiedEarlierFleet?:CollectionResult,
@@ -106,9 +116,12 @@ export class PlaywrightDeparturePort implements DeparturePort {
     if(this.rollingIndividualMode){
       const postDepartureRecovery=this.nativeInflightSincePreviousCollection;
       this.nativeInflightSincePreviousCollection=false;
-      const pilot=await inspectIndividualFirstPage(this.page,{
+      let pageIndex=0;
+      let unverifiedSkippedWindow=false;
+      let pilot=await inspectIndividualFirstPage(this.page,{
         timeout:Math.min(this.timeout,8000),
-        maxCandidates:20,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+        maxCandidates:10,deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+        excludedKeys:this.discoveredRollingKeys,
         postDepartureShortPageRetries:postDepartureRecovery?3:0
       }).catch((error:unknown)=>{
         const message=error instanceof Error?error.message:'';
@@ -124,19 +137,53 @@ export class PlaywrightDeparturePort implements DeparturePort {
         }));
         throw Error('ROLLING_FIRST_PAGE_PREFLIGHT_FAILED');
       });
+      // Each native page contains at most 20 aircraft; inspect up to 10 READY
+      // targets. Empty pages require advancing to the next exact native cursor.
+      // A short page leaves an audit gap even when a later target is verifiable.
+      const boundedPages=pilot.routeTotal===null?1:
+        Math.min(16,Math.ceil(pilot.routeTotal/20));
+      while(pageIndex+1<boundedPages&&
+        ['STABLE','SHORT_PAGE'].includes(pilot.window)&&
+        pilot.verified===0&&pilot.holds.length===0&&
+        (this.collectionRetryDeadlineEpochMs===undefined||
+          Date.now()+45000<this.collectionRetryDeadlineEpochMs)){
+        if(pilot.window==='SHORT_PAGE')unverifiedSkippedWindow=true;
+        const priorTotal=pilot.routeTotal;
+        pageIndex++;
+        console.log('[RollingNativePageAdvance] '+JSON.stringify({
+          page:pageIndex+1,reason:'NO_READY_IN_PREVIOUS_PAGE',
+          batchLimit:10,globalComplete:false,mutationAuthorized:false
+        }));
+        const next=await inspectIndividualFirstPage(this.page,{
+          timeout:Math.min(this.timeout,8000),pageIndex,maxCandidates:10,
+          deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
+          excludedKeys:this.discoveredRollingKeys
+        });
+        if(next.routeTotal!==priorTotal||
+           !['STABLE','SHORT_PAGE'].includes(next.window)){
+          unverifiedSkippedWindow=true;pilot=next;break;
+        }
+        pilot=next;
+      }
+      for(const a of pilot.verifiedAircraft)
+        this.discoveredRollingKeys.add(a.aircraftId+':'+a.routeId);
       const shortNoReadyObserved=pilot.window==='SHORT_PAGE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.windowObservedAircraft.length>0 &&
         pilot.windowObservedAircraft.every(a=>a.state!=='ready');
-      const noReadyVerified=pilot.window==='STABLE' && pilot.readyCandidates===0 &&
+      const scanExhaustedVerified=!unverifiedSkippedWindow&&
+        pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
+        pilot.verified===0&&pilot.holds.length===0;
+      const noReadyVerified=pageIndex===0&&pilot.window==='STABLE' && pilot.readyCandidates===0 &&
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0;
-      const verifiedWindow=['STABLE','SHORT_PAGE'].includes(pilot.window) &&
+      const verifiedWindow=scanExhaustedVerified||(['STABLE','SHORT_PAGE'].includes(pilot.window) &&
         pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.verified>0 && pilot.verifiedAircraft.length===pilot.verified &&
         pilot.verifiedAircraft.every(a=>a.state==='ready'&&!a.issue&&
-          !!a.capacity&&!!a.remaining&&!!a.dailyTotal);
+          !!a.capacity&&!!a.remaining&&!!a.dailyTotal));
       console.log('[RollingDispatchInventory] '+JSON.stringify({
         status:noReadyVerified?'NO_READY_ON_VERIFIED_FIRST_PAGE':verifiedWindow?'INDIVIDUAL_WINDOW_VERIFIED':'HOLD_UNVERIFIED_WINDOW',
+        nativePage:pageIndex+1,batchLimit:10,priorPageGap:unverifiedSkippedWindow,
         inspected:pilot.inspected,ready:pilot.readyCandidates,verified:pilot.verified,
         heldTargets:pilot.holds.length,
         heading:pilot.routeTotal,globalComplete:false,
@@ -146,12 +193,20 @@ export class PlaywrightDeparturePort implements DeparturePort {
       const rolling:CollectionResult={
         aircraft:verifiedWindow?pilot.verifiedAircraft:[],
         complete:false,expectedRoutes:pilot.routeTotal,
-        observationScope:(verifiedWindow||noReadyVerified)?'native-individual-first-page' as const:undefined,
+        observationScope:(verifiedWindow||noReadyVerified)?(pageIndex===0?
+          'native-individual-first-page' as const:'native-individual-page' as const):undefined,
+        windowPageIndex:pageIndex,
+        windowScanExhaustedVerified:scanExhaustedVerified,
         windowNoReadyVerified:noReadyVerified,
         windowShortNoReadyObserved:shortNoReadyObserved,
         windowObservedAircraft:pilot.windowObservedAircraft,
         windowReadyCandidates:pilot.readyCandidates,
-        warnings:(verifiedWindow||noReadyVerified)?(pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:[]):['ROLLING_WINDOW_UNVERIFIED']
+        warnings:(verifiedWindow||noReadyVerified)?
+          (unverifiedSkippedWindow?['ROLLING_EARLIER_NATIVE_PAGE_INCOMPLETE']:
+           pilot.holds.length?['ROLLING_WINDOW_PARTIAL_TARGETS']:
+           pilot.readyCandidates>pilot.verified&&!scanExhaustedVerified?
+             ['ROLLING_BATCH_REMAINDER_VERIFIED']:[]):
+          ['ROLLING_WINDOW_UNVERIFIED']
       };
       this.lastRollingWindow=verifiedWindow?rolling:null;
       return rolling;
@@ -216,7 +271,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
         if(!airports.license||!airports.source)return null;
       }catch{return null;}
       return readVerifiedRollingCurrentRouteFuel(
-        this.page,target,airports,collection.expectedRoutes,Math.min(this.timeout,10000)
+        this.page,target,airports,collection.expectedRoutes,Math.min(this.timeout,10000),
+        collection.windowPageIndex??0
       );
     }
     const inventory=this.lastCompleteFleet;
@@ -261,7 +317,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
     if(this.rollingIndividualMode){
       // The native page is reloaded, rather than replaying a stale offset.
       // An arrival may move the target; that is a HOLD for this aircraft.
-      const window=await inspectFirstPageReadOnly(this.page,Math.min(this.timeout,8000));
+      const window=await inspectNativeIndexedPageReadOnly(
+        this.page,this.lastRollingWindow?.windowPageIndex??0,Math.min(this.timeout,8000));
       if(!['STABLE','SHORT_PAGE'].includes(window.status)||
         window.aircraft.filter(a=>a.aircraftId===expected.aircraftId&&
           a.routeId===expected.routeId&&a.registration===expected.registration&&

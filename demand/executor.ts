@@ -11,6 +11,8 @@ export interface CurrentRouteFuelEvidence {
 }
 export interface DeparturePort {
   collect(): Promise<CollectionResult>;
+  /** Only a verified indexed-page implementation can continue without departures. */
+  hasUnassessedNativePages?(): boolean;
   /** Optional bounded, read-only exact-current-route quote; no departure or reroute mutation. */
   readCurrentRouteFuelQuote?(expected:AircraftSnapshot):Promise<CurrentRouteFuelEvidence|null>;
   /** Fresh identity/layout/demand AND a strictly verified native departure control. */
@@ -186,7 +188,8 @@ export class IndividualDepartureExecutor {
     let initial: CollectionResult;
     try { initial=await this.port.collect(); } catch { report.halted=true;await persist();throw new Error('EXECUTION_INITIAL_COLLECTION_FAILED'); }
     const verifiedRollingWindow=(candidate:CollectionResult)=>this.settings.rollingIndividualMode===true &&
-      candidate.complete===false && candidate.observationScope==='native-individual-first-page' &&
+      candidate.complete===false &&
+      ['native-individual-first-page','native-individual-page'].includes(candidate.observationScope||'') &&
       candidate.expectedRoutes!==null && Number.isSafeInteger(candidate.expectedRoutes) &&
       candidate.expectedRoutes>=candidate.aircraft.length &&
       candidate.windowReadyCandidates!==undefined &&
@@ -199,15 +202,19 @@ export class IndividualDepartureExecutor {
         validDemandCabins(a.dailyTotal)&&
         ['Y','J','F'].every(k=>a.remaining![k as keyof Cabins]<=a.dailyTotal![k as keyof Cabins]));
     let rollingWindowVerified=verifiedRollingWindow(initial);
-    if(this.settings.rollingIndividualMode&&initial.windowNoReadyVerified===true&&
+    if(this.settings.rollingIndividualMode&&
+       (initial.windowNoReadyVerified===true||initial.windowScanExhaustedVerified===true)&&
        initial.warnings.length===0&&initial.aircraft.length===0)
       report.firstPageNoReadyVerified=true;
-    if(this.settings.rollingIndividualMode && (initial.warnings.length>0 ||
-       (initial.windowReadyCandidates??0)>initial.aircraft.length))
+    if(this.settings.rollingIndividualMode && (initial.warnings.some(w=>
+       w!=='ROLLING_BATCH_REMAINDER_VERIFIED') ||
+       ((initial.windowReadyCandidates??0)>initial.aircraft.length &&
+         initial.warnings.includes('ROLLING_WINDOW_PARTIAL_TARGETS'))))
       report.rollingWindowUnverified=true;
     if(this.settings.rollingIndividualMode){
       console.log('[RollingDispatchCoverage] '+JSON.stringify({
-        scope:'FIRST_NATIVE_PAGE_ONLY',globalComplete:false,
+        scope:'BOUNDED_NATIVE_PAGES',nativePage:(initial.windowPageIndex??0)+1,batchLimit:10,
+        globalComplete:false,
         individualVerified:rollingWindowVerified,
         targets:initial.aircraft.length,
         remainingUnassessed:initial.expectedRoutes===null?null:
@@ -248,7 +255,7 @@ export class IndividualDepartureExecutor {
     // mode, after confirmed flights new ready planes can occupy page one;
     // rescan in the SAME executor to preserve attempt, fuel and demand journals.
     while(true){
-    const departedBeforePass=report.entries.filter(e=>e.status==='departed').length;
+    const departedBeforePass=report.summary.departed;
     for(const expected of ordered) {
       const targetKey=expected.aircraftId+':'+expected.routeId;
       if(seenWindowTargets.has(targetKey))continue;
@@ -510,7 +517,8 @@ export class IndividualDepartureExecutor {
       await persist();
     }
     if(!this.settings.rollingIndividualMode||report.halted||rollingPass>=100 ||
-       report.entries.filter(e=>e.status==='departed').length===departedBeforePass ||
+       (report.summary.departed===departedBeforePass&&
+        this.port.hasUnassessedNativePages?.()!==true) ||
        (this.settings.maxDepartures!=='all'&&
         this.attemptedAircraft.size>=this.settings.maxDepartures))break;
     // Bounded by confirmed new targets, unique attempts, a conservative pass cap\n    // and the real mutation deadline; never read all pages of the Fleet.\n    // Refresh only after real confirmed departures, with enough time left for
@@ -528,6 +536,7 @@ export class IndividualDepartureExecutor {
         .map(e=>e.aircraftId+':'+e.routeId));
       let tailRejection:ShortTailRejectionCode|null=null;
       const tailReconciled=!report.halted && report.summary.unknown===0 &&
+        (initial.windowPageIndex??0)===(nextWindow.windowPageIndex??0) &&
         verifiedPostDispatchShortTail(initial,nextWindow,confirmed,reason=>{
           tailRejection=reason;
         });
@@ -535,7 +544,7 @@ export class IndividualDepartureExecutor {
         report.postDispatchShortTailReconciled=true;
         console.log('[RollingFirstPageCycle] '+JSON.stringify({
           status:'CONFIRMED_DEPARTED_CARDS_EXPLAIN_SHORT_TAIL',
-          pass:rollingPass+1,scope:'PREVIOUSLY_VERIFIED_FIRST_PAGE_ONLY',
+          pass:rollingPass+1,scope:'PREVIOUSLY_VERIFIED_NATIVE_PAGE',
           missingCardsConfirmed:true,globalComplete:false,
           mutationAuthorized:false,globalFleetScans:0
         }));
@@ -563,7 +572,9 @@ export class IndividualDepartureExecutor {
         !this.attemptedAircraft.has(a.aircraftId) &&
         !this.attemptedRoutes.has(a.routeId));
     if(nextOrdered.length===0)break;
-    if(nextWindow.warnings.length>0 || (nextWindow.windowReadyCandidates??0)>nextWindow.aircraft.length)
+    if(nextWindow.warnings.some(w=>w!=='ROLLING_BATCH_REMAINDER_VERIFIED') ||
+       ((nextWindow.windowReadyCandidates??0)>nextWindow.aircraft.length &&
+         nextWindow.warnings.includes('ROLLING_WINDOW_PARTIAL_TARGETS')))
       report.rollingWindowUnverified=true;
     initial=nextWindow;rollingWindowVerified=true;
     ingestVerifiedWindow(nextWindow);

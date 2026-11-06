@@ -28,7 +28,8 @@ export function verifiedPostDispatchShortTail(
 ):boolean{
   const reject=(reason:ShortTailRejectionCode):false=>{onRejected?.(reason);return false;};
   if(before.complete!==false||after.complete!==false||
-     before.observationScope!=='native-individual-first-page'||
+     !['native-individual-first-page','native-individual-page'].includes(before.observationScope||'')||
+     (before.windowPageIndex??0)!==(after.windowPageIndex??0)||
      before.warnings.length>0||
      before.expectedRoutes===null||!Number.isSafeInteger(before.expectedRoutes)||
      before.expectedRoutes<=20||
