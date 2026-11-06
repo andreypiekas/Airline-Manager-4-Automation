@@ -221,6 +221,12 @@ test('production #1563: new card cannot conceal unconfirmed disappearance, rerou
 
 test('production #1563: refilled roster completes verified window without clicking any new aircraft',async()=>{
  const before={...baseline([1,2,3,4]),windowObservedAircraft:baseline([1,2,3,4]).windowObservedAircraft!.slice(0,18)};
+ // Each synthetic aircraft uses a distinct demand pool. Shared route demand
+ // must NOT be bypassed just to force a departure count in this regression.
+ const destinations=['GRU','DTW','LHR','JFK'];
+ before.aircraft=before.aircraft.map((a,i)=>({
+   ...a,from:'XAP',to:destinations[i],routeLabel:'XAP - '+destinations[i]
+ }));
  const after=shortTail([...Array.from({length:14},(_,i)=>i+5),21,22,23,24]);
  let collects=0,departClicks=0;
  const port:DeparturePort={
