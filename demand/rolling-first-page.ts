@@ -1,6 +1,6 @@
 import { type Page } from '@playwright/test';
 import { aircraftIdFromDetailsControl } from './identity';
-import { openFleetList } from './navigation';
+import { openFleetList, nativeFleetLoaderVisible } from './navigation';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
 /**
@@ -41,6 +41,9 @@ export function firstPageFingerprint(sample: Pick<WindowSample, 'total' | 'cards
 
 async function sampleFirstPage(page: Page, timeout: number): Promise<WindowSample | null> {
   await assertNoInteractiveChallenge(page, 'first-page-pilot:sample');
+  // A previously opened page can still be loading: a nonempty old roster
+  // cannot be used as an independent stable identity observation.
+  if(await nativeFleetLoaderVisible(page))return null;
   const heading = page.getByRole('button', { name: /^Routes\s*\(\d+\)$/ });
   if (await heading.count() !== 1) return null;
   const raw = (await heading.innerText({ timeout })).trim();
@@ -162,6 +165,7 @@ async function nativeFirstPageAlreadyVisible(page:Page):Promise<boolean> {
   const container=page.locator('#routesContainer');
   if(await list.count()!==1||!await list.isVisible()||
      await container.count()!==1||!await container.isVisible())return reject('FIRST_PAGE_SURFACE_NOT_VISIBLE');
+  if(await nativeFleetLoaderVisible(page))return reject('NATIVE_FIRST_PAGE_AJAX_LOADING');
   const heading=page.getByRole('button',{name:/^Routes\s*\(\d+\)$/});
   if(await heading.count()!==1)return reject('ROUTES_HEADING_NOT_UNIQUE');
   const value=(await heading.innerText({timeout:1500}).catch(()=>'' )).trim();
