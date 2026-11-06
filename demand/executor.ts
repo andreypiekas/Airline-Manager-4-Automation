@@ -206,7 +206,8 @@ export class IndividualDepartureExecutor {
       report.firstPageNoReadyVerified=true;
     if(this.settings.rollingIndividualMode && (initial.warnings.some(w=>
        w!=='ROLLING_BATCH_REMAINDER_VERIFIED') ||
-       (initial.windowReadyCandidates??0)>initial.aircraft.length))
+       ((initial.windowReadyCandidates??0)>initial.aircraft.length &&
+         initial.warnings.includes('ROLLING_WINDOW_PARTIAL_TARGETS'))))
       report.rollingWindowUnverified=true;
     if(this.settings.rollingIndividualMode){
       console.log('[RollingDispatchCoverage] '+JSON.stringify({
