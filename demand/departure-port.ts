@@ -151,6 +151,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
           ?firstPageFingerprint({total:pilot.routeTotal,cards:pilot.windowObservedAircraft})
           :null;
         if(firstAnchor===null)break;
+        const observedPageFingerprints=new Map<number,string>();
         const observedIds=new Map<string,{routeId:string;registration:string;page:number}>();
         const observedRoutes=new Map<string,{aircraftId:string;page:number}>();
         const recordPage=(value:IndividualPreflight,index:number):boolean=>{
@@ -166,6 +167,10 @@ export class PlaywrightDeparturePort implements DeparturePort {
             observedIds.set(a.aircraftId,{routeId:a.routeId,registration:a.registration,page:index});
             observedRoutes.set(a.routeId,{aircraftId:a.aircraftId,page:index});
           }
+          if(value.routeTotal===null)return false;
+          observedPageFingerprints.set(index,firstPageFingerprint({
+            total:value.routeTotal,cards:value.windowObservedAircraft
+          }));
           return true;
         };
         if(!recordPage(pilot,0)){unverifiedSkippedWindow=true;break;}
@@ -187,7 +192,8 @@ export class PlaywrightDeparturePort implements DeparturePort {
               timeout:Math.min(this.timeout,8000),pageIndex:nextIndex,maxCandidates:10,
               deadlineEpochMs:this.collectionRetryDeadlineEpochMs,
               excludedKeys:this.discoveredRollingKeys,
-              expectedFirstPageFingerprint:firstAnchor
+              expectedFirstPageFingerprint:firstAnchor,
+              expectedVisitedPageFingerprints:observedPageFingerprints
             });
           }catch(error){
             if(error instanceof Error&&
