@@ -41,7 +41,7 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
     div.append(nav);document.getElementById('routeAction')!.append(div);
   };
   w.menuFleet=()=>show(0);
-  w.Ajax=(url:string)=>{const m=url.match(/start=(\\d+)/);if(m)show(Number(m[1]));};
+  w.Ajax=(url:string)=>{const m=url.match(/start=(\d+)/);if(m)show(Number(m[1]));};
  },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered});
 }
 
