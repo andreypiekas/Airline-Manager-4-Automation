@@ -36,6 +36,8 @@ individual e primeira página nativa de `andreypiekas/Airline-Manager-4-Automati
 `demand/navigation.ts` já exigia transição do contêiner ou resposta
 `routes.php` nativa, cartões presentes e validação de controle/cursor.
 Agora também espera ausência de **loader visível no `#routesContainer`**.
+A leitura passiva também recusa reutilizar uma primeira página já aberta
+ou amostrá-la enquanto esse loader estiver visível.
 
 - O bot **não** remove conteúdo do DOM, chama AJAX diretamente,
   tenta clicar de novo ou atravessa páginas.
