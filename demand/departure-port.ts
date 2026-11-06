@@ -258,6 +258,15 @@ export class PlaywrightDeparturePort implements DeparturePort {
         pilot.holds.length===0 && pilot.routeTotal!==null && pilot.routeTotal>0 &&
         pilot.windowObservedAircraft.length>0 &&
         pilot.windowObservedAircraft.every(a=>a.state!=='ready');
+      // A stable but nonstandard terminal page may be verified as an observed
+      // NO-READY window while Fleet coverage remains UNKNOWN. #1568:
+      // Routes(187), last native page shows 8 rather than expected 7 cards.
+      // This evidence NEVER certifies the remaining aircraft or allows clicks.
+      const terminalNonstandardNoReadyObserved=shortNoReadyObserved&&
+        pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
+        pageIndex+1===boundedPages&&pilot.windowObservedAircraft.length<=20&&
+        pilot.windowObservedAircraft.every(a=>/^[1-9]\\d*$/.test(a.aircraftId)&&
+          /^[1-9]\\d*$/.test(a.routeId)&&!!a.registration&&a.state!=='ready');
       const scanExhaustedVerified=!unverifiedSkippedWindow&&
         pilot.routeTotal!==null&&Math.ceil(pilot.routeTotal/20)<=16&&
         pageIndex+1===boundedPages&&pilot.window==='STABLE'&&
@@ -291,6 +300,7 @@ export class PlaywrightDeparturePort implements DeparturePort {
         windowScanExhaustedVerified:scanExhaustedVerified,
         windowNoReadyVerified:noReadyVerified,
         windowShortNoReadyObserved:shortNoReadyObserved,
+        windowTerminalNonstandardNoReadyObserved:terminalNonstandardNoReadyObserved,
         windowObservedAircraft:pilot.windowObservedAircraft,
         windowReadyCandidates:pilot.readyCandidates,
         warnings:(verifiedWindow||noReadyVerified)?
