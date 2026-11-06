@@ -6,7 +6,7 @@ import { loadReference, type AirportCatalog } from '../optimization/reference-da
 import { AircraftSnapshot, CollectionResult } from './types';
 import { DemandReader, collectFleetWithFreshRetry } from './reader';
 import { openFleetList,findFleetRoute,reuseCurrentFleetPageForTarget } from './navigation';
-import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly, firstPageFingerprint } from './rolling-first-page';
+import { inspectFirstPageReadOnly, inspectNativeIndexedPageReadOnly, firstPageFingerprint, nativeWindowFingerprint } from './rolling-first-page';
 import { inspectIndividualFirstPage, type IndividualPreflight } from './rolling-individual-preflight';
 import { assertNoInteractiveChallenge } from '../utils/challenge-guard';
 
@@ -207,6 +207,25 @@ export class PlaywrightDeparturePort implements DeparturePort {
           }
           pageIndex=nextIndex;
           pilot=next;
+        }
+        // A landing after the final page was read can change the index
+        // mapping without changing Routes(N). Check the original page-one
+        // anchor once more before calling the bounded sweep exhausted.
+        if(!changedDuringSweep&&pageIndex+1===boundedPages&&
+           pilot.verified===0&&pilot.holds.length===0){
+          if(!canRebase())changedDuringSweep=true;
+          else{
+            try{
+              const closing=await inspectFirstPageReadOnly(
+                this.page,Math.min(this.timeout,8000));
+              if(nativeWindowFingerprint(closing)!==firstAnchor)
+                changedDuringSweep=true;
+            }catch(error){
+              if(error instanceof Error&&
+                 error.message==='INTERACTIVE_CHALLENGE_DETECTED_STOP')throw error;
+              changedDuringSweep=true;
+            }
+          }
         }
         if(changedDuringSweep){
           if(sweep<2&&canRebase()){
