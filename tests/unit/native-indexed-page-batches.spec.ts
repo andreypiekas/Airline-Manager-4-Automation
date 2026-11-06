@@ -2,14 +2,15 @@ import { test,expect,type Page } from '@playwright/test';
 import { inspectNativeIndexedPageReadOnly } from '../../demand/rolling-first-page';
 import { PlaywrightDeparturePort } from '../../demand/departure-port';
 
-async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean}={}){
+async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:boolean;reordered?:boolean;churnMode?:'once'|'continuous'|'overlap'}={}){
  const total=opts.total??47;
  await page.route('**/*',route=>route.abort());
  await page.setContent('<button id="mapRoutes" onclick="hideAllWhenClick();menuFleet(\'Routes\');">Fleet</button><div id="routeAction"></div>');
- await page.evaluate(({total,readyPage,badNext,reordered})=>{
-  const w=window as any;w.pageReads=[];w.departCalls=0;
+ await page.evaluate(({total,readyPage,badNext,reordered,churnMode})=>{
+  const w=window as any;w.pageReads=[];w.departCalls=0;w.churn=0;
   w.hideAllWhenClick=()=>{};
   const show=(offset:number)=>{
+    if(offset===20)w.churn++;
     w.pageReads.push(offset);let index=offset/20;
     const prior=document.getElementById('routesContainer');
     prior?.remove();
@@ -18,6 +19,11 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
     heading.textContent='Routes ('+total+')';div.append(heading);
     const count=Math.min(20,total-offset);
     const sequence=Array.from({length:count},(_,i)=>offset+i+1);
+    if(churnMode&&churnMode!=='overlap'&&index===0&&w.churn>0){
+      const rotation=churnMode==='continuous'?w.churn%20:1;
+      sequence.push(...sequence.splice(0,rotation));
+    }
+    if(churnMode==='overlap'&&index===1)sequence[0]=20;
     if(reordered&&index===1&&w.pageReads.filter((x:number)=>x===20).length>1)sequence.reverse();
     for(const id of sequence){
       const route=1000+id,aircraft=2000+id;
@@ -42,7 +48,7 @@ async function pages(page:Page,opts:{total?:number;readyPage?:number;badNext?:bo
   };
   w.menuFleet=()=>show(0);
   w.Ajax=(url:string)=>{const m=url.match(/start=(\d+)/);if(m)show(Number(m[1]));};
- },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered});
+ },{total,readyPage:opts.readyPage??-1,badNext:!!opts.badNext,reordered:!!opts.reordered,churnMode:opts.churnMode??null});
 }
 
 test('native pagination discovers page two of a 47-aircraft roster without any Depart click',async({page})=>{
@@ -78,5 +84,37 @@ test('collector skips twenty verified inflight aircraft and scans all pages with
    observationScope:'native-individual-page',windowPageIndex:2,
    windowScanExhaustedVerified:true,aircraft:[],warnings:[]});
  expect(port.navigationMetrics().fullFleetScans).toBe(0);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
+
+test('landing changes first page order: bounded rebase and no mutation',async({page})=>{
+ await pages(page,{churnMode:'once'});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({complete:false,expectedRoutes:47,
+   windowPageIndex:2,observationScope:'native-individual-page',
+   windowScanExhaustedVerified:true,aircraft:[],warnings:[]});
+ expect(port.navigationMetrics().nativePageRebases).toBe(1);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
+
+test('continuous arrivals stop after two safe rebases without click',async({page})=>{
+ await pages(page,{churnMode:'continuous'});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({complete:false,aircraft:[],
+   windowScanExhaustedVerified:false,observationScope:undefined,
+   warnings:['ROLLING_WINDOW_UNVERIFIED']});
+ expect(port.navigationMetrics().nativePageRebases).toBe(2);
+ expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
+});
+
+test('cross-page duplicate aircraft is a detected pagination drift',async({page})=>{
+ await pages(page,{churnMode:'overlap'});
+ const port=new PlaywrightDeparturePort(page,1400,undefined,undefined,true);
+ const result=await port.collect();
+ expect(result).toMatchObject({complete:false,aircraft:[],
+   windowScanExhaustedVerified:false,warnings:['ROLLING_WINDOW_UNVERIFIED']});
+ expect(port.navigationMetrics().nativePageRebases).toBe(2);
  expect(await page.evaluate(()=>(window as any).departCalls)).toBe(0);
 });
