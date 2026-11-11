@@ -216,8 +216,8 @@ export async function runDemandExecution(
       ?{reconcilePersistedUncertainReady:(fresh:AircraftSnapshot)=>
         appendResolvedUncertainFromVerifiedFirstPageTarget(
           optimization.returnJournal!.directory,optimization.returnJournal!.scope,fresh,
-          new Date(),reason=>console.warn('[DepartureQuarantineJournal] '+JSON.stringify({
-            status:'RECONCILIATION_REJECTED',reason,
+          new Date(),(reason,detail)=>console.warn('[DepartureQuarantineJournal] '+JSON.stringify({
+            status:'RECONCILIATION_REJECTED',reason,...(detail?{detail}:{}),
             departClicked:false,quarantineRetained:true
           }))
         )}:{ }),
