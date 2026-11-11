@@ -547,13 +547,24 @@ export type FirstPageUncertainResolutionRejection=
   'JOURNAL_SOURCE_CONTEXT_MISMATCH'|'LIVE_EVIDENCE_NOT_NEWER'|
   'RESOLUTION_EVENT_INVALID'|'RESOLUTION_EVENT_ALREADY_EXISTS';
 
+/** Diagnostic detail only: these codes never change the READY reconciliation gate. */
+export type FirstPageReadyEvidenceRejectionDetail=
+  'SCOPE_OR_CLOCK_INVALID'|'READY_STATE_OR_ISSUE_INVALID'|
+  'AIRCRAFT_ROUTE_ID_OR_REGISTRATION_INVALID'|'AIRPORT_ENDPOINTS_INVALID'|
+  'ROUTE_LABEL_REVERSED'|'ROUTE_LABEL_ENDPOINT_MISMATCH'|
+  'CABIN_DATA_INVALID'|'REMAINING_EXCEEDS_DAILY_TOTAL'|
+  'NATIVE_DEPART_CONTROL_MISSING'|'OBSERVATION_TIMESTAMP_INVALID'|
+  'OBSERVATION_STALE'|'UNCLASSIFIED';
+
 /** Fixed rejection categories only; never expose IDs, routes, or journal contents in logs. */
 export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
   directory:string,scope:string,fresh:AircraftSnapshot,now=new Date(),
-  onRejected?:(reason:FirstPageUncertainResolutionRejection)=>void
+  onRejected?:(reason:FirstPageUncertainResolutionRejection,
+    detail?:FirstPageReadyEvidenceRejectionDetail)=>void
 ):Promise<boolean>{
-  const reject=(reason:FirstPageUncertainResolutionRejection):false=>{
-    onRejected?.(reason);return false;
+  const reject=(reason:FirstPageUncertainResolutionRejection,
+    detail?:FirstPageReadyEvidenceRejectionDetail):false=>{
+    onRejected?.(reason,detail);return false;
   };
   const stamp=Date.parse(fresh?.observedAt||'');
   const cabinOk=(v:AircraftSnapshot['capacity']):boolean=>
@@ -569,7 +580,30 @@ export async function appendResolvedUncertainFromVerifiedFirstPageTarget(
        fresh.remaining![k]<=fresh.dailyTotal![k])||
      !fresh.departureControlShape?.includes('route_depart.php?')||
      !Number.isFinite(stamp)||stamp>now.getTime()||
-     now.getTime()-stamp>30_000)return reject('LIVE_READY_EVIDENCE_INVALID');
+     now.getTime()-stamp>30_000){
+    // Keep the original fail-closed predicate above intact. Classify only
+    // after it has rejected; no diagnostic can authorize reconciliation.
+    const detail:FirstPageReadyEvidenceRejectionDetail=
+      !validId(scope)||!Number.isFinite(now.getTime())?'SCOPE_OR_CLOCK_INVALID':
+      !fresh||fresh.state!=='ready'||!!fresh.issue?'READY_STATE_OR_ISSUE_INVALID':
+      !validId(fresh.aircraftId)||!validId(fresh.routeId)||
+        typeof fresh.registration!=='string'||!fresh.registration.trim()
+        ?'AIRCRAFT_ROUTE_ID_OR_REGISTRATION_INVALID':
+      !validOrigin(fresh.from)||!validOrigin(fresh.to)||fresh.from===fresh.to
+        ?'AIRPORT_ENDPOINTS_INVALID':
+      fresh.routeLabel.replace(/\s/g,'')!==fresh.from+'-'+fresh.to
+        ?(fresh.routeLabel.replace(/\s/g,'')===fresh.to+'-'+fresh.from
+          ?'ROUTE_LABEL_REVERSED':'ROUTE_LABEL_ENDPOINT_MISMATCH'):
+      !cabinOk(fresh.capacity)||!cabinOk(fresh.remaining)||!cabinOk(fresh.dailyTotal)
+        ?'CABIN_DATA_INVALID':
+      !(['Y','J','F'] as const).every(k=>fresh.remaining![k]<=fresh.dailyTotal![k])
+        ?'REMAINING_EXCEEDS_DAILY_TOTAL':
+      !fresh.departureControlShape?.includes('route_depart.php?')
+        ?'NATIVE_DEPART_CONTROL_MISSING':
+      !Number.isFinite(stamp)||stamp>now.getTime()?'OBSERVATION_TIMESTAMP_INVALID':
+      now.getTime()-stamp>30_000?'OBSERVATION_STALE':'UNCLASSIFIED';
+    return reject('LIVE_READY_EVIDENCE_INVALID',detail);
+  }
   const root=resolve(directory);
   return withRunLock(async()=>{
     const filename=join(root,'return-journal.json');

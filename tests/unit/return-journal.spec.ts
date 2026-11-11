@@ -540,3 +540,51 @@ test('run #1559: quarantine journal exposes fixed rejection reason without relea
   expect(codes).toEqual([]);
   expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(false);
 });
+
+
+test('run #1576: READY rejection details preserve the quarantine gate',async()=>{
+  await reviewWithReturnJournal(input(),options(),now);
+  const {appendUncertainDepartures,appendResolvedUncertainFromVerifiedFirstPageTarget,
+    readUnresolvedDepartureKeys}=await import('../../optimization/return-journal');
+  const prior:any={entries:[{status:'outcome_unknown',aircraftId:'9',registration:'UNCERTAIN',
+    routeId:'99',from:'AAA',to:'BBB',reason:'NO_RETRY_AFTER_CLICK_ATTEMPT:UNCLASSIFIED'}]};
+  expect(await appendUncertainDepartures(directory,'company-test','1576',prior,now)).toBe(1);
+  const future=new Date('2026-09-30T11:15:10.000Z');
+  const good:any={aircraftId:'9',routeId:'99',registration:'UNCERTAIN',
+    routeLabel:'AAA - BBB',from:'AAA',to:'BBB',state:'ready',
+    capacity:{Y:100,J:0,F:0},remaining:{Y:70,J:0,F:0},
+    dailyTotal:{Y:1000,J:0,F:0},observedAt:'2026-09-30T11:15:00.000Z',
+    departureControlShape:"Ajax('route_depart.php?id=<value>','routeAction',this);"};
+  const cases:Array<[Record<string,unknown>,string]>=[
+    [{routeLabel:'BBB - AAA'},'ROUTE_LABEL_REVERSED'],
+    [{routeLabel:'AAA - CCC'},'ROUTE_LABEL_ENDPOINT_MISMATCH'],
+    [{capacity:{Y:-1,J:0,F:0}},'CABIN_DATA_INVALID'],
+    [{remaining:{Y:1001,J:0,F:0}},'REMAINING_EXCEEDS_DAILY_TOTAL'],
+    [{departureControlShape:undefined},'NATIVE_DEPART_CONTROL_MISSING'],
+    [{observedAt:'invalid'},'OBSERVATION_TIMESTAMP_INVALID'],
+    [{observedAt:'2026-09-30T11:14:00.000Z'},'OBSERVATION_STALE'],
+    [{state:'inflight'},'READY_STATE_OR_ISSUE_INVALID'],
+    [{aircraftId:'invalid id'},'AIRCRAFT_ROUTE_ID_OR_REGISTRATION_INVALID'],
+    [{from:'AAA',to:'AAA'},'AIRPORT_ENDPOINTS_INVALID']
+  ];
+  for(const [patch,expectedDetail] of cases){
+    const rejected:Array<{reason:string;detail?:string}>=[];
+    expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+      directory,'company-test',{...good,...patch},future,
+      (reason,detail)=>rejected.push({reason,detail}))).toBe(false);
+    expect(rejected).toEqual([{reason:'LIVE_READY_EVIDENCE_INVALID',detail:expectedDetail}]);
+    expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(true);
+  }
+  const before=JSON.parse(await readFile(join(directory,'return-journal.json'),'utf8'));
+  expect(before.events.filter((e:any)=>e.type==='departure-uncertain-resolved')).toHaveLength(0);
+  // A correctly directed label still needs the original exact journal identity.
+  const rejected:Array<{reason:string;detail?:string}>=[];
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+    directory,'company-test',{...good,registration:'OTHER'},future,
+    (reason,detail)=>rejected.push({reason,detail}))).toBe(false);
+  expect(rejected).toEqual([{reason:'JOURNAL_SOURCE_CONTEXT_MISMATCH',detail:undefined}]);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(true);
+  expect(await appendResolvedUncertainFromVerifiedFirstPageTarget(
+    directory,'company-test',good,future)).toBe(true);
+  expect((await readUnresolvedDepartureKeys(directory,'company-test',future)).has('9:99')).toBe(false);
+});
